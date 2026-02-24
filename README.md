@@ -7,6 +7,7 @@ Web application for quizzes and knowledge games focused on **EuroLeague Basketba
 ```
 backend/   — Python/FastAPI API server, data ingestion, SQLAlchemy models
 frontend/  — React (Vite) UI
+scripts/   — Startup scripts (start-backend.bat, start-frontend.bat)
 ```
 
 ## Quick Start
@@ -15,10 +16,10 @@ Run the startup scripts from the project root:
 
 ```bash
 # Terminal 1 — backend (creates venv, installs deps, runs migrations, starts server)
-start-backend.bat
+scripts\start-backend.bat
 
 # Terminal 2 — frontend (installs npm deps, starts dev server)
-start-frontend.bat
+scripts\start-frontend.bat
 ```
 
 Then open `http://localhost:5173` to play.

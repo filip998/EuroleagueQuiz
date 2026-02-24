@@ -1,6 +1,6 @@
 @echo off
 REM Start the EuroLeague Quiz backend API server
-cd /d "%~dp0backend"
+cd /d "%~dp0..\backend"
 if not exist ".venv" (
     echo Creating virtual environment...
     python -m venv .venv
