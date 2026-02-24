@@ -29,3 +29,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Node modules
+node_modules/
