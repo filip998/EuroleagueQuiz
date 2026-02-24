@@ -778,15 +778,17 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
                 "claimed_player_id": cell.claimed_player_id,
                 "claimed_player_name": claimed_player_name,
             }
-            # Add sample answers for unclaimed cells when round is over
-            if (
-                cell.claimed_by_player is None
-                and round_obj.status in ("completed", "drawn")
-                and db is not None
-            ):
-                cell_data["sample_answers"] = _get_sample_answers(
-                    db, round_obj, row_index, col_index
-                )
+            # Add sample answers when round is over
+            if round_obj.status in ("completed", "drawn") and db is not None:
+                if cell.claimed_by_player is None:
+                    cell_data["sample_answers"] = _get_sample_answers(
+                        db, round_obj, row_index, col_index
+                    )
+                else:
+                    cell_data["sample_answers"] = _get_sample_answers(
+                        db, round_obj, row_index, col_index,
+                        count=2, exclude_player_id=cell.claimed_player_id,
+                    )
             # Backward compat: include team_code/team_name if both axes are teams
             if rows[row_index].get("team_code"):
                 cell_data["row_team_code"] = rows[row_index]["team_code"]
@@ -853,13 +855,16 @@ def _cell_axes(round_obj: QuizTicTacToeRound, row_index: int, col_index: int) ->
 
 
 def _get_sample_answers(
-    db: Session, round_obj: QuizTicTacToeRound, row_index: int, col_index: int, count: int = 3
+    db: Session, round_obj: QuizTicTacToeRound, row_index: int, col_index: int,
+    count: int = 3, exclude_player_id: int | None = None,
 ) -> list[str]:
-    """Get up to `count` random valid player names for an unclaimed cell."""
+    """Get up to `count` random valid player names for a cell."""
     row_axis, col_axis = _cell_axes(round_obj, row_index, col_index)
     row_set = _get_player_set_for_axis(db, row_axis)
     col_set = _get_player_set_for_axis(db, col_axis)
     valid_ids = list(row_set & col_set)
+    if exclude_player_id:
+        valid_ids = [pid for pid in valid_ids if pid != exclude_player_id]
     if not valid_ids:
         return []
     sample_ids = random.sample(valid_ids, min(count, len(valid_ids)))

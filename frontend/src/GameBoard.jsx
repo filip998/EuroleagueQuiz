@@ -411,6 +411,7 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
                 const isClickable =
                   !claimed && !inTransition && game.status === "active" && !game.pending_draw && isMyTurn;
                 const showSamples = inTransition && !claimed && cell?.sample_answers?.length > 0;
+                const showClaimedSamples = inTransition && claimed && cell?.sample_answers?.length > 0;
                 return (
                   <td
                     key={ci}
@@ -432,11 +433,22 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
                       fontSize: 12,
                       fontWeight: claimed ? "bold" : "normal",
                       color: claimed ? CELL_COLORS[claimed] : "#999",
-                      padding: showSamples ? 4 : 0,
+                      padding: (showSamples || showClaimedSamples) ? 4 : 0,
                     }}
                   >
                     {claimed
-                      ? cell.claimed_player_name || `P${claimed}`
+                      ? (
+                        <div>
+                          <div>{cell.claimed_player_name || `P${claimed}`}</div>
+                          {showClaimedSamples && (
+                            <div style={{ fontSize: 9, fontStyle: "italic", color: "#999", lineHeight: 1.3, marginTop: 2 }}>
+                              {cell.sample_answers.map((name, i) => (
+                                <div key={i}>{name}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
                       : showSamples
                         ? (
                           <div style={{ fontSize: 10, fontStyle: "italic", color: "#666", lineHeight: 1.4 }}>
