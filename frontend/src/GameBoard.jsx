@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { getGame, submitMove, offerDraw, respondDraw } from "./api";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { getGame, submitMove, offerDraw, respondDraw, connectWebSocket } from "./api";
 import PlayerSearch from "./PlayerSearch";
 
 const CELL_COLORS = {
@@ -7,13 +7,35 @@ const CELL_COLORS = {
   2: "#e74c3c",
 };
 
-export default function GameBoard({ initialState, onNewGame }) {
-  const [game, setGame] = useState(initialState);
+export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
+  const [game, setGame] = useState(initialState?.game || initialState);
   const [selectedCell, setSelectedCell] = useState(null);
   const [lastResult, setLastResult] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(initialState.turn_seconds);
+  const [timeLeft, setTimeLeft] = useState(null);
+  const wsRef = useRef(null);
+
+  const isOnline = onlineInfo?.isOnline;
+  const myPlayer = onlineInfo?.playerNumber;
+
+  // Connect WebSocket for online games
+  useEffect(() => {
+    if (!isOnline || !game?.id) return;
+    const ws = connectWebSocket(game.id, myPlayer, (data) => {
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setGame(data);
+        setError(null);
+      }
+    });
+    wsRef.current = ws;
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [isOnline, game?.id, myPlayer]);
 
   const round = game?.round;
 
@@ -27,18 +49,19 @@ export default function GameBoard({ initialState, onNewGame }) {
   useEffect(() => {
     if (!game?.turn_seconds || game.status !== "active" || timeLeft === null) return;
     if (timeLeft <= 0) {
-      // Time expired — switch turn
-      setGame((prev) => ({
-        ...prev,
-        current_player: prev.current_player === 1 ? 2 : 1,
-      }));
+      if (!isOnline) {
+        setGame((prev) => ({
+          ...prev,
+          current_player: prev.current_player === 1 ? 2 : 1,
+        }));
+      }
       setLastResult("⏰ Time's up! Turn switches.");
       setSelectedCell(null);
       return;
     }
     const timer = setTimeout(() => setTimeLeft((t) => t - 1), 1000);
     return () => clearTimeout(timer);
-  }, [timeLeft, game?.turn_seconds, game?.status]);
+  }, [timeLeft, game?.turn_seconds, game?.status, isOnline]);
 
   const refreshGame = useCallback(async () => {
     if (!game) return;
@@ -54,6 +77,8 @@ export default function GameBoard({ initialState, onNewGame }) {
     if (game.status !== "active") return;
     if (cell.claimed_by_player) return;
     if (game.pending_draw) return;
+    // In online mode, only allow clicks on your turn
+    if (isOnline && game.current_player !== myPlayer) return;
     setSelectedCell(cell);
     setError(null);
     setLastResult(null);
@@ -64,13 +89,22 @@ export default function GameBoard({ initialState, onNewGame }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await submitMove(game.id, {
-        row_index: selectedCell.row_index,
-        col_index: selectedCell.col_index,
-        player_id: player.player_id,
-      });
-      setGame(res.game);
-      setLastResult(res.result);
+      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          action: "move",
+          row_index: selectedCell.row_index,
+          col_index: selectedCell.col_index,
+          player_id: player.player_id,
+        }));
+      } else {
+        const res = await submitMove(game.id, {
+          row_index: selectedCell.row_index,
+          col_index: selectedCell.col_index,
+          player_id: player.player_id,
+        });
+        setGame(res.game);
+        setLastResult(res.result);
+      }
       setSelectedCell(null);
     } catch (err) {
       setError(err.message);
@@ -83,9 +117,13 @@ export default function GameBoard({ initialState, onNewGame }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await offerDraw(game.id);
-      setGame(res.game);
-      setLastResult("draw_offered");
+      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ action: "offer_draw" }));
+      } else {
+        const res = await offerDraw(game.id);
+        setGame(res.game);
+        setLastResult("draw_offered");
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -97,14 +135,48 @@ export default function GameBoard({ initialState, onNewGame }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await respondDraw(game.id, accept);
-      setGame(res.game);
-      setLastResult(accept ? "draw_accepted" : "draw_declined");
+      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ action: "respond_draw", accept }));
+      } else {
+        const res = await respondDraw(game.id, accept);
+        setGame(res.game);
+        setLastResult(accept ? "draw_accepted" : "draw_declined");
+      }
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  // Waiting for opponent screen (online host)
+  if (game?.status === "waiting_for_opponent") {
+    return (
+      <div style={{ maxWidth: 400, margin: "60px auto", textAlign: "center" }}>
+        <h2>Waiting for Opponent</h2>
+        <p>Share this code with your friend:</p>
+        <div
+          style={{
+            fontSize: 48,
+            fontFamily: "monospace",
+            letterSpacing: 8,
+            padding: "20px 0",
+            background: "#f0f0f0",
+            borderRadius: 8,
+            margin: "20px 0",
+            userSelect: "all",
+          }}
+        >
+          {game.join_code}
+        </div>
+        <p style={{ color: "#666" }}>
+          The game will start automatically when they join.
+        </p>
+        <button onClick={onNewGame} style={{ marginTop: 20 }}>
+          Cancel
+        </button>
+      </div>
+    );
   }
 
   if (!game || !round) {
@@ -113,6 +185,7 @@ export default function GameBoard({ initialState, onNewGame }) {
 
   const currentPlayerName =
     game.current_player === 1 ? game.player1_name : game.player2_name;
+  const isMyTurn = !isOnline || game.current_player === myPlayer;
 
   const resultMessages = {
     correct: "✅ Correct! Turn switches.",
@@ -127,6 +200,16 @@ export default function GameBoard({ initialState, onNewGame }) {
 
   return (
     <div style={{ maxWidth: 600, margin: "20px auto", textAlign: "center" }}>
+      {/* Online indicator */}
+      {isOnline && (
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
+          🌐 Online — You are {game.current_player === myPlayer
+            ? game[`player${myPlayer}_name`]
+            : game[`player${myPlayer}_name`]} (Player {myPlayer})
+          {!isMyTurn && " — Waiting for opponent..."}
+        </div>
+      )}
+
       {/* Scoreboard */}
       <div
         style={{
@@ -250,7 +333,7 @@ export default function GameBoard({ initialState, onNewGame }) {
                 );
                 const claimed = cell?.claimed_by_player;
                 const isClickable =
-                  !claimed && game.status === "active" && !game.pending_draw;
+                  !claimed && game.status === "active" && !game.pending_draw && isMyTurn;
                 return (
                   <td
                     key={ci}
@@ -298,24 +381,30 @@ export default function GameBoard({ initialState, onNewGame }) {
                   : game.player2_name}
                 , do you accept?
               </p>
-              <button
-                onClick={() => handleRespondDraw(true)}
-                disabled={loading}
-                style={{ marginRight: 8 }}
-              >
-                Accept Draw
-              </button>
-              <button
-                onClick={() => handleRespondDraw(false)}
-                disabled={loading}
-              >
-                Decline
-              </button>
+              {(!isOnline || myPlayer === game.pending_draw.respond_to) && (
+                <>
+                  <button
+                    onClick={() => handleRespondDraw(true)}
+                    disabled={loading}
+                    style={{ marginRight: 8 }}
+                  >
+                    Accept Draw
+                  </button>
+                  <button
+                    onClick={() => handleRespondDraw(false)}
+                    disabled={loading}
+                  >
+                    Decline
+                  </button>
+                </>
+              )}
             </div>
           ) : (
-            <button onClick={handleOfferDraw} disabled={loading}>
-              Offer Draw
-            </button>
+            isMyTurn && (
+              <button onClick={handleOfferDraw} disabled={loading}>
+                Offer Draw
+              </button>
+            )
           )}
         </div>
       )}

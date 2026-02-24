@@ -290,13 +290,40 @@ def test_round_win_and_match_win_progression(client: TestClient):
             assert result["game"]["player1_score"] == 2
 
 
-def test_online_mode_is_not_implemented(client: TestClient):
+def test_online_game_create_and_join(client: TestClient):
+    # Create online game
     response = client.post(
         "/quiz/tictactoe/games",
         json={
             "mode": "online_friend",
             "target_wins": 2,
             "timer_mode": "40s",
+            "player1_name": "Host",
         },
     )
-    assert response.status_code == 501
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "waiting_for_opponent"
+    assert data["join_code"] is not None
+    assert len(data["join_code"]) == 6
+    assert data["round"] is None  # no board until opponent joins
+
+    join_code = data["join_code"]
+
+    # Join the game
+    response2 = client.post(
+        "/quiz/tictactoe/games/join",
+        json={"join_code": join_code, "player_name": "Joiner"},
+    )
+    assert response2.status_code == 200
+    joined = response2.json()
+    assert joined["game"]["status"] == "active"
+    assert joined["game"]["player2_name"] == "Joiner"
+    assert joined["game"]["round"] is not None  # board generated
+
+    # Cannot join again
+    response3 = client.post(
+        "/quiz/tictactoe/games/join",
+        json={"join_code": join_code, "player_name": "Late"},
+    )
+    assert response3.status_code == 409

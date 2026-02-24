@@ -19,3 +19,8 @@ class TicTacToeMoveRequest(BaseModel):
 
 class TicTacToeDrawResponseRequest(BaseModel):
     accept: bool
+
+
+class TicTacToeJoinGameRequest(BaseModel):
+    join_code: str = Field(min_length=6, max_length=6)
+    player_name: Optional[str] = None

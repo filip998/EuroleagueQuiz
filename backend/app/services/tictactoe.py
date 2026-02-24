@@ -1,4 +1,5 @@
 import random
+import string
 from datetime import datetime, timedelta
 from itertools import combinations
 from typing import Optional
@@ -58,14 +59,14 @@ def create_game(
         raise TicTacToeError("target_wins must be one of: 2, 3, 5")
     if timer_mode not in TIMER_MODE_TO_SECONDS:
         raise TicTacToeError("timer_mode must be one of: 15s, 40s, unlimited")
-    if mode == "online_friend":
-        raise TicTacToeNotImplementedError(
-            "online_friend mode is not implemented yet"
-        )
+
+    is_online = mode == "online_friend"
+    join_code = _generate_join_code(db) if is_online else None
 
     game = QuizTicTacToeGame(
         mode=mode,
-        status="active",
+        status="waiting_for_opponent" if is_online else "active",
+        join_code=join_code,
         target_wins=target_wins,
         turn_seconds=TIMER_MODE_TO_SECONDS[timer_mode],
         player1_name=player1_name,
@@ -83,7 +84,8 @@ def create_game(
     db.add(game)
     db.flush()
 
-    create_next_round(db, game, started_by_player=1)
+    if not is_online:
+        create_next_round(db, game, started_by_player=1)
     db.flush()
     return game
 
@@ -92,6 +94,30 @@ def get_game_or_404(db: Session, game_id: int) -> QuizTicTacToeGame:
     game = db.query(QuizTicTacToeGame).filter(QuizTicTacToeGame.id == game_id).first()
     if not game:
         raise TicTacToeNotFoundError("Game not found")
+    return game
+
+
+def join_game(
+    db: Session,
+    join_code: str,
+    player2_name: Optional[str] = None,
+) -> QuizTicTacToeGame:
+    game = (
+        db.query(QuizTicTacToeGame)
+        .filter(QuizTicTacToeGame.join_code == join_code.upper())
+        .first()
+    )
+    if not game:
+        raise TicTacToeNotFoundError("Invalid join code")
+    if game.status != "waiting_for_opponent":
+        raise TicTacToeConflictError("Game is no longer accepting players")
+
+    game.player2_name = player2_name or game.player2_name
+    game.status = "active"
+    game.updated_at = datetime.utcnow()
+
+    create_next_round(db, game, started_by_player=1)
+    db.flush()
     return game
 
 
@@ -117,10 +143,16 @@ def submit_move(
     row_index: int,
     col_index: int,
     player_id: int,
+    acting_player: Optional[int] = None,
 ) -> str:
     _ensure_game_playable(game)
     if game.pending_draw_from is not None:
         raise TicTacToeConflictError("Resolve pending draw offer before making a move")
+
+    # Online turn enforcement
+    if game.mode == "online_friend" and acting_player is not None:
+        if acting_player != game.current_player:
+            raise TicTacToeConflictError("It is not your turn")
 
     if row_index not in (0, 1, 2) or col_index not in (0, 1, 2):
         raise TicTacToeError("row_index and col_index must be between 0 and 2")
@@ -189,10 +221,14 @@ def submit_move(
     return "correct"
 
 
-def offer_draw(db: Session, game: QuizTicTacToeGame) -> None:
+def offer_draw(db: Session, game: QuizTicTacToeGame, *, acting_player: Optional[int] = None) -> None:
     _ensure_game_playable(game)
     if game.pending_draw_from is not None:
         raise TicTacToeConflictError("A draw offer is already pending")
+
+    if game.mode == "online_friend" and acting_player is not None:
+        if acting_player != game.current_player:
+            raise TicTacToeConflictError("It is not your turn")
 
     get_active_round(db, game.id)
     offered_by = game.current_player
@@ -203,10 +239,14 @@ def offer_draw(db: Session, game: QuizTicTacToeGame) -> None:
     db.flush()
 
 
-def respond_draw(db: Session, game: QuizTicTacToeGame, *, accept: bool) -> str:
+def respond_draw(db: Session, game: QuizTicTacToeGame, *, accept: bool, acting_player: Optional[int] = None) -> str:
     _ensure_game_playable(game)
     if game.pending_draw_from is None or game.pending_draw_to is None:
         raise TicTacToeConflictError("No pending draw offer")
+
+    if game.mode == "online_friend" and acting_player is not None:
+        if acting_player != game.pending_draw_to:
+            raise TicTacToeConflictError("Only the recipient can respond to the draw offer")
 
     round_obj = get_active_round(db, game.id)
     responder = game.current_player
@@ -306,6 +346,7 @@ def serialize_game_state(
         "mode": game.mode,
         "resolved_mode": "local_two_player" if game.mode in LOCAL_PLAY_MODES else game.mode,
         "status": game.status,
+        "join_code": game.join_code,
         "target_wins": game.target_wins,
         "turn_seconds": game.turn_seconds,
         "turn_deadline_utc": turn_deadline,
@@ -455,10 +496,6 @@ def _serialize_round(round_obj: QuizTicTacToeRound) -> dict:
 def _ensure_game_playable(game: QuizTicTacToeGame) -> None:
     if game.status != "active":
         raise TicTacToeConflictError("Game is not active")
-    if game.mode not in LOCAL_PLAY_MODES:
-        raise TicTacToeNotImplementedError(
-            f"Mode '{game.mode}' is not implemented for gameplay"
-        )
 
 
 def _get_cell(
@@ -569,3 +606,16 @@ def _all_cells_have_answers(
             if not (player_sets.get(row_team_id, set()) & player_sets.get(col_team_id, set())):
                 return False
     return True
+
+
+def _generate_join_code(db: Session) -> str:
+    for _ in range(100):
+        code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        existing = (
+            db.query(QuizTicTacToeGame)
+            .filter(QuizTicTacToeGame.join_code == code)
+            .first()
+        )
+        if not existing:
+            return code
+    raise TicTacToeError("Unable to generate a unique join code")

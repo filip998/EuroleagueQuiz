@@ -1,22 +1,24 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import func
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models import Player, PlayerSeasonTeam, PlayerSeasonStats, Team, Season
 from app.schemas.player import PlayerDetail, SeasonStatsEntry
 from app.schemas.quiz_ttt import (
     TicTacToeCreateGameRequest,
     TicTacToeMoveRequest,
     TicTacToeDrawResponseRequest,
+    TicTacToeJoinGameRequest,
 )
 from app.services.tictactoe import (
     TicTacToeError,
     autocomplete_players,
     create_game,
     get_game_or_404,
+    join_game,
     offer_draw,
     respond_draw,
     serialize_game_state,
@@ -24,6 +26,19 @@ from app.services.tictactoe import (
 )
 
 router = APIRouter()
+
+
+import asyncio
+
+
+def _try_broadcast(game_id: int, state: dict):
+    """Best-effort broadcast game state to connected WebSocket clients."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(ws_manager.broadcast(game_id, state))
+    except RuntimeError:
+        pass
 
 
 @router.get("/random-player")
@@ -236,7 +251,9 @@ def submit_tictactoe_move(
         )
         db.commit()
         db.refresh(game)
-        return {"result": result, "game": serialize_game_state(db, game)}
+        state = serialize_game_state(db, game)
+        _try_broadcast(game_id, state)
+        return {"result": result, "game": state}
     except TicTacToeError as exc:
         db.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -249,7 +266,9 @@ def offer_tictactoe_draw(game_id: int, db: Session = Depends(get_db)):
         offer_draw(db, game)
         db.commit()
         db.refresh(game)
-        return {"result": "offered", "game": serialize_game_state(db, game)}
+        state = serialize_game_state(db, game)
+        _try_broadcast(game_id, state)
+        return {"result": "offered", "game": state}
     except TicTacToeError as exc:
         db.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -266,7 +285,9 @@ def respond_tictactoe_draw(
         result = respond_draw(db, game, accept=payload.accept)
         db.commit()
         db.refresh(game)
-        return {"result": result, "game": serialize_game_state(db, game)}
+        state = serialize_game_state(db, game)
+        _try_broadcast(game_id, state)
+        return {"result": result, "game": state}
     except TicTacToeError as exc:
         db.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -291,6 +312,111 @@ def tictactoe_player_autocomplete(
         return {"query": q, "count": len(players), "players": players}
     except TicTacToeError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+# ---------------------------------------------------------------------------
+# Online multiplayer: join endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/tictactoe/games/join")
+def join_tictactoe_game(
+    payload: TicTacToeJoinGameRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        game = join_game(db, payload.join_code.upper(), payload.player_name)
+        db.commit()
+        db.refresh(game)
+        state = serialize_game_state(db, game)
+        _try_broadcast(game.id, state)
+        return {"game_id": game.id, "game": state}
+    except TicTacToeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+# ---------------------------------------------------------------------------
+# WebSocket connection manager
+# ---------------------------------------------------------------------------
+
+class ConnectionManager:
+    def __init__(self):
+        # {game_id: {player_number: WebSocket}}
+        self.connections: dict[int, dict[int, WebSocket]] = {}
+
+    async def connect(self, game_id: int, player: int, ws: WebSocket):
+        await ws.accept()
+        self.connections.setdefault(game_id, {})[player] = ws
+
+    def disconnect(self, game_id: int, player: int):
+        if game_id in self.connections:
+            self.connections[game_id].pop(player, None)
+            if not self.connections[game_id]:
+                del self.connections[game_id]
+
+    async def broadcast(self, game_id: int, state: dict):
+        conns = self.connections.get(game_id, {})
+        for ws in list(conns.values()):
+            try:
+                await ws.send_json(state)
+            except Exception:
+                pass
+
+
+ws_manager = ConnectionManager()
+
+
+@router.websocket("/tictactoe/ws/{game_id}")
+async def tictactoe_websocket(websocket: WebSocket, game_id: int, player: int = 1):
+    db = SessionLocal()
+    try:
+        game = get_game_or_404(db, game_id)
+        await ws_manager.connect(game_id, player, websocket)
+        # Send current state on connect
+        state = serialize_game_state(db, game)
+        await websocket.send_json(state)
+
+        while True:
+            data = await websocket.receive_json()
+            action = data.get("action")
+            try:
+                if action == "move":
+                    player_id = data["player_id"]
+                    row_idx = data["row_index"]
+                    col_idx = data["col_index"]
+                    result = submit_move(
+                        db, game, row_idx, col_idx, player_id,
+                        acting_player=player,
+                    )
+                    db.commit()
+                    db.refresh(game)
+                elif action == "offer_draw":
+                    offer_draw(db, game, acting_player=player)
+                    db.commit()
+                    db.refresh(game)
+                elif action == "respond_draw":
+                    respond_draw(
+                        db, game, accept=data.get("accept", False),
+                        acting_player=player,
+                    )
+                    db.commit()
+                    db.refresh(game)
+                else:
+                    await websocket.send_json({"error": f"Unknown action: {action}"})
+                    continue
+
+                state = serialize_game_state(db, game)
+                await ws_manager.broadcast(game_id, state)
+
+            except TicTacToeError as exc:
+                await websocket.send_json({"error": exc.detail})
+
+    except WebSocketDisconnect:
+        ws_manager.disconnect(game_id, player)
+    except Exception:
+        ws_manager.disconnect(game_id, player)
+    finally:
+        db.close()
 
 
 def _build_season_entries(db: Session, player_id: int) -> List[SeasonStatsEntry]:

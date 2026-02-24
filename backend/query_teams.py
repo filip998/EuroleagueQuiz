@@ -1,0 +1,10 @@
+import sqlite3
+conn = sqlite3.connect('data/euroleague.db')
+cur = conn.cursor()
+cur.execute("SELECT id, euroleague_code, name FROM teams WHERE name LIKE '%BAR%' OR euroleague_code LIKE '%BAR%' ORDER BY id")
+print('Teams matching BAR:')
+for r in cur.fetchall(): print(r)
+cur.execute("SELECT ts.team_id, t.euroleague_code, t.name, ts.team_name_that_season, s.year FROM team_seasons ts JOIN teams t ON t.id=ts.team_id JOIN seasons s ON s.id=ts.season_id WHERE t.euroleague_code LIKE '%BAR%' ORDER BY s.year")
+print('Team seasons:')
+for r in cur.fetchall(): print(r)
+conn.close()

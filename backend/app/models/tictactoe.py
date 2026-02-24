@@ -12,6 +12,7 @@ class QuizTicTacToeGame(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     mode = Column(String, nullable=False)
     status = Column(String, nullable=False, default="active")
+    join_code = Column(String(6), nullable=True, unique=True, index=True)
     target_wins = Column(Integer, nullable=False)
     turn_seconds = Column(Integer, nullable=True)
     player1_name = Column(String, nullable=True)
