@@ -13,8 +13,32 @@ export default function GameBoard({ initialState, onNewGame }) {
   const [lastResult, setLastResult] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(initialState.turn_seconds);
 
   const round = game?.round;
+
+  // Reset timer whenever the current player changes
+  useEffect(() => {
+    if (!game?.turn_seconds || game.status !== "active") return;
+    setTimeLeft(game.turn_seconds);
+  }, [game?.current_player, game?.round_number, game?.turn_seconds, game?.status]);
+
+  // Countdown tick
+  useEffect(() => {
+    if (!game?.turn_seconds || game.status !== "active" || timeLeft === null) return;
+    if (timeLeft <= 0) {
+      // Time expired — switch turn
+      setGame((prev) => ({
+        ...prev,
+        current_player: prev.current_player === 1 ? 2 : 1,
+      }));
+      setLastResult("⏰ Time's up! Turn switches.");
+      setSelectedCell(null);
+      return;
+    }
+    const timer = setTimeout(() => setTimeLeft((t) => t - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [timeLeft, game?.turn_seconds, game?.status]);
 
   const refreshGame = useCallback(async () => {
     if (!game) return;
@@ -130,6 +154,18 @@ export default function GameBoard({ initialState, onNewGame }) {
               ? `🎉 ${game.winner_player === 1 ? game.player1_name : game.player2_name} wins!`
               : `🎯 ${currentPlayerName}'s turn`}
           </div>
+          {game.turn_seconds && game.status === "active" && timeLeft !== null && (
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: "bold",
+                marginTop: 4,
+                color: timeLeft <= 5 ? "#e74c3c" : "#333",
+              }}
+            >
+              ⏱ {timeLeft}s
+            </div>
+          )}
         </div>
         <div>
           <strong style={{ color: CELL_COLORS[2] }}>{game.player2_name}</strong>
