@@ -7,6 +7,7 @@ from app.models.tictactoe import (
     QuizTicTacToeGame,
     QuizTicTacToeRound,
     QuizTicTacToeCell,
+    QuizTicTacToeAxis,
 )
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "QuizTicTacToeGame",
     "QuizTicTacToeRound",
     "QuizTicTacToeCell",
+    "QuizTicTacToeAxis",
 ]

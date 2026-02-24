@@ -47,12 +47,12 @@ class QuizTicTacToeRound(Base):
     game_id = Column(Integer, ForeignKey("quiz_ttt_games.id"), nullable=False)
     round_number = Column(Integer, nullable=False)
     status = Column(String, nullable=False, default="active")
-    row_team_id_1 = Column(Integer, ForeignKey("teams.id"), nullable=False)
-    row_team_id_2 = Column(Integer, ForeignKey("teams.id"), nullable=False)
-    row_team_id_3 = Column(Integer, ForeignKey("teams.id"), nullable=False)
-    col_team_id_1 = Column(Integer, ForeignKey("teams.id"), nullable=False)
-    col_team_id_2 = Column(Integer, ForeignKey("teams.id"), nullable=False)
-    col_team_id_3 = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    row_team_id_1 = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    row_team_id_2 = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    row_team_id_3 = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    col_team_id_1 = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    col_team_id_2 = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    col_team_id_3 = Column(Integer, ForeignKey("teams.id"), nullable=True)
     started_by_player = Column(Integer, nullable=False, default=1)
     winner_player = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -70,6 +70,11 @@ class QuizTicTacToeRound(Base):
     col_team_3 = relationship("Team", foreign_keys=[col_team_id_3])
     cells = relationship(
         "QuizTicTacToeCell",
+        back_populates="round",
+        cascade="all, delete-orphan",
+    )
+    axes = relationship(
+        "QuizTicTacToeAxis",
         back_populates="round",
         cascade="all, delete-orphan",
     )
@@ -92,3 +97,20 @@ class QuizTicTacToeCell(Base):
 
     round = relationship("QuizTicTacToeRound", back_populates="cells")
     claimed_player = relationship("Player")
+
+
+class QuizTicTacToeAxis(Base):
+    __tablename__ = "quiz_ttt_axes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    round_id = Column(Integer, ForeignKey("quiz_ttt_rounds.id"), nullable=False)
+    position = Column(String, nullable=False)  # "row_0", "row_1", "row_2", "col_0", "col_1", "col_2"
+    axis_type = Column(String, nullable=False)  # "team", "nationality", ...
+    value = Column(String, nullable=False)  # team_id (as str) or nationality name
+    display_label = Column(String, nullable=False)  # "Real Madrid", "Serbia", etc.
+
+    __table_args__ = (
+        UniqueConstraint("round_id", "position", name="uq_quiz_ttt_axis"),
+    )
+
+    round = relationship("QuizTicTacToeRound", back_populates="axes")

@@ -328,11 +328,12 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
                   padding: 8,
                   fontSize: 12,
                   textAlign: "center",
-                  background: "#e8e8e8",
+                  background: col.axis_type === "nationality" ? "#e8f4e8" : "#e8e8e8",
                   border: "2px solid #ccc",
                 }}
               >
-                {col.team_name}
+                {col.axis_type === "nationality" ? "🌍 " : ""}
+                {col.display_label || col.team_name}
               </th>
             ))}
           </tr>
@@ -345,11 +346,12 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
                   padding: 8,
                   fontSize: 12,
                   textAlign: "center",
-                  background: "#e8e8e8",
+                  background: round.rows[ri].axis_type === "nationality" ? "#e8f4e8" : "#e8e8e8",
                   border: "2px solid #ccc",
                 }}
               >
-                {round.rows[ri].team_name}
+                {round.rows[ri].axis_type === "nationality" ? "🌍 " : ""}
+                {round.rows[ri].display_label || round.rows[ri].team_name}
               </th>
               {[0, 1, 2].map((ci) => {
                 const cell = round.cells.find(
@@ -445,8 +447,8 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
       {/* Player search modal */}
       {selectedCell && (
         <PlayerSearch
-          rowTeamCode={selectedCell.row_team_code}
-          colTeamCode={selectedCell.col_team_code}
+          rowTeamCode={selectedCell.row_team_code || null}
+          colTeamCode={selectedCell.col_team_code || null}
           onSelect={handlePlayerSelect}
           onCancel={() => setSelectedCell(null)}
         />

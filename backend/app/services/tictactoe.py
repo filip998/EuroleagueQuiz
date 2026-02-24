@@ -1,3 +1,4 @@
+import math
 import random
 import string
 from datetime import datetime, timedelta
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     Player,
     PlayerSeasonTeam,
+    QuizTicTacToeAxis,
     QuizTicTacToeCell,
     QuizTicTacToeGame,
     QuizTicTacToeRound,
@@ -40,6 +42,104 @@ class TicTacToeConflictError(TicTacToeError):
 
 class TicTacToeNotImplementedError(TicTacToeError):
     status_code = 501
+
+
+# ---------------------------------------------------------------------------
+# Axis registry — extensible axis types for board generation
+# ---------------------------------------------------------------------------
+
+# Weights for axis type selection (must sum to 1.0)
+AXIS_WEIGHTS = {"team": 0.8, "nationality": 0.2}
+MIN_NATIONALITY_PLAYERS = 5
+
+
+def _get_team_candidates(db: Session) -> list[dict]:
+    """Get candidate teams with enough player history."""
+    rows = (
+        db.query(
+            Team.id,
+            Team.name,
+            func.count(distinct(PlayerSeasonTeam.player_id)).label("player_count"),
+        )
+        .join(PlayerSeasonTeam, PlayerSeasonTeam.team_id == Team.id)
+        .group_by(Team.id)
+        .having(func.count(distinct(PlayerSeasonTeam.player_id)) >= 3)
+        .order_by(func.count(distinct(PlayerSeasonTeam.player_id)).desc())
+        .limit(24)
+        .all()
+    )
+    return [
+        {"axis_type": "team", "value": str(r.id), "display_label": r.name}
+        for r in rows
+    ]
+
+
+def _get_nationality_candidates(db: Session) -> list[dict]:
+    """Get candidate nationalities using sqrt weighting."""
+    rows = (
+        db.query(
+            Player.nationality,
+            func.count(Player.id).label("cnt"),
+        )
+        .filter(Player.nationality.isnot(None), Player.nationality != "")
+        .group_by(Player.nationality)
+        .having(func.count(Player.id) >= MIN_NATIONALITY_PLAYERS)
+        .all()
+    )
+    return [
+        {
+            "axis_type": "nationality",
+            "value": r.nationality,
+            "display_label": r.nationality,
+            "_weight": math.sqrt(r.cnt),
+        }
+        for r in rows
+    ]
+
+
+def _pick_weighted(candidates: list[dict]) -> dict:
+    """Pick a candidate using _weight field (or uniform if no weights)."""
+    weights = [c.get("_weight", 1.0) for c in candidates]
+    return random.choices(candidates, weights=weights, k=1)[0]
+
+
+def _get_player_set_for_axis(db: Session, axis: dict) -> set[int]:
+    """Get set of player IDs matching an axis constraint."""
+    if axis["axis_type"] == "team":
+        team_id = int(axis["value"])
+        rows = (
+            db.query(PlayerSeasonTeam.player_id)
+            .filter(PlayerSeasonTeam.team_id == team_id)
+            .distinct()
+            .all()
+        )
+        return {r.player_id for r in rows}
+    elif axis["axis_type"] == "nationality":
+        rows = (
+            db.query(Player.id)
+            .filter(Player.nationality == axis["value"])
+            .all()
+        )
+        return {r.id for r in rows}
+    return set()
+
+
+def _player_matches_axis(db: Session, player_id: int, axis: dict) -> bool:
+    """Check if a player matches an axis constraint."""
+    if axis["axis_type"] == "team":
+        team_id = int(axis["value"])
+        return (
+            db.query(PlayerSeasonTeam)
+            .filter(
+                PlayerSeasonTeam.player_id == player_id,
+                PlayerSeasonTeam.team_id == team_id,
+            )
+            .first()
+        ) is not None
+    elif axis["axis_type"] == "nationality":
+        player = db.query(Player).filter(Player.id == player_id).first()
+        return player is not None and player.nationality == axis["value"]
+    return False
 
 
 def create_game(
@@ -167,12 +267,10 @@ def submit_move(
         raise TicTacToeNotFoundError("Player not found")
 
     acting_player = game.current_player
-    row_team_id, col_team_id = _cell_team_ids(round_obj, row_index, col_index)
-    is_correct = player_matches_teams(
-        db,
-        player_id=player_id,
-        team_id_1=row_team_id,
-        team_id_2=col_team_id,
+    row_axis, col_axis = _cell_axes(round_obj, row_index, col_index)
+    is_correct = (
+        _player_matches_axis(db, player_id, row_axis)
+        and _player_matches_axis(db, player_id, col_axis)
     )
 
     if not is_correct:
@@ -274,7 +372,14 @@ def create_next_round(
     *,
     started_by_player: int,
 ) -> QuizTicTacToeRound:
-    row_team_ids, col_team_ids = _select_board_teams(db)
+    board_axes = _select_board_axes(db)
+    row_axes = board_axes[:3]
+    col_axes = board_axes[3:]
+
+    # Extract team IDs for backward-compat columns (None for non-team axes)
+    def _team_id_or_none(axis):
+        return int(axis["value"]) if axis["axis_type"] == "team" else None
+
     next_round_number = (
         db.query(func.max(QuizTicTacToeRound.round_number))
         .filter(QuizTicTacToeRound.game_id == game.id)
@@ -286,18 +391,36 @@ def create_next_round(
         game_id=game.id,
         round_number=next_round_number,
         status="active",
-        row_team_id_1=row_team_ids[0],
-        row_team_id_2=row_team_ids[1],
-        row_team_id_3=row_team_ids[2],
-        col_team_id_1=col_team_ids[0],
-        col_team_id_2=col_team_ids[1],
-        col_team_id_3=col_team_ids[2],
+        row_team_id_1=_team_id_or_none(row_axes[0]),
+        row_team_id_2=_team_id_or_none(row_axes[1]),
+        row_team_id_3=_team_id_or_none(row_axes[2]),
+        col_team_id_1=_team_id_or_none(col_axes[0]),
+        col_team_id_2=_team_id_or_none(col_axes[1]),
+        col_team_id_3=_team_id_or_none(col_axes[2]),
         started_by_player=started_by_player,
         winner_player=None,
         created_at=datetime.utcnow(),
     )
     db.add(round_obj)
     db.flush()
+
+    # Populate axes table
+    for i, axis in enumerate(row_axes):
+        db.add(QuizTicTacToeAxis(
+            round_id=round_obj.id,
+            position=f"row_{i}",
+            axis_type=axis["axis_type"],
+            value=axis["value"],
+            display_label=axis["display_label"],
+        ))
+    for i, axis in enumerate(col_axes):
+        db.add(QuizTicTacToeAxis(
+            round_id=round_obj.id,
+            position=f"col_{i}",
+            axis_type=axis["axis_type"],
+            value=axis["value"],
+            display_label=axis["display_label"],
+        ))
 
     for row_index in range(3):
         for col_index in range(3):
@@ -447,10 +570,41 @@ def player_matches_teams(
 
 
 def _serialize_round(round_obj: QuizTicTacToeRound) -> dict:
+    axes_by_pos = {a.position: a for a in round_obj.axes}
+    use_axes_table = bool(axes_by_pos)
+
+    # Build row/col axis info
+    def _axis_info(pos_prefix, index, legacy_team):
+        pos = f"{pos_prefix}_{index}"
+        if use_axes_table and pos in axes_by_pos:
+            a = axes_by_pos[pos]
+            info = {
+                "axis_type": a.axis_type,
+                "value": a.value,
+                "display_label": a.display_label,
+            }
+            if a.axis_type == "team" and legacy_team:
+                info["team_code"] = legacy_team.euroleague_code
+                info["team_name"] = legacy_team.name
+            return info
+        # Fallback: legacy team-only columns
+        if legacy_team:
+            return {
+                "axis_type": "team",
+                "value": str(legacy_team.id),
+                "display_label": legacy_team.name,
+                "team_code": legacy_team.euroleague_code,
+                "team_name": legacy_team.name,
+            }
+        return {"axis_type": "unknown", "value": "", "display_label": "?"}
+
     row_teams = [round_obj.row_team_1, round_obj.row_team_2, round_obj.row_team_3]
     col_teams = [round_obj.col_team_1, round_obj.col_team_2, round_obj.col_team_3]
-    cells_by_pos = {(c.row_index, c.col_index): c for c in round_obj.cells}
 
+    rows = [_axis_info("row", i, row_teams[i]) for i in range(3)]
+    columns = [_axis_info("col", i, col_teams[i]) for i in range(3)]
+
+    cells_by_pos = {(c.row_index, c.col_index): c for c in round_obj.cells}
     cells = []
     for row_index in range(3):
         for col_index in range(3):
@@ -461,19 +615,23 @@ def _serialize_round(round_obj: QuizTicTacToeRound) -> dict:
                     f"{cell.claimed_player.first_name or ''} {cell.claimed_player.last_name or ''}"
                 ).strip()
 
-            cells.append(
-                {
-                    "row_index": row_index,
-                    "col_index": col_index,
-                    "row_team_code": row_teams[row_index].euroleague_code,
-                    "row_team_name": row_teams[row_index].name,
-                    "col_team_code": col_teams[col_index].euroleague_code,
-                    "col_team_name": col_teams[col_index].name,
-                    "claimed_by_player": cell.claimed_by_player,
-                    "claimed_player_id": cell.claimed_player_id,
-                    "claimed_player_name": claimed_player_name,
-                }
-            )
+            cell_data = {
+                "row_index": row_index,
+                "col_index": col_index,
+                "row_axis": rows[row_index],
+                "col_axis": columns[col_index],
+                "claimed_by_player": cell.claimed_by_player,
+                "claimed_player_id": cell.claimed_player_id,
+                "claimed_player_name": claimed_player_name,
+            }
+            # Backward compat: include team_code/team_name if both axes are teams
+            if rows[row_index].get("team_code"):
+                cell_data["row_team_code"] = rows[row_index]["team_code"]
+                cell_data["row_team_name"] = rows[row_index]["team_name"]
+            if columns[col_index].get("team_code"):
+                cell_data["col_team_code"] = columns[col_index]["team_code"]
+                cell_data["col_team_name"] = columns[col_index]["team_name"]
+            cells.append(cell_data)
 
     return {
         "id": round_obj.id,
@@ -481,14 +639,8 @@ def _serialize_round(round_obj: QuizTicTacToeRound) -> dict:
         "status": round_obj.status,
         "winner_player": round_obj.winner_player,
         "started_by_player": round_obj.started_by_player,
-        "rows": [
-            {"team_code": t.euroleague_code, "team_name": t.name}
-            for t in row_teams
-        ],
-        "columns": [
-            {"team_code": t.euroleague_code, "team_name": t.name}
-            for t in col_teams
-        ],
+        "rows": rows,
+        "columns": columns,
         "cells": cells,
     }
 
@@ -505,6 +657,36 @@ def _get_cell(
         if cell.row_index == row_index and cell.col_index == col_index:
             return cell
     raise TicTacToeNotFoundError("Cell not found")
+
+
+def _cell_axes(round_obj: QuizTicTacToeRound, row_index: int, col_index: int) -> tuple[dict, dict]:
+    """Get the row and column axis dicts for a cell position."""
+    axes_by_pos = {a.position: a for a in round_obj.axes}
+    use_axes_table = bool(axes_by_pos)
+
+    if use_axes_table:
+        row_a = axes_by_pos[f"row_{row_index}"]
+        col_a = axes_by_pos[f"col_{col_index}"]
+        return (
+            {"axis_type": row_a.axis_type, "value": row_a.value},
+            {"axis_type": col_a.axis_type, "value": col_a.value},
+        )
+
+    # Legacy fallback
+    row_team_ids = [
+        round_obj.row_team_id_1,
+        round_obj.row_team_id_2,
+        round_obj.row_team_id_3,
+    ]
+    col_team_ids = [
+        round_obj.col_team_id_1,
+        round_obj.col_team_id_2,
+        round_obj.col_team_id_3,
+    ]
+    return (
+        {"axis_type": "team", "value": str(row_team_ids[row_index])},
+        {"axis_type": "team", "value": str(col_team_ids[col_index])},
+    )
 
 
 def _cell_team_ids(round_obj: QuizTicTacToeRound, row_index: int, col_index: int) -> tuple[int, int]:
@@ -546,52 +728,104 @@ def _other_player(player_no: int) -> int:
     return 2 if player_no == 1 else 1
 
 
-def _select_board_teams(db: Session) -> tuple[list[int], list[int]]:
-    candidate_rows = (
-        db.query(
-            Team.id,
-            func.count(distinct(PlayerSeasonTeam.player_id)).label("player_count"),
-        )
-        .join(PlayerSeasonTeam, PlayerSeasonTeam.team_id == Team.id)
-        .group_by(Team.id)
-        .having(func.count(distinct(PlayerSeasonTeam.player_id)) >= 3)
-        .order_by(func.count(distinct(PlayerSeasonTeam.player_id)).desc(), Team.id.asc())
-        .limit(24)
-        .all()
-    )
-    team_ids = [row.id for row in candidate_rows]
+def _select_board_axes(db: Session) -> list[dict]:
+    """Select 6 axes (3 rows + 3 cols) using weighted axis type selection.
 
-    if len(team_ids) < 6:
+    Returns list of 6 axis dicts: [row0, row1, row2, col0, col1, col2].
+    Each dict has: axis_type, value, display_label.
+    """
+    team_candidates = _get_team_candidates(db)
+    nationality_candidates = _get_nationality_candidates(db)
+
+    if len(team_candidates) < 6:
         raise TicTacToeConflictError(
             "Not enough teams with player history to generate a TicTacToe board"
         )
 
+    # Precompute player sets for validation
+    team_ids = [int(c["value"]) for c in team_candidates]
     pairs = (
         db.query(PlayerSeasonTeam.team_id, PlayerSeasonTeam.player_id)
         .filter(PlayerSeasonTeam.team_id.in_(team_ids))
         .distinct()
         .all()
     )
-    player_sets: dict[int, set[int]] = {team_id: set() for team_id in team_ids}
+    team_player_sets: dict[str, set[int]] = {}
     for team_id, player_id in pairs:
-        player_sets[team_id].add(player_id)
+        team_player_sets.setdefault(str(team_id), set()).add(player_id)
 
-    # Sample random valid boards instead of exhaustively collecting all
-    random.shuffle(team_ids)
+    # Precompute nationality player sets
+    nat_player_sets: dict[str, set[int]] = {}
+    if nationality_candidates:
+        nat_names = [c["value"] for c in nationality_candidates]
+        nat_rows = (
+            db.query(Player.id, Player.nationality)
+            .filter(Player.nationality.in_(nat_names))
+            .all()
+        )
+        for pid, nat in nat_rows:
+            nat_player_sets.setdefault(nat, set()).add(pid)
+
+    def _player_set_for(axis: dict) -> set[int]:
+        if axis["axis_type"] == "team":
+            return team_player_sets.get(axis["value"], set())
+        elif axis["axis_type"] == "nationality":
+            return nat_player_sets.get(axis["value"], set())
+        return set()
+
+    axis_types = list(AXIS_WEIGHTS.keys())
+    axis_probs = [AXIS_WEIGHTS[t] for t in axis_types]
+
     max_attempts = 500
     for _ in range(max_attempts):
-        sample = random.sample(team_ids, 6)
-        row_team_ids = tuple(sample[:3])
-        col_team_ids = tuple(sample[3:])
-        if _all_cells_have_answers(
-            row_team_ids=row_team_ids,
-            col_team_ids=col_team_ids,
-            player_sets=player_sets,
-        ):
-            return list(row_team_ids), list(col_team_ids)
+        axes = []
+        used_values = set()  # prevent duplicate axes
+        for _ in range(6):
+            chosen_type = random.choices(axis_types, weights=axis_probs, k=1)[0]
+            if chosen_type == "team":
+                available = [c for c in team_candidates if c["value"] not in used_values]
+                if not available:
+                    break
+                axis = random.choice(available)
+            elif chosen_type == "nationality" and nationality_candidates:
+                available = [c for c in nationality_candidates if c["value"] not in used_values]
+                if not available:
+                    # Fallback to team
+                    available = [c for c in team_candidates if c["value"] not in used_values]
+                    if not available:
+                        break
+                    axis = random.choice(available)
+                else:
+                    axis = _pick_weighted(available)
+            else:
+                available = [c for c in team_candidates if c["value"] not in used_values]
+                if not available:
+                    break
+                axis = random.choice(available)
+
+            used_values.add(axis["value"])
+            axes.append(axis)
+
+        if len(axes) != 6:
+            continue
+
+        # Validate: every cell intersection must have at least one valid player
+        row_axes = axes[:3]
+        col_axes = axes[3:]
+        valid = True
+        for ra in row_axes:
+            for ca in col_axes:
+                if not (_player_set_for(ra) & _player_set_for(ca)):
+                    valid = False
+                    break
+            if not valid:
+                break
+
+        if valid:
+            return axes
 
     raise TicTacToeConflictError(
-        "Unable to generate a valid 3x3 board with club intersections"
+        "Unable to generate a valid 3x3 board with axis intersections"
     )
 
 
