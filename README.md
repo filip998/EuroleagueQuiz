@@ -9,6 +9,20 @@ backend/   — Python/FastAPI API server, data ingestion, SQLAlchemy models
 frontend/  — React (Vite) UI
 ```
 
+## Quick Start
+
+Run the startup scripts from the project root:
+
+```bash
+# Terminal 1 — backend (creates venv, installs deps, runs migrations, starts server)
+start-backend.bat
+
+# Terminal 2 — frontend (installs npm deps, starts dev server)
+start-frontend.bat
+```
+
+Then open `http://localhost:5173` to play.
+
 ## Backend
 
 ### Setup

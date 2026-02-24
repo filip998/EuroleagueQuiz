@@ -24,3 +24,6 @@ dev = [
 
 [project.scripts]
 ingest = "ingestion.ingest:main"
+
+[tool.setuptools.packages.find]
+include = ["app*", "ingestion*"]
