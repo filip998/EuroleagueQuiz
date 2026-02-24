@@ -66,10 +66,15 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
   useEffect(() => {
     if (!game?.turn_seconds || game.status !== "active" || timeLeft === null) return;
     if (timeLeft <= 0) {
-      setGame((prev) => ({
-        ...prev,
-        current_player: prev.current_player === 1 ? 2 : 1,
-      }));
+      // Notify backend to switch turn
+      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ action: "time_expired" }));
+      } else {
+        setGame((prev) => ({
+          ...prev,
+          current_player: prev.current_player === 1 ? 2 : 1,
+        }));
+      }
       setLastResult("⏰ Time's up! Turn switches.");
       setSelectedCell(null);
       return;
@@ -211,6 +216,7 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
     draw_offered: "🤝 Draw offered.",
     draw_accepted: "🤝 Draw accepted — new board!",
     draw_declined: "Draw declined — game continues.",
+    time_expired: "⏰ Time's up! Turn switches.",
   };
 
   return (

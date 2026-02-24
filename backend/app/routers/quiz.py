@@ -15,6 +15,7 @@ from app.schemas.quiz_ttt import (
 )
 from app.services.tictactoe import (
     TicTacToeError,
+    _other_player,
     autocomplete_players,
     create_game,
     get_game_or_404,
@@ -414,6 +415,17 @@ async def tictactoe_websocket(websocket: WebSocket, game_id: int, player: int = 
                     )
                     db.commit()
                     db.refresh(game)
+                elif action == "time_expired":
+                    if game.status == "active" and game.current_player == player:
+                        game.current_player = _other_player(player)
+                        from datetime import datetime
+                        game.updated_at = datetime.utcnow()
+                        db.commit()
+                        db.refresh(game)
+                    state = serialize_game_state(db, game)
+                    state["last_result"] = "time_expired"
+                    await ws_manager.broadcast(game_id, state)
+                    continue
                 else:
                     await websocket.send_json({"error": f"Unknown action: {action}"})
                     continue
