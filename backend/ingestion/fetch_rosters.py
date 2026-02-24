@@ -117,6 +117,7 @@ def fetch_rosters(session: Session, year: int, rate_limiter: RateLimiter) -> Non
                     registration_end=reg_end,
                 )
                 session.add(pst)
+                session.flush()
             else:
                 if jersey:
                     pst.jersey_number = jersey
