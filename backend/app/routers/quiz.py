@@ -385,6 +385,10 @@ async def tictactoe_websocket(websocket: WebSocket, game_id: int, player: int = 
             data = await websocket.receive_json()
             action = data.get("action")
             try:
+                # Refresh game from DB to pick up changes from REST endpoints
+                db.expire(game)
+                db.refresh(game)
+
                 if action == "move":
                     player_id = data["player_id"]
                     row_idx = data["row_index"]
