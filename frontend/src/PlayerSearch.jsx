@@ -26,8 +26,8 @@ export default function PlayerSearch({
       try {
         const data = await autocompletePlayer(
           query,
-          rowTeamCode,
-          colTeamCode
+          null,
+          null
         );
         setResults(data.players || []);
       } catch {
