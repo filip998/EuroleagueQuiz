@@ -1,7 +1,7 @@
 import math
 import random
 import string
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from itertools import combinations
 from typing import Optional
 
@@ -134,6 +134,18 @@ def _pick_weighted(candidates: list[dict]) -> dict:
     return random.choices(candidates, weights=weights, k=1)[0]
 
 
+def _stints_overlap(
+    start_a: date | None,
+    end_a: date | None,
+    start_b: date | None,
+    end_b: date | None,
+) -> bool:
+    """Check if two date ranges overlap. None dates treated as unbounded (always overlaps)."""
+    if start_a is None or end_a is None or start_b is None or end_b is None:
+        return True
+    return start_a <= end_b and start_b <= end_a
+
+
 def _get_player_set_for_axis(db: Session, axis: dict) -> set[int]:
     """Get set of player IDs matching an axis constraint."""
     if axis["axis_type"] == "team":
@@ -154,26 +166,52 @@ def _get_player_set_for_axis(db: Session, axis: dict) -> set[int]:
         return {r.id for r in rows}
     elif axis["axis_type"] == "played_with":
         star_id = int(axis["value"])
-        # Find all (team_id, season_id) pairs for the star
+        # Find all stints for the star with dates
         star_stints = (
-            db.query(PlayerSeasonTeam.team_id, PlayerSeasonTeam.season_id)
+            db.query(
+                PlayerSeasonTeam.team_id,
+                PlayerSeasonTeam.season_id,
+                PlayerSeasonTeam.registration_start,
+                PlayerSeasonTeam.registration_end,
+            )
             .filter(PlayerSeasonTeam.player_id == star_id)
             .all()
         )
         if not star_stints:
             return set()
+        # Find all players on the same teams/seasons
         conditions = [
-            (PlayerSeasonTeam.team_id == tid) & (PlayerSeasonTeam.season_id == sid)
-            for tid, sid in star_stints
+            (PlayerSeasonTeam.team_id == s.team_id)
+            & (PlayerSeasonTeam.season_id == s.season_id)
+            for s in star_stints
         ]
-        rows = (
-            db.query(PlayerSeasonTeam.player_id)
+        candidate_rows = (
+            db.query(
+                PlayerSeasonTeam.player_id,
+                PlayerSeasonTeam.team_id,
+                PlayerSeasonTeam.season_id,
+                PlayerSeasonTeam.registration_start,
+                PlayerSeasonTeam.registration_end,
+            )
             .filter(or_(*conditions))
             .filter(PlayerSeasonTeam.player_id != star_id)
-            .distinct()
             .all()
         )
-        return {r.player_id for r in rows}
+        # Filter by date overlap
+        result: set[int] = set()
+        star_by_key = {}
+        for s in star_stints:
+            star_by_key.setdefault((s.team_id, s.season_id), []).append(s)
+        for row in candidate_rows:
+            key = (row.team_id, row.season_id)
+            for s in star_by_key.get(key, []):
+                if _stints_overlap(
+                    row.registration_start, row.registration_end,
+                    s.registration_start, s.registration_end,
+                ):
+                    result.add(row.player_id)
+                    break
+        return result
     return set()
 
 
@@ -196,24 +234,49 @@ def _player_matches_axis(db: Session, player_id: int, axis: dict) -> bool:
         star_id = int(axis["value"])
         if player_id == star_id:
             return False
-        # Check if player shares any (team_id, season_id) with the star
+        # Load star stints with dates
         star_stints = (
-            db.query(PlayerSeasonTeam.team_id, PlayerSeasonTeam.season_id)
+            db.query(
+                PlayerSeasonTeam.team_id,
+                PlayerSeasonTeam.season_id,
+                PlayerSeasonTeam.registration_start,
+                PlayerSeasonTeam.registration_end,
+            )
             .filter(PlayerSeasonTeam.player_id == star_id)
             .all()
         )
         if not star_stints:
             return False
+        # Load player stints on the same teams/seasons
         conditions = [
-            (PlayerSeasonTeam.team_id == tid) & (PlayerSeasonTeam.season_id == sid)
-            for tid, sid in star_stints
+            (PlayerSeasonTeam.team_id == s.team_id)
+            & (PlayerSeasonTeam.season_id == s.season_id)
+            for s in star_stints
         ]
-        return (
-            db.query(PlayerSeasonTeam)
+        player_stints = (
+            db.query(
+                PlayerSeasonTeam.team_id,
+                PlayerSeasonTeam.season_id,
+                PlayerSeasonTeam.registration_start,
+                PlayerSeasonTeam.registration_end,
+            )
             .filter(PlayerSeasonTeam.player_id == player_id)
             .filter(or_(*conditions))
-            .first()
-        ) is not None
+            .all()
+        )
+        # Check date overlap
+        for ps in player_stints:
+            for ss in star_stints:
+                if (
+                    ps.team_id == ss.team_id
+                    and ps.season_id == ss.season_id
+                    and _stints_overlap(
+                        ps.registration_start, ps.registration_end,
+                        ss.registration_start, ss.registration_end,
+                    )
+                ):
+                    return True
+        return False
     return False
 
 
@@ -842,7 +905,7 @@ def _select_board_axes(db: Session) -> list[dict]:
         for pid, nat in nat_rows:
             nat_player_sets.setdefault(nat, set()).add(pid)
 
-    # Precompute played_with player sets (teammates for each star)
+    # Precompute played_with player sets (teammates with date overlap)
     pw_player_sets: dict[str, set[int]] = {}
     if played_with_candidates:
         star_ids = [int(c["value"]) for c in played_with_candidates]
@@ -851,19 +914,23 @@ def _select_board_axes(db: Session) -> list[dict]:
                 PlayerSeasonTeam.player_id,
                 PlayerSeasonTeam.team_id,
                 PlayerSeasonTeam.season_id,
+                PlayerSeasonTeam.registration_start,
+                PlayerSeasonTeam.registration_end,
             )
             .filter(PlayerSeasonTeam.player_id.in_(star_ids))
             .all()
         )
-        # Map star → list of (team_id, season_id)
-        star_roster_keys: dict[int, set[tuple[int, int]]] = {}
-        for pid, tid, sid in star_stints:
-            star_roster_keys.setdefault(pid, set()).add((tid, sid))
+        # Map star → list of stint records
+        star_stint_map: dict[int, list] = {}
+        for s in star_stints:
+            star_stint_map.setdefault(s.player_id, []).append(s)
 
-        # Get all roster entries for those (team, season) combos
-        all_roster_keys = set()
-        for keys in star_roster_keys.values():
-            all_roster_keys.update(keys)
+        # Collect all (team, season) keys across stars
+        all_roster_keys: set[tuple[int, int]] = set()
+        for stints in star_stint_map.values():
+            for s in stints:
+                all_roster_keys.add((s.team_id, s.season_id))
+
         if all_roster_keys:
             roster_conditions = [
                 (PlayerSeasonTeam.team_id == tid) & (PlayerSeasonTeam.season_id == sid)
@@ -874,20 +941,26 @@ def _select_board_axes(db: Session) -> list[dict]:
                     PlayerSeasonTeam.player_id,
                     PlayerSeasonTeam.team_id,
                     PlayerSeasonTeam.season_id,
+                    PlayerSeasonTeam.registration_start,
+                    PlayerSeasonTeam.registration_end,
                 )
                 .filter(or_(*roster_conditions))
                 .all()
             )
-            # Build reverse index: (team_id, season_id) → set of player_ids
-            roster_index: dict[tuple[int, int], set[int]] = {}
-            for pid, tid, sid in all_roster_entries:
-                roster_index.setdefault((tid, sid), set()).add(pid)
+            # Index roster entries by (team_id, season_id)
+            roster_by_key: dict[tuple[int, int], list] = {}
+            for r in all_roster_entries:
+                roster_by_key.setdefault((r.team_id, r.season_id), []).append(r)
 
-            for star_id, keys in star_roster_keys.items():
+            for star_id, stints in star_stint_map.items():
                 teammates: set[int] = set()
-                for key in keys:
-                    teammates.update(roster_index.get(key, set()))
-                teammates.discard(star_id)
+                for s in stints:
+                    for r in roster_by_key.get((s.team_id, s.season_id), []):
+                        if r.player_id != star_id and _stints_overlap(
+                            s.registration_start, s.registration_end,
+                            r.registration_start, r.registration_end,
+                        ):
+                            teammates.add(r.player_id)
                 pw_player_sets[str(star_id)] = teammates
 
     def _player_set_for(axis: dict) -> set[int]:
