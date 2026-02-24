@@ -66,12 +66,10 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
   useEffect(() => {
     if (!game?.turn_seconds || game.status !== "active" || timeLeft === null) return;
     if (timeLeft <= 0) {
-      if (!isOnline) {
-        setGame((prev) => ({
-          ...prev,
-          current_player: prev.current_player === 1 ? 2 : 1,
-        }));
-      }
+      setGame((prev) => ({
+        ...prev,
+        current_player: prev.current_player === 1 ? 2 : 1,
+      }));
       setLastResult("⏰ Time's up! Turn switches.");
       setSelectedCell(null);
       return;
