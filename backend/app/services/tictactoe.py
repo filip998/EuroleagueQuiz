@@ -1,3 +1,4 @@
+import random
 from datetime import datetime, timedelta
 from itertools import combinations
 from typing import Optional
@@ -523,7 +524,7 @@ def _select_board_teams(db: Session) -> tuple[list[int], list[int]]:
     )
     team_ids = [row.id for row in candidate_rows]
 
-    if len(team_ids) < 3:
+    if len(team_ids) < 6:
         raise TicTacToeConflictError(
             "Not enough teams with player history to generate a TicTacToe board"
         )
@@ -538,18 +539,31 @@ def _select_board_teams(db: Session) -> tuple[list[int], list[int]]:
     for team_id, player_id in pairs:
         player_sets[team_id].add(player_id)
 
+    # Collect valid boards, then pick one at random
+    valid_boards: list[tuple[tuple, tuple]] = []
     for row_team_ids in combinations(team_ids, 3):
         for col_team_ids in combinations(team_ids, 3):
+            # Row and column sets must not share any team
+            if set(row_team_ids) & set(col_team_ids):
+                continue
             if _all_cells_have_answers(
                 row_team_ids=row_team_ids,
                 col_team_ids=col_team_ids,
                 player_sets=player_sets,
             ):
-                return list(row_team_ids), list(col_team_ids)
+                valid_boards.append((row_team_ids, col_team_ids))
 
-    raise TicTacToeConflictError(
-        "Unable to generate a valid 3x3 board with club intersections"
-    )
+    if not valid_boards:
+        raise TicTacToeConflictError(
+            "Unable to generate a valid 3x3 board with club intersections"
+        )
+
+    chosen = random.choice(valid_boards)
+    rows = list(chosen[0])
+    cols = list(chosen[1])
+    random.shuffle(rows)
+    random.shuffle(cols)
+    return rows, cols
 
 
 def _all_cells_have_answers(

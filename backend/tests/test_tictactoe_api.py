@@ -64,31 +64,32 @@ def client(tmp_path: Path):
     session = TestingSessionLocal()
     try:
         season = Season(year=2024, name="2024-2025")
+        # 6 teams so rows and columns can be fully disjoint
         team_a = Team(euroleague_code="AAA", name="Alpha Club")
         team_b = Team(euroleague_code="BBB", name="Beta Club")
         team_c = Team(euroleague_code="CCC", name="Gamma Club")
-        session.add_all([season, team_a, team_b, team_c])
+        team_d = Team(euroleague_code="DDD", name="Delta Club")
+        team_e = Team(euroleague_code="EEE", name="Echo Club")
+        team_f = Team(euroleague_code="FFF", name="Foxtrot Club")
+        session.add_all([season, team_a, team_b, team_c, team_d, team_e, team_f])
         session.flush()
 
         player_1 = Player(euroleague_code="P001", first_name="Alex", last_name="Bridge")
         player_2 = Player(euroleague_code="P002", first_name="Boris", last_name="Cross")
         player_3 = Player(euroleague_code="P003", first_name="Carlos", last_name="Delta")
         player_4 = Player(euroleague_code="P004", first_name="Dino", last_name="Edge")
-        session.add_all([player_1, player_2, player_3, player_4])
+        # Player 5 only plays for one team — guaranteed invalid for cross-team cells
+        player_5 = Player(euroleague_code="P005", first_name="Emil", last_name="Frost")
+        session.add_all([player_1, player_2, player_3, player_4, player_5])
         session.flush()
 
-        # Player-team history creates pair intersections across all 3 clubs.
-        links = [
-            (player_1.id, team_a.id),
-            (player_1.id, team_b.id),
-            (player_1.id, team_c.id),
-            (player_2.id, team_a.id),
-            (player_2.id, team_b.id),
-            (player_3.id, team_a.id),
-            (player_3.id, team_c.id),
-            (player_4.id, team_b.id),
-            (player_4.id, team_c.id),
-        ]
+        # Players 1-4 played for all 6 clubs, so any row/col combo has valid answers.
+        links = []
+        for p in [player_1, player_2, player_3, player_4]:
+            for t in [team_a, team_b, team_c, team_d, team_e, team_f]:
+                links.append((p.id, t.id))
+        # Player 5 only for team_a
+        links.append((player_5.id, team_a.id))
         for player_id, team_id in links:
             session.add(
                 PlayerSeasonTeam(
