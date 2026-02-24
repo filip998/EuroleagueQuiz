@@ -26,6 +26,9 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
       if (data.error) {
         setError(data.error);
       } else {
+        if (data.last_result) {
+          setLastResult(data.last_result);
+        }
         setGame(data);
         setError(null);
       }

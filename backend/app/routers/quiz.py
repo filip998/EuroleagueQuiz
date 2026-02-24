@@ -390,11 +390,15 @@ async def tictactoe_websocket(websocket: WebSocket, game_id: int, player: int = 
                     row_idx = data["row_index"]
                     col_idx = data["col_index"]
                     result = submit_move(
-                        db, game, row_idx, col_idx, player_id,
-                        acting_player=player,
+                        db, game=game, row_index=row_idx, col_index=col_idx,
+                        player_id=player_id, acting_player=player,
                     )
                     db.commit()
                     db.refresh(game)
+                    state = serialize_game_state(db, game)
+                    state["last_result"] = result
+                    await ws_manager.broadcast(game_id, state)
+                    continue
                 elif action == "offer_draw":
                     offer_draw(db, game, acting_player=player)
                     db.commit()
