@@ -60,15 +60,18 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
   useEffect(() => {
     if (!game?.turn_seconds || game.status !== "active") return;
     setTimeLeft(game.turn_seconds);
+    setLastResult(null);
   }, [game?.current_player, game?.round_number, game?.turn_seconds, game?.status]);
 
   // Countdown tick
   useEffect(() => {
     if (!game?.turn_seconds || game.status !== "active" || timeLeft === null) return;
     if (timeLeft <= 0) {
-      // Notify backend to switch turn
+      // Notify backend to switch turn (only the current player sends this)
       if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ action: "time_expired" }));
+        if (game.current_player === myPlayer) {
+          wsRef.current.send(JSON.stringify({ action: "time_expired" }));
+        }
       } else {
         setGame((prev) => ({
           ...prev,
