@@ -37,6 +37,20 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
     };
   }, [isOnline, game?.id, myPlayer]);
 
+  // Poll for opponent joining while waiting
+  useEffect(() => {
+    if (!isOnline || game?.status !== "waiting_for_opponent") return;
+    const interval = setInterval(async () => {
+      try {
+        const fresh = await getGame(game.id);
+        if (fresh.status === "active") {
+          setGame(fresh);
+        }
+      } catch {}
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [isOnline, game?.id, game?.status]);
+
   const round = game?.round;
 
   // Reset timer whenever the current player changes

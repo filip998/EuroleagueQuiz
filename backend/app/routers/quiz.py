@@ -34,11 +34,16 @@ import asyncio
 def _try_broadcast(game_id: int, state: dict):
     """Best-effort broadcast game state to connected WebSocket clients."""
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(ws_manager.broadcast(game_id, state))
+        loop = asyncio.get_running_loop()
+        loop.create_task(ws_manager.broadcast(game_id, state))
     except RuntimeError:
-        pass
+        # No running loop in this thread — use run_coroutine_threadsafe
+        try:
+            import uvicorn
+            loop = asyncio.get_event_loop()
+            asyncio.run_coroutine_threadsafe(ws_manager.broadcast(game_id, state), loop)
+        except Exception:
+            pass
 
 
 @router.get("/random-player")
@@ -235,7 +240,7 @@ def get_tictactoe_game(game_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/tictactoe/games/{game_id}/moves")
-def submit_tictactoe_move(
+async def submit_tictactoe_move(
     game_id: int,
     payload: TicTacToeMoveRequest,
     db: Session = Depends(get_db),
@@ -252,7 +257,7 @@ def submit_tictactoe_move(
         db.commit()
         db.refresh(game)
         state = serialize_game_state(db, game)
-        _try_broadcast(game_id, state)
+        await ws_manager.broadcast(game_id, state)
         return {"result": result, "game": state}
     except TicTacToeError as exc:
         db.rollback()
@@ -260,14 +265,14 @@ def submit_tictactoe_move(
 
 
 @router.post("/tictactoe/games/{game_id}/draw-offer")
-def offer_tictactoe_draw(game_id: int, db: Session = Depends(get_db)):
+async def offer_tictactoe_draw(game_id: int, db: Session = Depends(get_db)):
     try:
         game = get_game_or_404(db, game_id)
         offer_draw(db, game)
         db.commit()
         db.refresh(game)
         state = serialize_game_state(db, game)
-        _try_broadcast(game_id, state)
+        await ws_manager.broadcast(game_id, state)
         return {"result": "offered", "game": state}
     except TicTacToeError as exc:
         db.rollback()
@@ -275,7 +280,7 @@ def offer_tictactoe_draw(game_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/tictactoe/games/{game_id}/draw-response")
-def respond_tictactoe_draw(
+async def respond_tictactoe_draw(
     game_id: int,
     payload: TicTacToeDrawResponseRequest,
     db: Session = Depends(get_db),
@@ -286,7 +291,7 @@ def respond_tictactoe_draw(
         db.commit()
         db.refresh(game)
         state = serialize_game_state(db, game)
-        _try_broadcast(game_id, state)
+        await ws_manager.broadcast(game_id, state)
         return {"result": result, "game": state}
     except TicTacToeError as exc:
         db.rollback()
@@ -319,7 +324,7 @@ def tictactoe_player_autocomplete(
 # ---------------------------------------------------------------------------
 
 @router.post("/tictactoe/games/join")
-def join_tictactoe_game(
+async def join_tictactoe_game(
     payload: TicTacToeJoinGameRequest,
     db: Session = Depends(get_db),
 ):
@@ -328,7 +333,7 @@ def join_tictactoe_game(
         db.commit()
         db.refresh(game)
         state = serialize_game_state(db, game)
-        _try_broadcast(game.id, state)
+        await ws_manager.broadcast(game.id, state)
         return {"game_id": game.id, "game": state}
     except TicTacToeError as exc:
         db.rollback()
