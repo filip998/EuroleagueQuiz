@@ -14,6 +14,7 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [timeLeft, setTimeLeft] = useState(null);
+  const [roundTransition, setRoundTransition] = useState(null);
   const wsRef = useRef(null);
 
   const isOnline = onlineInfo?.isOnline;
@@ -26,11 +27,19 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
       if (data.error) {
         setError(data.error);
       } else {
-        if (data.last_result) {
-          setLastResult(data.last_result);
-        }
-        setGame(data);
+        const result = data.last_result;
+        const completedRound = data.completed_round;
+        // Remove non-game fields before setting game state
+        const gameData = { ...data };
+        delete gameData.last_result;
+        delete gameData.completed_round;
+        setGame(gameData);
         setError(null);
+        if (result && completedRound && ["round_won", "round_drawn", "match_won"].includes(result)) {
+          startRoundTransition(result, completedRound);
+        } else if (result) {
+          setLastResult(result);
+        }
       }
     });
     wsRef.current = ws;
@@ -86,6 +95,30 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
     return () => clearTimeout(timer);
   }, [timeLeft, game?.turn_seconds, game?.status, isOnline]);
 
+  // Round transition countdown
+  useEffect(() => {
+    if (!roundTransition) return;
+    if (roundTransition.countdown <= 0) {
+      setRoundTransition(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setRoundTransition((prev) =>
+        prev ? { ...prev, countdown: prev.countdown - 1 } : null
+      );
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [roundTransition]);
+
+  // Helper to trigger round transition
+  function startRoundTransition(result, completedRound) {
+    if (completedRound) {
+      setRoundTransition({ countdown: 3, completedRound, result });
+    }
+    setLastResult(result);
+    setSelectedCell(null);
+  }
+
   const refreshGame = useCallback(async () => {
     if (!game) return;
     try {
@@ -126,7 +159,11 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
           player_id: player.player_id,
         });
         setGame(res.game);
-        setLastResult(res.result);
+        if (res.completed_round && ["round_won", "round_drawn", "match_won"].includes(res.result)) {
+          startRoundTransition(res.result, res.completed_round);
+        } else {
+          setLastResult(res.result);
+        }
       }
       setSelectedCell(null);
     } catch (err) {
@@ -163,7 +200,11 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
       } else {
         const res = await respondDraw(game.id, accept);
         setGame(res.game);
-        setLastResult(accept ? "draw_accepted" : "draw_declined");
+        if (accept && res.completed_round) {
+          startRoundTransition("draw_accepted", res.completed_round);
+        } else {
+          setLastResult(accept ? "draw_accepted" : "draw_declined");
+        }
       }
     } catch (err) {
       setError(err.message);
@@ -205,6 +246,10 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
   if (!game || !round) {
     return <p>Loading game...</p>;
   }
+
+  // During round transition, show the completed round instead of the new one
+  const displayRound = roundTransition?.completedRound || round;
+  const inTransition = !!roundTransition;
 
   const currentPlayerName =
     game.current_player === 1 ? game.player1_name : game.player2_name;
@@ -293,6 +338,11 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
           }}
         >
           {resultMessages[lastResult] || lastResult}
+          {inTransition && (
+            <span style={{ marginLeft: 8, fontWeight: "bold" }}>
+              Next round in {roundTransition.countdown}...
+            </span>
+          )}
         </div>
       )}
 
@@ -320,7 +370,7 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
         <thead>
           <tr>
             <th style={{ width: 100 }}></th>
-            {round.columns.map((col, ci) => (
+            {displayRound.columns.map((col, ci) => (
               <th
                 key={ci}
                 style={{
@@ -346,20 +396,21 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
                   padding: 8,
                   fontSize: 12,
                   textAlign: "center",
-                  background: round.rows[ri].axis_type === "nationality" ? "#e8f4e8" : round.rows[ri].axis_type === "played_with" ? "#fff3e0" : "#e8e8e8",
+                  background: displayRound.rows[ri].axis_type === "nationality" ? "#e8f4e8" : displayRound.rows[ri].axis_type === "played_with" ? "#fff3e0" : "#e8e8e8",
                   border: "2px solid #ccc",
                 }}
               >
-                {round.rows[ri].axis_type === "nationality" ? "🌍 " : round.rows[ri].axis_type === "played_with" ? "🤝 " : ""}
-                {round.rows[ri].display_label || round.rows[ri].team_name}
+                {displayRound.rows[ri].axis_type === "nationality" ? "🌍 " : displayRound.rows[ri].axis_type === "played_with" ? "🤝 " : ""}
+                {displayRound.rows[ri].display_label || displayRound.rows[ri].team_name}
               </th>
               {[0, 1, 2].map((ci) => {
-                const cell = round.cells.find(
+                const cell = displayRound.cells.find(
                   (c) => c.row_index === ri && c.col_index === ci
                 );
                 const claimed = cell?.claimed_by_player;
                 const isClickable =
-                  !claimed && game.status === "active" && !game.pending_draw && isMyTurn;
+                  !claimed && !inTransition && game.status === "active" && !game.pending_draw && isMyTurn;
+                const showSamples = inTransition && !claimed && cell?.sample_answers?.length > 0;
                 return (
                   <td
                     key={ci}
@@ -373,17 +424,28 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
                       cursor: isClickable ? "pointer" : "default",
                       background: claimed
                         ? CELL_COLORS[claimed] + "33"
-                        : isClickable
-                          ? "#fafafa"
-                          : "#f5f5f5",
+                        : showSamples
+                          ? "#f0f8ff"
+                          : isClickable
+                            ? "#fafafa"
+                            : "#f5f5f5",
                       fontSize: 12,
                       fontWeight: claimed ? "bold" : "normal",
                       color: claimed ? CELL_COLORS[claimed] : "#999",
+                      padding: showSamples ? 4 : 0,
                     }}
                   >
                     {claimed
                       ? cell.claimed_player_name || `P${claimed}`
-                      : ""}
+                      : showSamples
+                        ? (
+                          <div style={{ fontSize: 10, fontStyle: "italic", color: "#666", lineHeight: 1.4 }}>
+                            {cell.sample_answers.map((name, i) => (
+                              <div key={i}>{name}</div>
+                            ))}
+                          </div>
+                        )
+                        : ""}
                   </td>
                 );
               })}
@@ -393,7 +455,7 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
       </table>
 
       {/* Draw controls */}
-      {game.status === "active" && (
+      {game.status === "active" && !inTransition && (
         <div style={{ marginTop: 16 }}>
           {game.pending_draw ? (
             <div>
@@ -436,7 +498,7 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
       )}
 
       {/* New game button */}
-      {game.status === "finished" && (
+      {game.status === "finished" && !inTransition && (
         <div style={{ marginTop: 20 }}>
           <button onClick={onNewGame} style={{ fontSize: 16, padding: "8px 24px" }}>
             New Game
@@ -445,7 +507,7 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
       )}
 
       {/* Player search modal */}
-      {selectedCell && (
+      {selectedCell && !inTransition && (
         <PlayerSearch
           rowTeamCode={selectedCell.row_team_code || null}
           colTeamCode={selectedCell.col_team_code || null}

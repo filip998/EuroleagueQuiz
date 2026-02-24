@@ -596,7 +596,7 @@ def serialize_game_state(
 
     round_payload = None
     if round_obj:
-        round_payload = _serialize_round(round_obj)
+        round_payload = _serialize_round(round_obj, db=db)
 
     turn_deadline = None
     if game.turn_seconds is not None:
@@ -626,6 +626,22 @@ def serialize_game_state(
         else None,
         "round": round_payload,
     }
+
+
+def serialize_completed_round(db: Session, game_id: int, round_number: int) -> dict | None:
+    """Serialize a completed/drawn round with sample answers for unclaimed cells."""
+    round_obj = (
+        db.query(QuizTicTacToeRound)
+        .filter(
+            QuizTicTacToeRound.game_id == game_id,
+            QuizTicTacToeRound.round_number == round_number,
+            QuizTicTacToeRound.status.in_(["completed", "drawn"]),
+        )
+        .first()
+    )
+    if not round_obj:
+        return None
+    return _serialize_round(round_obj, db=db)
 
 
 def autocomplete_players(
@@ -707,7 +723,7 @@ def player_matches_teams(
     return matched_team_count == len(required_team_ids)
 
 
-def _serialize_round(round_obj: QuizTicTacToeRound) -> dict:
+def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -> dict:
     axes_by_pos = {a.position: a for a in round_obj.axes}
     use_axes_table = bool(axes_by_pos)
 
@@ -762,6 +778,15 @@ def _serialize_round(round_obj: QuizTicTacToeRound) -> dict:
                 "claimed_player_id": cell.claimed_player_id,
                 "claimed_player_name": claimed_player_name,
             }
+            # Add sample answers for unclaimed cells when round is over
+            if (
+                cell.claimed_by_player is None
+                and round_obj.status in ("completed", "drawn")
+                and db is not None
+            ):
+                cell_data["sample_answers"] = _get_sample_answers(
+                    db, round_obj, row_index, col_index
+                )
             # Backward compat: include team_code/team_name if both axes are teams
             if rows[row_index].get("team_code"):
                 cell_data["row_team_code"] = rows[row_index]["team_code"]
@@ -825,6 +850,21 @@ def _cell_axes(round_obj: QuizTicTacToeRound, row_index: int, col_index: int) ->
         {"axis_type": "team", "value": str(row_team_ids[row_index])},
         {"axis_type": "team", "value": str(col_team_ids[col_index])},
     )
+
+
+def _get_sample_answers(
+    db: Session, round_obj: QuizTicTacToeRound, row_index: int, col_index: int, count: int = 3
+) -> list[str]:
+    """Get up to `count` random valid player names for an unclaimed cell."""
+    row_axis, col_axis = _cell_axes(round_obj, row_index, col_index)
+    row_set = _get_player_set_for_axis(db, row_axis)
+    col_set = _get_player_set_for_axis(db, col_axis)
+    valid_ids = list(row_set & col_set)
+    if not valid_ids:
+        return []
+    sample_ids = random.sample(valid_ids, min(count, len(valid_ids)))
+    players = db.query(Player).filter(Player.id.in_(sample_ids)).all()
+    return [f"{p.first_name} {p.last_name}" for p in players]
 
 
 def _cell_team_ids(round_obj: QuizTicTacToeRound, row_index: int, col_index: int) -> tuple[int, int]:
