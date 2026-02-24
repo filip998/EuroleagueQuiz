@@ -539,31 +539,23 @@ def _select_board_teams(db: Session) -> tuple[list[int], list[int]]:
     for team_id, player_id in pairs:
         player_sets[team_id].add(player_id)
 
-    # Collect valid boards, then pick one at random
-    valid_boards: list[tuple[tuple, tuple]] = []
-    for row_team_ids in combinations(team_ids, 3):
-        for col_team_ids in combinations(team_ids, 3):
-            # Row and column sets must not share any team
-            if set(row_team_ids) & set(col_team_ids):
-                continue
-            if _all_cells_have_answers(
-                row_team_ids=row_team_ids,
-                col_team_ids=col_team_ids,
-                player_sets=player_sets,
-            ):
-                valid_boards.append((row_team_ids, col_team_ids))
+    # Sample random valid boards instead of exhaustively collecting all
+    random.shuffle(team_ids)
+    max_attempts = 500
+    for _ in range(max_attempts):
+        sample = random.sample(team_ids, 6)
+        row_team_ids = tuple(sample[:3])
+        col_team_ids = tuple(sample[3:])
+        if _all_cells_have_answers(
+            row_team_ids=row_team_ids,
+            col_team_ids=col_team_ids,
+            player_sets=player_sets,
+        ):
+            return list(row_team_ids), list(col_team_ids)
 
-    if not valid_boards:
-        raise TicTacToeConflictError(
-            "Unable to generate a valid 3x3 board with club intersections"
-        )
-
-    chosen = random.choice(valid_boards)
-    rows = list(chosen[0])
-    cols = list(chosen[1])
-    random.shuffle(rows)
-    random.shuffle(cols)
-    return rows, cols
+    raise TicTacToeConflictError(
+        "Unable to generate a valid 3x3 board with club intersections"
+    )
 
 
 def _all_cells_have_answers(
