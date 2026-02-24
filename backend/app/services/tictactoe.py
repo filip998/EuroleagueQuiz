@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     Player,
+    PlayerSeasonStats,
     PlayerSeasonTeam,
     QuizTicTacToeAxis,
     QuizTicTacToeCell,
@@ -49,8 +50,9 @@ class TicTacToeNotImplementedError(TicTacToeError):
 # ---------------------------------------------------------------------------
 
 # Weights for axis type selection (must sum to 1.0)
-AXIS_WEIGHTS = {"team": 0.8, "nationality": 0.2}
+AXIS_WEIGHTS = {"team": 0.65, "nationality": 0.15, "played_with": 0.20}
 MIN_NATIONALITY_PLAYERS = 5
+PLAYED_WITH_TOP_N = 50
 
 
 def _get_team_candidates(db: Session) -> list[dict]:
@@ -97,6 +99,35 @@ def _get_nationality_candidates(db: Session) -> list[dict]:
     ]
 
 
+def _get_played_with_candidates(db: Session) -> list[dict]:
+    """Get top players by career PIR as 'played with' axis candidates."""
+    rows = (
+        db.query(
+            Player.id,
+            (Player.first_name + " " + Player.last_name).label("name"),
+            func.sum(PlayerSeasonStats.pir).label("career_pir"),
+        )
+        .join(PlayerSeasonTeam, PlayerSeasonTeam.player_id == Player.id)
+        .join(
+            PlayerSeasonStats,
+            PlayerSeasonStats.player_season_team_id == PlayerSeasonTeam.id,
+        )
+        .group_by(Player.id)
+        .order_by(func.sum(PlayerSeasonStats.pir).desc())
+        .limit(PLAYED_WITH_TOP_N)
+        .all()
+    )
+    return [
+        {
+            "axis_type": "played_with",
+            "value": str(r.id),
+            "display_label": r.name,
+        }
+        for r in rows
+        if r.career_pir is not None
+    ]
+
+
 def _pick_weighted(candidates: list[dict]) -> dict:
     """Pick a candidate using _weight field (or uniform if no weights)."""
     weights = [c.get("_weight", 1.0) for c in candidates]
@@ -121,6 +152,28 @@ def _get_player_set_for_axis(db: Session, axis: dict) -> set[int]:
             .all()
         )
         return {r.id for r in rows}
+    elif axis["axis_type"] == "played_with":
+        star_id = int(axis["value"])
+        # Find all (team_id, season_id) pairs for the star
+        star_stints = (
+            db.query(PlayerSeasonTeam.team_id, PlayerSeasonTeam.season_id)
+            .filter(PlayerSeasonTeam.player_id == star_id)
+            .all()
+        )
+        if not star_stints:
+            return set()
+        conditions = [
+            (PlayerSeasonTeam.team_id == tid) & (PlayerSeasonTeam.season_id == sid)
+            for tid, sid in star_stints
+        ]
+        rows = (
+            db.query(PlayerSeasonTeam.player_id)
+            .filter(or_(*conditions))
+            .filter(PlayerSeasonTeam.player_id != star_id)
+            .distinct()
+            .all()
+        )
+        return {r.player_id for r in rows}
     return set()
 
 
@@ -139,6 +192,28 @@ def _player_matches_axis(db: Session, player_id: int, axis: dict) -> bool:
     elif axis["axis_type"] == "nationality":
         player = db.query(Player).filter(Player.id == player_id).first()
         return player is not None and player.nationality == axis["value"]
+    elif axis["axis_type"] == "played_with":
+        star_id = int(axis["value"])
+        if player_id == star_id:
+            return False
+        # Check if player shares any (team_id, season_id) with the star
+        star_stints = (
+            db.query(PlayerSeasonTeam.team_id, PlayerSeasonTeam.season_id)
+            .filter(PlayerSeasonTeam.player_id == star_id)
+            .all()
+        )
+        if not star_stints:
+            return False
+        conditions = [
+            (PlayerSeasonTeam.team_id == tid) & (PlayerSeasonTeam.season_id == sid)
+            for tid, sid in star_stints
+        ]
+        return (
+            db.query(PlayerSeasonTeam)
+            .filter(PlayerSeasonTeam.player_id == player_id)
+            .filter(or_(*conditions))
+            .first()
+        ) is not None
     return False
 
 
@@ -736,6 +811,7 @@ def _select_board_axes(db: Session) -> list[dict]:
     """
     team_candidates = _get_team_candidates(db)
     nationality_candidates = _get_nationality_candidates(db)
+    played_with_candidates = _get_played_with_candidates(db)
 
     if len(team_candidates) < 6:
         raise TicTacToeConflictError(
@@ -766,12 +842,69 @@ def _select_board_axes(db: Session) -> list[dict]:
         for pid, nat in nat_rows:
             nat_player_sets.setdefault(nat, set()).add(pid)
 
+    # Precompute played_with player sets (teammates for each star)
+    pw_player_sets: dict[str, set[int]] = {}
+    if played_with_candidates:
+        star_ids = [int(c["value"]) for c in played_with_candidates]
+        star_stints = (
+            db.query(
+                PlayerSeasonTeam.player_id,
+                PlayerSeasonTeam.team_id,
+                PlayerSeasonTeam.season_id,
+            )
+            .filter(PlayerSeasonTeam.player_id.in_(star_ids))
+            .all()
+        )
+        # Map star → list of (team_id, season_id)
+        star_roster_keys: dict[int, set[tuple[int, int]]] = {}
+        for pid, tid, sid in star_stints:
+            star_roster_keys.setdefault(pid, set()).add((tid, sid))
+
+        # Get all roster entries for those (team, season) combos
+        all_roster_keys = set()
+        for keys in star_roster_keys.values():
+            all_roster_keys.update(keys)
+        if all_roster_keys:
+            roster_conditions = [
+                (PlayerSeasonTeam.team_id == tid) & (PlayerSeasonTeam.season_id == sid)
+                for tid, sid in all_roster_keys
+            ]
+            all_roster_entries = (
+                db.query(
+                    PlayerSeasonTeam.player_id,
+                    PlayerSeasonTeam.team_id,
+                    PlayerSeasonTeam.season_id,
+                )
+                .filter(or_(*roster_conditions))
+                .all()
+            )
+            # Build reverse index: (team_id, season_id) → set of player_ids
+            roster_index: dict[tuple[int, int], set[int]] = {}
+            for pid, tid, sid in all_roster_entries:
+                roster_index.setdefault((tid, sid), set()).add(pid)
+
+            for star_id, keys in star_roster_keys.items():
+                teammates: set[int] = set()
+                for key in keys:
+                    teammates.update(roster_index.get(key, set()))
+                teammates.discard(star_id)
+                pw_player_sets[str(star_id)] = teammates
+
     def _player_set_for(axis: dict) -> set[int]:
         if axis["axis_type"] == "team":
             return team_player_sets.get(axis["value"], set())
         elif axis["axis_type"] == "nationality":
             return nat_player_sets.get(axis["value"], set())
+        elif axis["axis_type"] == "played_with":
+            return pw_player_sets.get(axis["value"], set())
         return set()
+
+    # Build candidate map by type for axis selection
+    candidates_by_type = {
+        "team": team_candidates,
+        "nationality": nationality_candidates,
+        "played_with": played_with_candidates,
+    }
 
     axis_types = list(AXIS_WEIGHTS.keys())
     axis_probs = [AXIS_WEIGHTS[t] for t in axis_types]
@@ -779,31 +912,30 @@ def _select_board_axes(db: Session) -> list[dict]:
     max_attempts = 500
     for _ in range(max_attempts):
         axes = []
-        used_values = set()  # prevent duplicate axes
+        used_values: set[tuple[str, str]] = set()  # (axis_type, value) to prevent duplicates
         for _ in range(6):
             chosen_type = random.choices(axis_types, weights=axis_probs, k=1)[0]
-            if chosen_type == "team":
-                available = [c for c in team_candidates if c["value"] not in used_values]
+            pool = candidates_by_type.get(chosen_type, [])
+            available = [
+                c for c in pool
+                if (c["axis_type"], c["value"]) not in used_values
+            ]
+
+            if not available:
+                # Fallback to team
+                available = [
+                    c for c in team_candidates
+                    if (c["axis_type"], c["value"]) not in used_values
+                ]
                 if not available:
                     break
                 axis = random.choice(available)
-            elif chosen_type == "nationality" and nationality_candidates:
-                available = [c for c in nationality_candidates if c["value"] not in used_values]
-                if not available:
-                    # Fallback to team
-                    available = [c for c in team_candidates if c["value"] not in used_values]
-                    if not available:
-                        break
-                    axis = random.choice(available)
-                else:
-                    axis = _pick_weighted(available)
+            elif chosen_type == "nationality":
+                axis = _pick_weighted(available)
             else:
-                available = [c for c in team_candidates if c["value"] not in used_values]
-                if not available:
-                    break
                 axis = random.choice(available)
 
-            used_values.add(axis["value"])
+            used_values.add((axis["axis_type"], axis["value"]))
             axes.append(axis)
 
         if len(axes) != 6:

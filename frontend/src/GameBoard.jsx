@@ -328,11 +328,11 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
                   padding: 8,
                   fontSize: 12,
                   textAlign: "center",
-                  background: col.axis_type === "nationality" ? "#e8f4e8" : "#e8e8e8",
+                  background: col.axis_type === "nationality" ? "#e8f4e8" : col.axis_type === "played_with" ? "#fff3e0" : "#e8e8e8",
                   border: "2px solid #ccc",
                 }}
               >
-                {col.axis_type === "nationality" ? "🌍 " : ""}
+                {col.axis_type === "nationality" ? "🌍 " : col.axis_type === "played_with" ? "🤝 " : ""}
                 {col.display_label || col.team_name}
               </th>
             ))}
@@ -346,11 +346,11 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
                   padding: 8,
                   fontSize: 12,
                   textAlign: "center",
-                  background: round.rows[ri].axis_type === "nationality" ? "#e8f4e8" : "#e8e8e8",
+                  background: round.rows[ri].axis_type === "nationality" ? "#e8f4e8" : round.rows[ri].axis_type === "played_with" ? "#fff3e0" : "#e8e8e8",
                   border: "2px solid #ccc",
                 }}
               >
-                {round.rows[ri].axis_type === "nationality" ? "🌍 " : ""}
+                {round.rows[ri].axis_type === "nationality" ? "🌍 " : round.rows[ri].axis_type === "played_with" ? "🤝 " : ""}
                 {round.rows[ri].display_label || round.rows[ri].team_name}
               </th>
               {[0, 1, 2].map((ci) => {
