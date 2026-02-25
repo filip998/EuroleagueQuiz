@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_WEBAPP_NAME: your-backend-app          # ← Replace with your App Service name
+  AZURE_WEBAPP_NAME: euroleague-quiz-backend-app          # ← Replace with your App Service name
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "20"
 
