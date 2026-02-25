@@ -594,8 +594,16 @@ def serialize_game_state(
 ) -> dict:
     round_obj = None
     if game.status == "active":
-        round_obj = get_active_round(db, game.id)
-    elif game.round_number > 0:
+        round_obj = (
+            db.query(QuizTicTacToeRound)
+            .filter(
+                QuizTicTacToeRound.game_id == game.id,
+                QuizTicTacToeRound.status == "active",
+            )
+            .order_by(QuizTicTacToeRound.round_number.desc())
+            .first()
+        )
+    if round_obj is None and game.round_number > 0:
         round_obj = (
             db.query(QuizTicTacToeRound)
             .filter(QuizTicTacToeRound.game_id == game.id)

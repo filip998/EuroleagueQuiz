@@ -31,7 +31,7 @@ async def _expire_turn(game_id: int, expected_player: int, expected_round: int):
         if not game:
             return
 
-        # Only act if the turn hasn't already changed
+        # Only act if the turn hasn't already changed (prevents races)
         if (
             game.status != "active"
             or game.current_player != expected_player
@@ -46,12 +46,17 @@ async def _expire_turn(game_id: int, expected_player: int, expected_round: int):
         db.commit()
         db.refresh(game)
 
-        state = serialize_game_state(db, game)
+        try:
+            state = serialize_game_state(db, game)
+        except Exception:
+            logger.exception("Failed to serialize game %s after timer expiry", game_id)
+            return
         state["last_result"] = "time_expired"
         await ws_manager.broadcast(game_id, state)
 
-        # Start timer for the next player's turn
-        _schedule_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
+        # Start timer for the next player's turn (only if game is still active)
+        if game.status == "active":
+            _schedule_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
     except Exception:
         logger.exception("Error in turn timer for game %s", game_id)
         db.rollback()
