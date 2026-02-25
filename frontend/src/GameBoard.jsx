@@ -20,34 +20,62 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
   const isOnline = onlineInfo?.isOnline;
   const myPlayer = onlineInfo?.playerNumber;
 
-  // Connect WebSocket for online games
+  // Connect WebSocket for online games (with auto-reconnect)
   useEffect(() => {
     if (!isOnline || !game?.id) return;
-    const ws = connectWebSocket(game.id, myPlayer, (data) => {
-      if (data.error) {
-        setError(data.error);
-      } else {
-        const result = data.last_result;
-        const completedRound = data.completed_round;
-        // Remove non-game fields before setting game state
-        const gameData = { ...data };
-        delete gameData.last_result;
-        delete gameData.completed_round;
-        setGame(gameData);
-        setError(null);
-        if (result && completedRound && ["round_won", "round_drawn", "match_won"].includes(result)) {
-          startRoundTransition(result, completedRound);
-        } else if (result) {
-          setLastResult(result);
+    let ws = null;
+    let reconnectTimeout = null;
+    let closed = false;
+
+    function connect() {
+      if (closed) return;
+      ws = connectWebSocket(game.id, myPlayer, (data) => {
+        if (data.error) {
+          setError(data.error);
+        } else {
+          const result = data.last_result;
+          const completedRound = data.completed_round;
+          const gameData = { ...data };
+          delete gameData.last_result;
+          delete gameData.completed_round;
+          setGame(gameData);
+          setError(null);
+          if (result && completedRound && ["round_won", "round_drawn", "match_won"].includes(result)) {
+            startRoundTransition(result, completedRound);
+          } else if (result) {
+            setLastResult(result);
+          }
         }
-      }
-    });
-    wsRef.current = ws;
+      }, () => {
+        // onClose: auto-reconnect after 2 seconds
+        if (!closed) {
+          reconnectTimeout = setTimeout(connect, 2000);
+        }
+      });
+      wsRef.current = ws;
+    }
+
+    connect();
+
     return () => {
-      ws.close();
+      closed = true;
+      clearTimeout(reconnectTimeout);
+      if (ws) ws.close();
       wsRef.current = null;
     };
   }, [isOnline, game?.id, myPlayer]);
+
+  // Periodic state sync for online games (catches missed WebSocket messages)
+  useEffect(() => {
+    if (!isOnline || !game?.id || game?.status === "waiting_for_opponent") return;
+    const interval = setInterval(async () => {
+      try {
+        const fresh = await getGame(game.id);
+        setGame(fresh);
+      } catch {}
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [isOnline, game?.id, game?.status]);
 
   // Poll for opponent joining while waiting
   useEffect(() => {
