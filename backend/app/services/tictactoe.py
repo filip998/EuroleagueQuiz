@@ -316,6 +316,7 @@ def create_game(
         pending_draw_from=None,
         pending_draw_to=None,
         winner_player=None,
+        turn_started_at=datetime.utcnow(),
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -352,7 +353,9 @@ def join_game(
 
     game.player2_name = player2_name or game.player2_name
     game.status = "active"
-    game.updated_at = datetime.utcnow()
+    now = datetime.utcnow()
+    game.turn_started_at = now
+    game.updated_at = now
 
     create_next_round(db, game, started_by_player=1)
     db.flush()
@@ -412,8 +415,10 @@ def submit_move(
     )
 
     if not is_correct:
+        now = datetime.utcnow()
         game.current_player = _other_player(acting_player)
-        game.updated_at = datetime.utcnow()
+        game.turn_started_at = now
+        game.updated_at = now
         db.flush()
         return "incorrect"
 
@@ -452,7 +457,9 @@ def submit_move(
         return "round_drawn"
 
     game.current_player = _other_player(acting_player)
-    game.updated_at = datetime.utcnow()
+    now = datetime.utcnow()
+    game.turn_started_at = now
+    game.updated_at = now
     db.flush()
     return "correct"
 
@@ -574,7 +581,9 @@ def create_next_round(
     game.current_player = started_by_player
     game.pending_draw_from = None
     game.pending_draw_to = None
-    game.updated_at = datetime.utcnow()
+    now = datetime.utcnow()
+    game.turn_started_at = now
+    game.updated_at = now
     db.flush()
     return round_obj
 
@@ -599,8 +608,8 @@ def serialize_game_state(
         round_payload = _serialize_round(round_obj, db=db)
 
     turn_deadline = None
-    if game.turn_seconds is not None:
-        turn_deadline = (game.updated_at + timedelta(seconds=game.turn_seconds)).isoformat()
+    if game.turn_seconds is not None and game.turn_started_at is not None:
+        turn_deadline = (game.turn_started_at + timedelta(seconds=game.turn_seconds)).isoformat() + "Z"
 
     return {
         "id": game.id,

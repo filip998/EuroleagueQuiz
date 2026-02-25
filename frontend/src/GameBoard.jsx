@@ -68,26 +68,31 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
   // Reset timer whenever the current player changes
   useEffect(() => {
     if (!game?.turn_seconds || game.status !== "active") return;
-    setTimeLeft(game.turn_seconds);
+    if (isOnline && game.turn_deadline_utc) {
+      // Online: sync to server deadline
+      const deadline = new Date(game.turn_deadline_utc).getTime();
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setTimeLeft(remaining);
+    } else {
+      // Local: flat reset
+      setTimeLeft(game.turn_seconds);
+    }
     setLastResult(null);
-  }, [game?.current_player, game?.round_number, game?.turn_seconds, game?.status]);
+  }, [game?.current_player, game?.round_number, game?.turn_seconds, game?.status, game?.turn_deadline_utc, isOnline]);
 
   // Countdown tick
   useEffect(() => {
     if (!game?.turn_seconds || game.status !== "active" || timeLeft === null) return;
     if (timeLeft <= 0) {
-      // Notify backend to switch turn (only the current player sends this)
-      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) {
-        if (game.current_player === myPlayer) {
-          wsRef.current.send(JSON.stringify({ action: "time_expired" }));
-        }
-      } else {
+      if (!isOnline) {
+        // Local only: switch turn client-side
         setGame((prev) => ({
           ...prev,
           current_player: prev.current_player === 1 ? 2 : 1,
         }));
+        setLastResult("⏰ Time's up! Turn switches.");
       }
-      setLastResult("⏰ Time's up! Turn switches.");
+      // Online: server handles expiry via timer_manager, nothing to send
       setSelectedCell(null);
       return;
     }

@@ -26,6 +26,7 @@ from app.services.tictactoe import (
     serialize_game_state,
     submit_move,
 )
+from app.services.timer_manager import start_turn_timer, cancel_timer
 
 router = APIRouter()
 
@@ -357,6 +358,8 @@ async def join_tictactoe_game(
         db.refresh(game)
         state = serialize_game_state(db, game)
         await ws_manager.broadcast(game.id, state)
+        # Start server-side turn timer for the online game
+        start_turn_timer(game.id, game.turn_seconds, game.current_player, game.round_number)
         return {"game_id": game.id, "game": state}
     except TicTacToeError as exc:
         db.rollback()
@@ -429,6 +432,14 @@ async def tictactoe_websocket(websocket: WebSocket, game_id: int, player: int = 
                         completed = serialize_completed_round(db, game_id, prev_round_number)
                         if completed:
                             state["completed_round"] = completed
+                        if result == "match_won":
+                            cancel_timer(game_id)
+                        else:
+                            # New round started — timer for next turn
+                            start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
+                    else:
+                        # Turn switched (correct or incorrect) — timer for next turn
+                        start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
                     await ws_manager.broadcast(game_id, state)
                     continue
                 elif action == "offer_draw":
@@ -442,16 +453,14 @@ async def tictactoe_websocket(websocket: WebSocket, game_id: int, player: int = 
                     )
                     db.commit()
                     db.refresh(game)
+                    if game.status == "finished":
+                        cancel_timer(game_id)
+                    elif game.status == "active":
+                        # Draw declined or new round after draw — restart timer
+                        start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
                 elif action == "time_expired":
-                    if game.status == "active" and game.current_player == player:
-                        game.current_player = _other_player(player)
-                        from datetime import datetime
-                        game.updated_at = datetime.utcnow()
-                        db.commit()
-                        db.refresh(game)
-                    state = serialize_game_state(db, game)
-                    state["last_result"] = "time_expired"
-                    await ws_manager.broadcast(game_id, state)
+                    # Client-sent time_expired is ignored for online games;
+                    # the server timer handles expiry authoritatively.
                     continue
                 else:
                     await websocket.send_json({"error": f"Unknown action: {action}"})
