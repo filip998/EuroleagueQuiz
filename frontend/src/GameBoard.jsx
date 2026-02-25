@@ -65,34 +65,50 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
 
   const round = game?.round;
 
-  // Reset timer whenever the current player changes
+  // Sync timer to server deadline for online games.
+  // Recomputes from turn_deadline_utc on every tick to stay accurate
+  // even if the browser was suspended (phone app-switch, screen off).
   useEffect(() => {
-    if (!game?.turn_seconds || game.status !== "active") return;
+    if (!game?.turn_seconds || game.status !== "active") {
+      setTimeLeft(null);
+      return;
+    }
+
     if (isOnline && game.turn_deadline_utc) {
-      // Online: sync to server deadline
-      const deadline = new Date(game.turn_deadline_utc).getTime();
-      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-      setTimeLeft(remaining);
+      // Online: always compute from server deadline
+      const computeRemaining = () => {
+        const deadline = new Date(game.turn_deadline_utc).getTime();
+        return Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      };
+
+      setTimeLeft(computeRemaining());
+
+      const timer = setInterval(() => {
+        const remaining = computeRemaining();
+        setTimeLeft(remaining);
+        if (remaining <= 0) {
+          setSelectedCell(null);
+        }
+      }, 1000);
+
+      return () => clearInterval(timer);
     } else {
-      // Local: flat reset
+      // Local: client-side countdown
       setTimeLeft(game.turn_seconds);
     }
     setLastResult(null);
-  }, [game?.current_player, game?.round_number, game?.turn_seconds, game?.status, game?.turn_deadline_utc, isOnline]);
+  }, [game?.turn_deadline_utc, game?.current_player, game?.round_number, game?.turn_seconds, game?.status, isOnline]);
 
-  // Countdown tick
+  // Local-only countdown tick (online is handled above via setInterval)
   useEffect(() => {
+    if (isOnline) return;
     if (!game?.turn_seconds || game.status !== "active" || timeLeft === null) return;
     if (timeLeft <= 0) {
-      if (!isOnline) {
-        // Local only: switch turn client-side
-        setGame((prev) => ({
-          ...prev,
-          current_player: prev.current_player === 1 ? 2 : 1,
-        }));
-        setLastResult("⏰ Time's up! Turn switches.");
-      }
-      // Online: server handles expiry via timer_manager, nothing to send
+      setGame((prev) => ({
+        ...prev,
+        current_player: prev.current_player === 1 ? 2 : 1,
+      }));
+      setLastResult("⏰ Time's up! Turn switches.");
       setSelectedCell(null);
       return;
     }
