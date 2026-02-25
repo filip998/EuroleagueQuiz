@@ -25,6 +25,11 @@ def main():
         default="all",
     )
     parser.add_argument(
+        "--skip-boxscores",
+        action="store_true",
+        help="Skip boxscore fetching and aggregation (for seasons without game data)",
+    )
+    parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
@@ -57,9 +62,9 @@ def main():
                 fetch_season_data(session, year, rate_limiter)
             if args.step in ("all", "rosters"):
                 fetch_rosters(session, year, rate_limiter)
-            if args.step in ("all", "boxscores"):
+            if args.step in ("all", "boxscores") and not args.skip_boxscores:
                 fetch_boxscores(session, year, rate_limiter)
-            if args.step in ("all", "aggregate"):
+            if args.step in ("all", "aggregate") and not args.skip_boxscores:
                 aggregate_season_stats(session, year)
             session.commit()
             logger.info(f"Season {year} committed successfully")
