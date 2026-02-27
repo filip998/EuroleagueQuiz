@@ -49,6 +49,18 @@ python -m ingestion.ingest --start-season 2000 --end-season 2025  # full ingesti
 python -m ingestion.ingest --step rosters --start-season 2024 --end-season 2024  # single step/season
 ```
 
+### Deploy to Production
+After making changes, commit and push to `main` to trigger automatic deployment via GitHub Actions:
+```bash
+git add -A
+git commit -m "description of changes"
+git push origin main
+```
+This runs `.github/workflows/deploy.yml` which:
+- Deploys the **backend** to Azure App Service (`euroleague-quiz-backend-app`)
+- Builds the **frontend** with `npm ci && npm run build` and deploys to Azure Static Web Apps
+Always run `npm run build` in `frontend/` locally before pushing to catch build errors early.
+
 ### Create Migration
 ```bash
 cd backend

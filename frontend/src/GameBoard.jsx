@@ -2,10 +2,28 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getGame, submitMove, offerDraw, respondDraw, connectWebSocket } from "./api";
 import PlayerSearch from "./PlayerSearch";
 
-const CELL_COLORS = {
-  1: "#4a90d9",
-  2: "#e74c3c",
-};
+function AxisLabel({ axis }) {
+  const prefix =
+    axis.axis_type === "nationality"
+      ? "\ud83c\udf0d "
+      : axis.axis_type === "played_with"
+        ? "\ud83e\udd1d "
+        : "";
+  const bgColor =
+    axis.axis_type === "nationality"
+      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+      : axis.axis_type === "played_with"
+        ? "bg-amber-50 text-amber-800 border-amber-200"
+        : "bg-slate-50 text-slate-700 border-slate-200";
+  return (
+    <div
+      className={`px-2 py-3 text-[11px] sm:text-xs font-semibold text-center rounded-lg border ${bgColor} leading-tight flex items-center justify-center`}
+    >
+      {prefix}
+      {axis.display_label || axis.team_name}
+    </div>
+  );
+}
 
 export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
   const [game, setGame] = useState(initialState?.game || initialState);
@@ -47,7 +65,6 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
           }
         }
       }, () => {
-        // onClose: auto-reconnect after 2 seconds
         if (!closed) {
           reconnectTimeout = setTimeout(connect, 2000);
         }
@@ -65,7 +82,7 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
     };
   }, [isOnline, game?.id, myPlayer]);
 
-  // Periodic state sync for online games (catches missed WebSocket messages)
+  // Periodic state sync for online games
   useEffect(() => {
     if (!isOnline || !game?.id || game?.status === "waiting_for_opponent") return;
     const interval = setInterval(async () => {
@@ -93,9 +110,7 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
 
   const round = game?.round;
 
-  // Sync timer to server deadline for online games.
-  // Recomputes from turn_deadline_utc on every tick to stay accurate
-  // even if the browser was suspended (phone app-switch, screen off).
+  // Sync timer
   useEffect(() => {
     if (!game?.turn_seconds || game.status !== "active") {
       setTimeLeft(null);
@@ -103,7 +118,6 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
     }
 
     if (isOnline && game.turn_deadline_utc) {
-      // Online: always compute from server deadline
       const computeRemaining = () => {
         const deadline = new Date(game.turn_deadline_utc).getTime();
         return Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
@@ -121,13 +135,12 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
 
       return () => clearInterval(timer);
     } else {
-      // Local: client-side countdown
       setTimeLeft(game.turn_seconds);
     }
     setLastResult(null);
   }, [game?.turn_deadline_utc, game?.current_player, game?.round_number, game?.turn_seconds, game?.status, isOnline]);
 
-  // Local-only countdown tick (online is handled above via setInterval)
+  // Local-only countdown tick
   useEffect(() => {
     if (isOnline) return;
     if (!game?.turn_seconds || game.status !== "active" || timeLeft === null) return;
@@ -136,7 +149,7 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
         ...prev,
         current_player: prev.current_player === 1 ? 2 : 1,
       }));
-      setLastResult("⏰ Time's up! Turn switches.");
+      setLastResult("time_expired");
       setSelectedCell(null);
       return;
     }
@@ -159,7 +172,6 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
     return () => clearTimeout(timer);
   }, [roundTransition]);
 
-  // Helper to trigger round transition
   function startRoundTransition(result, completedRound) {
     if (completedRound) {
       setRoundTransition({ countdown: 3, completedRound, result });
@@ -182,7 +194,6 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
     if (game.status !== "active") return;
     if (cell.claimed_by_player) return;
     if (game.pending_draw) return;
-    // In online mode, only allow clicks on your turn
     if (isOnline && game.current_player !== myPlayer) return;
     setSelectedCell(cell);
     setError(null);
@@ -262,41 +273,50 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
     }
   }
 
-  // Waiting for opponent screen (online host)
+  // Waiting for opponent screen
   if (game?.status === "waiting_for_opponent") {
     return (
-      <div style={{ maxWidth: 400, margin: "60px auto", textAlign: "center" }}>
-        <h2>Waiting for Opponent</h2>
-        <p>Share this code with your friend:</p>
-        <div
-          style={{
-            fontSize: 48,
-            fontFamily: "monospace",
-            letterSpacing: 8,
-            padding: "20px 0",
-            background: "#f0f0f0",
-            borderRadius: 8,
-            margin: "20px 0",
-            userSelect: "all",
-          }}
-        >
-          {game.join_code}
+      <div className="min-h-screen flex flex-col">
+        <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="text-center animate-fade-in-up">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-elq-orange/10 mb-6 animate-pulse-ring">
+              <svg className="w-8 h-8 text-elq-orange animate-spin-slow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+            </div>
+            <h2 className="font-display text-4xl text-elq-dark mb-3">WAITING FOR OPPONENT</h2>
+            <p className="text-elq-muted mb-6">Share this code with your friend</p>
+            <div className="inline-block bg-elq-bg border-2 border-dashed border-elq-orange/30 rounded-2xl px-10 py-6 mb-6 select-all">
+              <span className="font-mono text-5xl tracking-[0.3em] text-elq-dark font-bold">
+                {game.join_code}
+              </span>
+            </div>
+            <p className="text-sm text-elq-muted mb-8">
+              The game will start automatically when they join.
+            </p>
+            <button
+              onClick={onNewGame}
+              className="text-sm text-elq-muted hover:text-elq-orange transition-colors underline underline-offset-2"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
-        <p style={{ color: "#666" }}>
-          The game will start automatically when they join.
-        </p>
-        <button onClick={onNewGame} style={{ marginTop: 20 }}>
-          Cancel
-        </button>
       </div>
     );
   }
 
   if (!game || !round) {
-    return <p>Loading game...</p>;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <svg className="w-8 h-8 text-elq-orange animate-spin-slow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+        </svg>
+      </div>
+    );
   }
 
-  // During round transition, show the completed round instead of the new one
   const displayRound = roundTransition?.completedRound || round;
   const inTransition = !!roundTransition;
 
@@ -305,267 +325,301 @@ export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
   const isMyTurn = !isOnline || game.current_player === myPlayer;
 
   const resultMessages = {
-    correct: "✅ Correct! Turn switches.",
-    incorrect: "❌ Incorrect. Turn switches.",
-    round_won: "🏆 Round won!",
-    round_drawn: "🤝 Round drawn — new board!",
-    match_won: "🎉 Match won!",
-    draw_offered: "🤝 Draw offered.",
-    draw_accepted: "🤝 Draw accepted — new board!",
-    draw_declined: "Draw declined — game continues.",
-    time_expired: "⏰ Time's up! Turn switches.",
+    correct: "\u2705 Correct! Turn switches.",
+    incorrect: "\u274c Incorrect. Turn switches.",
+    round_won: "\ud83c\udfc6 Round won!",
+    round_drawn: "\ud83e\udd1d Round drawn \u2014 new board!",
+    match_won: "\ud83c\udf89 Match won!",
+    draw_offered: "\ud83e\udd1d Draw offered.",
+    draw_accepted: "\ud83e\udd1d Draw accepted \u2014 new board!",
+    draw_declined: "Draw declined \u2014 game continues.",
+    time_expired: "\u23f0 Time\u2019s up! Turn switches.",
   };
 
   return (
-    <div style={{ maxWidth: 600, margin: "20px auto", textAlign: "center" }}>
-      {/* Online indicator */}
-      {isOnline && (
-        <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
-          🌐 Online — You are {game.current_player === myPlayer
-            ? game[`player${myPlayer}_name`]
-            : game[`player${myPlayer}_name`]} (Player {myPlayer})
-          {!isMyTurn && " — Waiting for opponent..."}
-        </div>
-      )}
+    <div className="min-h-screen flex flex-col">
+      {/* Orange accent bar */}
+      <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
 
-      {/* Scoreboard */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-          padding: "12px 20px",
-          background: "#f5f5f5",
-          borderRadius: 8,
-        }}
-      >
-        <div>
-          <strong style={{ color: CELL_COLORS[1] }}>{game.player1_name}</strong>
-          <div style={{ fontSize: 28, fontWeight: "bold" }}>
-            {game.player1_score}
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 12, color: "#999" }}>
-            Round {game.round_number} · First to {game.target_wins}
-          </div>
-          <div style={{ fontSize: 14, marginTop: 4 }}>
-            {game.status === "finished"
-              ? `🎉 ${game.winner_player === 1 ? game.player1_name : game.player2_name} wins!`
-              : `🎯 ${currentPlayerName}'s turn`}
-          </div>
-          {game.turn_seconds && game.status === "active" && timeLeft !== null && (
-            <div
-              style={{
-                fontSize: 22,
-                fontWeight: "bold",
-                marginTop: 4,
-                color: timeLeft <= 5 ? "#e74c3c" : "#333",
-              }}
-            >
-              ⏱ {timeLeft}s
-            </div>
-          )}
-        </div>
-        <div>
-          <strong style={{ color: CELL_COLORS[2] }}>{game.player2_name}</strong>
-          <div style={{ fontSize: 28, fontWeight: "bold" }}>
-            {game.player2_score}
-          </div>
+      {/* Header bar */}
+      <div className="bg-white border-b border-elq-border">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+          <button
+            onClick={onNewGame}
+            className="text-sm text-elq-muted hover:text-elq-text transition-colors flex items-center gap-1.5"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+            </svg>
+            New Game
+          </button>
+          <span className="font-display text-lg tracking-wide text-elq-dark">
+            EUROLEAGUE QUIZ
+          </span>
+          <span className="text-xs text-elq-muted">
+            Round {game.round_number} &middot; First to {game.target_wins}
+          </span>
         </div>
       </div>
 
-      {/* Result banner */}
-      {lastResult && (
-        <div
-          style={{
-            padding: 8,
-            marginBottom: 12,
-            background: "#ffffcc",
-            borderRadius: 4,
-          }}
-        >
-          {resultMessages[lastResult] || lastResult}
-          {inTransition && (
-            <span style={{ marginLeft: 8, fontWeight: "bold" }}>
-              Next round in {roundTransition.countdown}...
-            </span>
-          )}
+      {/* Online indicator */}
+      {isOnline && (
+        <div className="bg-elq-bg text-center py-1.5 text-xs text-elq-muted border-b border-elq-border">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Online &mdash; You are <strong>{game[`player${myPlayer}_name`]}</strong> (Player {myPlayer})
+            {!isMyTurn && <span className="text-elq-orange ml-1">Waiting for opponent...</span>}
+          </span>
         </div>
       )}
 
-      {error && (
-        <div
-          style={{
-            padding: 8,
-            marginBottom: 12,
-            background: "#ffcccc",
-            borderRadius: 4,
-          }}
-        >
-          {error}
-        </div>
-      )}
+      {/* Main content */}
+      <div className="flex-1 flex flex-col items-center px-4 py-4 sm:py-6 max-w-2xl mx-auto w-full">
+        {/* Scoreboard */}
+        <div className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-4 sm:p-5 mb-4 animate-fade-in-up">
+          <div className="flex items-center justify-between">
+            {/* Player 1 */}
+            <div className="text-center flex-1">
+              <div className={`text-sm font-semibold transition-colors ${game.current_player === 1 && game.status === "active" ? "text-elq-player1" : "text-elq-muted"}`}>
+                {game.player1_name}
+              </div>
+              <div className="text-3xl sm:text-4xl font-bold text-elq-dark mt-1">
+                {game.player1_score}
+              </div>
+              {game.current_player === 1 && game.status === "active" && (
+                <div className="w-2 h-2 rounded-full bg-elq-player1 mx-auto mt-2 animate-pulse" />
+              )}
+            </div>
 
-      {/* Board */}
-      <table
-        style={{
-          borderCollapse: "collapse",
-          margin: "0 auto",
-          tableLayout: "fixed",
-        }}
-      >
-        <thead>
-          <tr>
-            <th style={{ width: 100 }}></th>
+            {/* Center: timer + status */}
+            <div className="text-center px-4 flex-shrink-0">
+              {game.turn_seconds && game.status === "active" && timeLeft !== null && (
+                <div
+                  className={`text-3xl sm:text-4xl font-bold font-mono tabular-nums ${
+                    timeLeft <= 5 ? "animate-timer-critical" : "text-elq-dark"
+                  }`}
+                >
+                  {timeLeft}
+                  <span className="text-sm text-elq-muted font-normal ml-0.5">s</span>
+                </div>
+              )}
+              <div className="text-xs text-elq-muted mt-1">
+                {game.status === "finished"
+                  ? `\ud83c\udf89 ${game.winner_player === 1 ? game.player1_name : game.player2_name} wins!`
+                  : `${currentPlayerName}'s turn`}
+              </div>
+            </div>
+
+            {/* Player 2 */}
+            <div className="text-center flex-1">
+              <div className={`text-sm font-semibold transition-colors ${game.current_player === 2 && game.status === "active" ? "text-elq-player2" : "text-elq-muted"}`}>
+                {game.player2_name}
+              </div>
+              <div className="text-3xl sm:text-4xl font-bold text-elq-dark mt-1">
+                {game.player2_score}
+              </div>
+              {game.current_player === 2 && game.status === "active" && (
+                <div className="w-2 h-2 rounded-full bg-elq-player2 mx-auto mt-2 animate-pulse" />
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Result banner */}
+        {lastResult && (
+          <div className="w-full mb-4 animate-slide-down">
+            <div
+              className={`p-3 rounded-xl text-center text-sm font-medium ${
+                ["round_won", "match_won"].includes(lastResult)
+                  ? "bg-elq-orange/10 text-elq-orange border border-elq-orange/20"
+                  : lastResult === "correct"
+                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                    : lastResult === "incorrect" || lastResult === "time_expired"
+                      ? "bg-red-50 text-red-700 border border-red-200"
+                      : "bg-amber-50 text-amber-700 border border-amber-200"
+              }`}
+            >
+              {resultMessages[lastResult] || lastResult}
+              {inTransition && (
+                <span className="ml-2 font-bold">
+                  Next round in {roundTransition.countdown}...
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="w-full mb-4 animate-slide-down">
+            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm text-center">
+              {error}
+            </div>
+          </div>
+        )}
+
+        {/* Board */}
+        <div className="w-full animate-fade-in-up" style={{ animationDelay: "100ms" }}>
+          {/* Column headers */}
+          <div
+            className="grid gap-1.5 mb-1.5"
+            style={{ gridTemplateColumns: "minmax(72px, 96px) repeat(3, 1fr)" }}
+          >
+            <div />
             {displayRound.columns.map((col, ci) => (
-              <th
-                key={ci}
-                style={{
-                  width: 120,
-                  padding: 8,
-                  fontSize: 12,
-                  textAlign: "center",
-                  background: col.axis_type === "nationality" ? "#e8f4e8" : col.axis_type === "played_with" ? "#fff3e0" : "#e8e8e8",
-                  border: "2px solid #ccc",
-                }}
-              >
-                {col.axis_type === "nationality" ? "🌍 " : col.axis_type === "played_with" ? "🤝 " : ""}
-                {col.display_label || col.team_name}
-              </th>
+              <AxisLabel key={ci} axis={col} />
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </div>
+
+          {/* Rows */}
           {[0, 1, 2].map((ri) => (
-            <tr key={ri}>
-              <th
-                style={{
-                  padding: 8,
-                  fontSize: 12,
-                  textAlign: "center",
-                  background: displayRound.rows[ri].axis_type === "nationality" ? "#e8f4e8" : displayRound.rows[ri].axis_type === "played_with" ? "#fff3e0" : "#e8e8e8",
-                  border: "2px solid #ccc",
-                }}
-              >
-                {displayRound.rows[ri].axis_type === "nationality" ? "🌍 " : displayRound.rows[ri].axis_type === "played_with" ? "🤝 " : ""}
-                {displayRound.rows[ri].display_label || displayRound.rows[ri].team_name}
-              </th>
+            <div
+              key={ri}
+              className="grid gap-1.5 mb-1.5"
+              style={{ gridTemplateColumns: "minmax(72px, 96px) repeat(3, 1fr)" }}
+            >
+              <AxisLabel axis={displayRound.rows[ri]} />
               {[0, 1, 2].map((ci) => {
                 const cell = displayRound.cells.find(
                   (c) => c.row_index === ri && c.col_index === ci
                 );
                 const claimed = cell?.claimed_by_player;
                 const isClickable =
-                  !claimed && !inTransition && game.status === "active" && !game.pending_draw && isMyTurn;
-                const showSamples = inTransition && !claimed && cell?.sample_answers?.length > 0;
-                const showClaimedSamples = inTransition && claimed && cell?.sample_answers?.length > 0;
+                  !claimed &&
+                  !inTransition &&
+                  game.status === "active" &&
+                  !game.pending_draw &&
+                  isMyTurn;
+                const showSamples =
+                  inTransition && !claimed && cell?.sample_answers?.length > 0;
+                const showClaimedSamples =
+                  inTransition && claimed && cell?.sample_answers?.length > 0;
+
+                let cellBg = "border-elq-border bg-white";
+                if (claimed === 1) cellBg = "border-elq-player1/30 bg-elq-player1-bg";
+                else if (claimed === 2) cellBg = "border-elq-player2/30 bg-elq-player2-bg";
+                else if (isClickable) cellBg = "border-elq-border bg-white hover:border-elq-orange/40 hover:shadow-md hover:scale-[1.02] cursor-pointer active:scale-95";
+                else if (showSamples) cellBg = "border-elq-border bg-sky-50/50";
+
                 return (
-                  <td
+                  <button
                     key={ci}
+                    type="button"
                     onClick={() => isClickable && handleCellClick(cell)}
-                    style={{
-                      width: 120,
-                      height: 80,
-                      border: "2px solid #ccc",
-                      textAlign: "center",
-                      verticalAlign: "middle",
-                      cursor: isClickable ? "pointer" : "default",
-                      background: claimed
-                        ? CELL_COLORS[claimed] + "33"
-                        : showSamples
-                          ? "#f0f8ff"
-                          : isClickable
-                            ? "#fafafa"
-                            : "#f5f5f5",
-                      fontSize: 12,
-                      fontWeight: claimed ? "bold" : "normal",
-                      color: claimed ? CELL_COLORS[claimed] : "#999",
-                      padding: (showSamples || showClaimedSamples) ? 4 : 0,
-                    }}
+                    disabled={!isClickable}
+                    className={`relative aspect-square rounded-xl border-2 flex items-center justify-center transition-all duration-200 text-center p-1.5 ${cellBg}`}
                   >
-                    {claimed
-                      ? (
-                        <div>
-                          <div>{cell.claimed_player_name || `P${claimed}`}</div>
-                          {showClaimedSamples && (
-                            <div style={{ fontSize: 9, fontStyle: "italic", color: "#999", lineHeight: 1.3, marginTop: 2 }}>
-                              {cell.sample_answers.map((name, i) => (
-                                <div key={i}>{name}</div>
-                              ))}
-                            </div>
-                          )}
+                    {claimed ? (
+                      <div className="animate-cell-claim">
+                        <div
+                          className={`text-xs sm:text-sm font-bold ${
+                            claimed === 1 ? "text-elq-player1" : "text-elq-player2"
+                          }`}
+                        >
+                          {cell.claimed_player_name || `P${claimed}`}
                         </div>
-                      )
-                      : showSamples
-                        ? (
-                          <div style={{ fontSize: 10, fontStyle: "italic", color: "#666", lineHeight: 1.4 }}>
+                        {showClaimedSamples && (
+                          <div className="mt-1 space-y-0.5">
                             {cell.sample_answers.map((name, i) => (
-                              <div key={i}>{name}</div>
+                              <div
+                                key={i}
+                                className="text-[9px] text-elq-muted italic leading-tight"
+                              >
+                                {name}
+                              </div>
                             ))}
                           </div>
-                        )
-                        : ""}
-                  </td>
+                        )}
+                      </div>
+                    ) : showSamples ? (
+                      <div className="space-y-0.5">
+                        {cell.sample_answers.map((name, i) => (
+                          <div
+                            key={i}
+                            className="text-[10px] text-elq-muted/70 italic leading-tight"
+                          >
+                            {name}
+                          </div>
+                        ))}
+                      </div>
+                    ) : isClickable ? (
+                      <div className="text-elq-muted/30 text-xl">+</div>
+                    ) : null}
+                  </button>
                 );
               })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {/* Draw controls */}
-      {game.status === "active" && !inTransition && (
-        <div style={{ marginTop: 16 }}>
-          {game.pending_draw ? (
-            <div>
-              <p>
-                {game.pending_draw.offered_by === 1
-                  ? game.player1_name
-                  : game.player2_name}{" "}
-                offers a draw.{" "}
-                {game.pending_draw.respond_to === 1
-                  ? game.player1_name
-                  : game.player2_name}
-                , do you accept?
-              </p>
-              {(!isOnline || myPlayer === game.pending_draw.respond_to) && (
-                <>
-                  <button
-                    onClick={() => handleRespondDraw(true)}
-                    disabled={loading}
-                    style={{ marginRight: 8 }}
-                  >
-                    Accept Draw
-                  </button>
-                  <button
-                    onClick={() => handleRespondDraw(false)}
-                    disabled={loading}
-                  >
-                    Decline
-                  </button>
-                </>
-              )}
             </div>
-          ) : (
-            isMyTurn && (
-              <button onClick={handleOfferDraw} disabled={loading}>
-                Offer Draw
-              </button>
-            )
-          )}
+          ))}
         </div>
-      )}
 
-      {/* New game button */}
-      {game.status === "finished" && !inTransition && (
-        <div style={{ marginTop: 20 }}>
-          <button onClick={onNewGame} style={{ fontSize: 16, padding: "8px 24px" }}>
-            New Game
-          </button>
-        </div>
-      )}
+        {/* Draw controls */}
+        {game.status === "active" && !inTransition && (
+          <div className="mt-6 text-center">
+            {game.pending_draw ? (
+              <div className="bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
+                <p className="text-sm text-elq-text mb-3">
+                  <strong>
+                    {game.pending_draw.offered_by === 1
+                      ? game.player1_name
+                      : game.player2_name}
+                  </strong>{" "}
+                  offers a draw.{" "}
+                  <strong>
+                    {game.pending_draw.respond_to === 1
+                      ? game.player1_name
+                      : game.player2_name}
+                  </strong>
+                  , do you accept?
+                </p>
+                {(!isOnline || myPlayer === game.pending_draw.respond_to) && (
+                  <div className="flex gap-3 justify-center">
+                    <button
+                      onClick={() => handleRespondDraw(true)}
+                      disabled={loading}
+                      className="px-5 py-2 bg-elq-success text-white font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      onClick={() => handleRespondDraw(false)}
+                      disabled={loading}
+                      className="px-5 py-2 bg-white border border-elq-border text-elq-text font-medium rounded-lg hover:bg-elq-bg transition-colors disabled:opacity-50"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              isMyTurn && (
+                <button
+                  onClick={handleOfferDraw}
+                  disabled={loading}
+                  className="text-sm text-elq-muted hover:text-elq-text transition-colors underline underline-offset-2"
+                >
+                  Offer Draw
+                </button>
+              )
+            )}
+          </div>
+        )}
+
+        {/* Match finished */}
+        {game.status === "finished" && !inTransition && (
+          <div className="mt-8 text-center animate-fade-in-up">
+            <div className="text-4xl mb-2">{"\ud83c\udfc6"}</div>
+            <h2 className="font-display text-3xl text-elq-dark mb-4">
+              {game.winner_player === 1 ? game.player1_name : game.player2_name} WINS!
+            </h2>
+            <button
+              onClick={onNewGame}
+              className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all text-lg"
+            >
+              New Game
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Player search modal */}
       {selectedCell && !inTransition && (
