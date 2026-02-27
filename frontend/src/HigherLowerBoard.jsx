@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { submitHigherLowerAnswer } from "./api";
+import { LogoMini } from "./Logo";
 
 // Country code mapping for flag emojis
 const COUNTRY_FLAGS = {
@@ -158,15 +159,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
       {/* Header */}
       <div className="bg-white border-b border-elq-border">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
-          <button
-            onClick={onHome || onNewGame}
-            className="text-sm text-elq-muted hover:text-elq-text transition-colors flex items-center gap-1.5"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-            </svg>
-            Home
-          </button>
+          <LogoMini onClick={onHome || onNewGame} />
           <span className="font-display text-lg tracking-wide text-elq-dark">
             HIGHER OR LOWER
           </span>

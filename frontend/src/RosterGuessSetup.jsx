@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createRosterGame, joinRosterGame } from "./api";
+import { LogoMini } from "./Logo";
 
 const MODES = [
   {
@@ -137,15 +138,10 @@ export default function RosterGuessSetup({ onGameCreated, onBack }) {
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
       <div className="flex-1 flex items-center justify-center p-4 py-8">
         <div className="w-full max-w-lg">
-          {/* Back */}
+          {/* Logo */}
           {onBack && (
             <div className="mb-4 animate-fade-in-up">
-              <button onClick={onBack} className="text-sm text-elq-muted hover:text-elq-text transition-colors flex items-center gap-1.5">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-                </svg>
-                All Games
-              </button>
+              <LogoMini onClick={onBack} />
             </div>
           )}
           {/* Header */}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getGame, submitMove, offerDraw, respondDraw, connectWebSocket } from "./api";
 import PlayerSearch from "./PlayerSearch";
+import { LogoMini } from "./Logo";
 
 function AxisLabel({ axis }) {
   const prefix =
@@ -357,9 +358,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
             </svg>
             New Game
           </button>
-          <span className="font-display text-lg tracking-wide text-elq-dark">
-            EUROLEAGUE QUIZ
-          </span>
+          <LogoMini onClick={onHome} />
           <span className="text-xs text-elq-muted">
             {isSolo ? "" : `Round ${game.round_number} \u00b7 First to ${game.target_wins}`}
           </span>

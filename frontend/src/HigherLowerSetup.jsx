@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { createHigherLowerGame, getHigherLowerLeaderboard } from "./api";
+import { LogoMini } from "./Logo";
 
 const SEASONS = Array.from({ length: 19 }, (_, i) => 2007 + i);
 
@@ -82,15 +83,9 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
         <div className="w-full max-w-lg">
           {/* Header */}
           <div className="text-center mb-8 animate-fade-in-up">
-            <button
-              onClick={onBack}
-              className="text-sm text-elq-muted hover:text-elq-text transition-colors mb-4 inline-flex items-center gap-1"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-              </svg>
-              Back
-            </button>
+            <div className="flex justify-start mb-4">
+              <LogoMini onClick={onBack} />
+            </div>
             <div className="flex items-center justify-center gap-3 mb-2">
               <span className="text-3xl">⬆️</span>
               <h1 className="font-display text-4xl sm:text-5xl tracking-wide text-elq-dark">HIGHER OR LOWER</h1>
