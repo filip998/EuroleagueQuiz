@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import Column, DateTime, Float, Integer, String
 
 from app.database import Base
 
@@ -19,8 +19,8 @@ class HigherLowerGame(Base):
     left_player_id = Column(Integer, nullable=True)
     right_player_id = Column(Integer, nullable=True)
     category = Column(String, nullable=True)
-    left_value = Column(Integer, nullable=True)
-    right_value = Column(Integer, nullable=True)
+    left_value = Column(Float, nullable=True)
+    right_value = Column(Float, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 

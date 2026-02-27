@@ -29,7 +29,10 @@ TIER_CATEGORIES: dict[str, list[dict]] = {
         {"key": "total_assists", "label": "Total Assists"},
         {"key": "total_rebounds", "label": "Total Rebounds"},
         {"key": "total_games", "label": "Total Games Played"},
-        {"key": "best_season_pir", "label": "Best Single-Season PIR"},
+        {"key": "best_season_pir", "label": "Best Season Avg PIR"},
+        {"key": "best_season_ppg", "label": "Best Season PPG"},
+        {"key": "best_season_apg", "label": "Best Season APG"},
+        {"key": "best_season_rpg", "label": "Best Season RPG"},
     ],
     "hard": [
         {"key": "total_three_pointers", "label": "Career 3-Pointers Made"},
@@ -85,7 +88,7 @@ def _compute_stat(
     category: str,
     season_start: int,
     season_end: int,
-) -> int:
+) -> float:
     """Compute a stat value for a player filtered to the season range."""
     season_ids = (
         db.query(Season.id)
@@ -137,13 +140,12 @@ def _compute_stat(
         )
         return r or 0
 
-    # Season-aggregate stats
+    # Season-aggregate stats (career totals)
     agg_map = {
         "total_points": func.sum(PlayerSeasonStats.points),
         "total_assists": func.sum(PlayerSeasonStats.assists),
         "total_rebounds": func.sum(PlayerSeasonStats.total_rebounds),
         "total_games": func.sum(PlayerSeasonStats.games_played),
-        "best_season_pir": func.max(PlayerSeasonStats.pir),
         "total_three_pointers": func.sum(PlayerSeasonStats.three_points_made),
         "total_steals": func.sum(PlayerSeasonStats.steals),
         "total_blocks": func.sum(PlayerSeasonStats.blocks_favor),
@@ -158,6 +160,30 @@ def _compute_stat(
             .scalar()
         )
         return r or 0
+
+    # Per-game average stats (best single season)
+    avg_map = {
+        "best_season_pir": (PlayerSeasonStats.pir, PlayerSeasonStats.games_played),
+        "best_season_ppg": (PlayerSeasonStats.points, PlayerSeasonStats.games_played),
+        "best_season_apg": (PlayerSeasonStats.assists, PlayerSeasonStats.games_played),
+        "best_season_rpg": (PlayerSeasonStats.total_rebounds, PlayerSeasonStats.games_played),
+    }
+    if category in avg_map:
+        stat_col, gp_col = avg_map[category]
+        rows = (
+            db.query(stat_col, gp_col)
+            .join(PlayerSeasonTeam, PlayerSeasonStats.player_season_team_id == PlayerSeasonTeam.id)
+            .filter(PlayerSeasonTeam.player_id == player_id)
+            .filter(PlayerSeasonTeam.season_id.in_(db.query(season_ids)))
+            .filter(PlayerSeasonStats.games_played >= 5)
+            .all()
+        )
+        if not rows:
+            return 0.0
+        best = max(
+            (stat / gp if gp > 0 else 0.0) for stat, gp in rows
+        )
+        return round(best, 1)
 
     # Game-level stats
     if category == "career_high_points":

@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 class HigherLowerCreateRequest(BaseModel):
     tier: Literal["easy", "medium", "hard"] = "easy"
-    season_range_start: int = Field(ge=2003, le=2025)
-    season_range_end: int = Field(ge=2003, le=2025)
+    season_range_start: int = Field(ge=2007, le=2025)
+    season_range_end: int = Field(ge=2007, le=2025)
     nickname: str = Field(min_length=1, max_length=30)
 
 
@@ -34,8 +34,8 @@ class HigherLowerCreateResponse(BaseModel):
 
 class HigherLowerAnswerResponse(BaseModel):
     correct: bool
-    left_value: int
-    right_value: int
+    left_value: float
+    right_value: float
     streak: int
     next_pair: PairInfo | None = None
     # Only present when game is over

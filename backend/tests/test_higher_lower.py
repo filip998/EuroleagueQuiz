@@ -28,7 +28,7 @@ client = TestClient(app)
 def _create_game(tier="easy"):
     resp = client.post("/quiz/higher-lower/games", json={
         "tier": tier,
-        "season_range_start": 2003,
+        "season_range_start": 2010,
         "season_range_end": 2025,
         "nickname": "TestPlayer",
     })
@@ -125,7 +125,7 @@ def test_invalid_season_range():
     resp = client.post("/quiz/higher-lower/games", json={
         "tier": "easy",
         "season_range_start": 2025,
-        "season_range_end": 2003,
+        "season_range_end": 2010,
         "nickname": "Test",
     })
     assert resp.status_code == 400

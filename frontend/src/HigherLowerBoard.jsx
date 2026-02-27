@@ -31,6 +31,11 @@ function getFlag(nationality) {
   return COUNTRY_FLAGS[nationality] || "🌍";
 }
 
+function formatValue(v) {
+  if (v == null) return "—";
+  return Number.isInteger(v) ? v.toString() : v.toFixed(1);
+}
+
 export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
   const [gameId] = useState(initialState.game_id);
   const [pair, setPair] = useState(initialState.pair);
@@ -97,12 +102,12 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
               <div className="flex items-center justify-between gap-4">
                 <div className="flex-1 text-center">
                   <div className="text-lg font-semibold text-elq-dark">{pair.left.name}</div>
-                  <div className="text-2xl font-bold text-elq-dark mt-1">{result.left_value}</div>
+                  <div className="text-2xl font-bold text-elq-dark mt-1">{formatValue(result.left_value)}</div>
                 </div>
                 <div className="text-elq-muted text-sm font-medium">vs</div>
                 <div className="flex-1 text-center">
                   <div className="text-lg font-semibold text-elq-dark">{pair.right.name}</div>
-                  <div className="text-2xl font-bold text-elq-dark mt-1">{result.right_value}</div>
+                  <div className="text-2xl font-bold text-elq-dark mt-1">{formatValue(result.right_value)}</div>
                 </div>
               </div>
             </div>
@@ -214,7 +219,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
                     ? "text-amber-600"
                     : "text-elq-dark"
               }`}>
-                {result.left_value}
+                {formatValue(result.left_value)}
               </div>
             ) : (
               <div className="text-3xl sm:text-4xl font-bold text-elq-muted/30">?</div>
@@ -254,7 +259,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
                     ? "text-amber-600"
                     : "text-elq-dark"
               }`}>
-                {result.right_value}
+                {formatValue(result.right_value)}
               </div>
             ) : (
               <div className="text-3xl sm:text-4xl font-bold text-elq-muted/30">?</div>

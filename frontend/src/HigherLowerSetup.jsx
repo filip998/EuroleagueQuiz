@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { createHigherLowerGame, getHigherLowerLeaderboard } from "./api";
 
-const SEASONS = Array.from({ length: 23 }, (_, i) => 2003 + i);
+const SEASONS = Array.from({ length: 19 }, (_, i) => 2007 + i);
 
 const TIERS = [
   {
@@ -35,7 +35,7 @@ const TIERS = [
 
 export default function HigherLowerSetup({ onGameCreated, onBack }) {
   const [tier, setTier] = useState("easy");
-  const [seasonStart, setSeasonStart] = useState(2003);
+  const [seasonStart, setSeasonStart] = useState(2007);
   const [seasonEnd, setSeasonEnd] = useState(2025);
   const [nickname, setNickname] = useState(() => localStorage.getItem("hol_nickname") || "");
   const [loading, setLoading] = useState(false);
