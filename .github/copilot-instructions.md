@@ -63,21 +63,23 @@ Always run `npm run build` in `frontend/` locally before pushing to catch build 
 
 ### Upload Database to Azure (required after schema or data changes)
 The SQLite database (`backend/data/euroleague.db`) is `.gitignore`d and NOT deployed via CI/CD.
-**You must manually upload it to Azure whenever:**
+**You must upload it to Azure whenever:**
 - New tables are added (Alembic migrations)
 - Data ingestion is re-run
 - Any schema change is made
 
 Steps:
-1. Run migrations locally: `cd backend && alembic upgrade head`
-2. Upload via Azure CLI (SSH/FTP to App Service):
+1. Run migrations locally: `cd backend && .venv\Scripts\activate && alembic upgrade head`
+2. Upload via Azure CLI:
    ```bash
-   az webapp deploy --resource-group <RG> --name euroleague-quiz-backend-app --src-path backend/data/euroleague.db --target-path data/euroleague.db --type static
+   az webapp deploy --resource-group euroleague-quiz-rg --name euroleague-quiz-backend-app --src-path backend/data/euroleague.db --target-path data/euroleague.db --type static --restart true
    ```
-   Or use the Azure Portal → App Service → SSH/FTPS to upload `backend/data/euroleague.db` to the `data/` directory.
-3. Restart the App Service after upload.
+   Note: Azure CLI is installed at `C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd`. If `az` is not in PATH, add it: `$env:PATH += ";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"`.
+3. The `--restart true` flag automatically restarts the App Service after upload.
 
-**IMPORTANT:** Always remind the user to upload the database after making schema or data changes.
+**IMPORTANT:** Always remind the user to upload the database after making schema or data changes. When possible, run this command automatically after confirming with the user.
+
+A convenience script is also available: `scripts\upload-db.bat`
 
 ### Create Migration
 ```bash
