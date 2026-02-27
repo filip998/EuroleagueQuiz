@@ -398,6 +398,13 @@ def _finish_round(
     """Complete the round, update scores, and check for match end."""
     round_obj.status = "completed"
 
+    if game.mode == "single_player":
+        # Solo: no match scoring — just complete the roster and prepare next
+        round_obj.winner_player = None
+        _create_next_round(db, game)
+        db.flush()
+        return "board_complete"
+
     if round_obj.player1_correct > round_obj.player2_correct:
         round_obj.winner_player = 1
     elif round_obj.player2_correct > round_obj.player1_correct:

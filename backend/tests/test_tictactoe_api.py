@@ -126,7 +126,7 @@ def _create_ttt_game(client: TestClient, target_wins: int = 2) -> dict:
     response = client.post(
         "/quiz/tictactoe/games",
         json={
-            "mode": "single_player",
+            "mode": "local_two_player",
             "target_wins": target_wins,
             "timer_mode": "15s",
             "player1_name": "Player One",
@@ -139,8 +139,7 @@ def _create_ttt_game(client: TestClient, target_wins: int = 2) -> dict:
 
 def test_create_tictactoe_game_has_board(client: TestClient):
     payload = _create_ttt_game(client)
-    assert payload["mode"] == "single_player"
-    assert payload["resolved_mode"] == "local_two_player"
+    assert payload["mode"] == "local_two_player"
     assert payload["round"]["status"] == "active"
     assert len(payload["round"]["rows"]) == 3
     assert len(payload["round"]["columns"]) == 3

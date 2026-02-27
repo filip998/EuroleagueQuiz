@@ -30,6 +30,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
 
   const isOnline = onlineInfo?.isOnline;
   const myPlayer = onlineInfo?.playerNumber;
+  const isSolo = game?.mode === "single_player";
 
   useEffect(() => {
     if (!isOnline || !game?.id) return;
@@ -41,7 +42,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
           const result = data.last_result;
           const gameData = { ...data }; delete gameData.last_result;
           setGame(gameData); setError(null);
-          if (result && ["round_won","round_complete","match_won"].includes(result)) startRoundTransition(result, gameData);
+          if (result && ["round_won","round_complete","match_won","board_complete"].includes(result)) startRoundTransition(result, gameData);
           else if (result) setLastResult(result);
         }
       }, () => { if (!closed) reconnectTimeout = setTimeout(connect, 2000); });
@@ -78,7 +79,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
 
   useEffect(() => {
     if (isOnline || !game?.turn_seconds || game.status !== "active" || timeLeft === null) return;
-    if (timeLeft <= 0) { setGame(p => ({ ...p, current_player: p.current_player === 1 ? 2 : 1 })); setLastResult("time_expired"); return; }
+    if (timeLeft <= 0) { if (!isSolo) { setGame(p => ({ ...p, current_player: p.current_player === 1 ? 2 : 1 })); } setLastResult("time_expired"); return; }
     const t = setTimeout(() => setTimeLeft(v => v - 1), 1000);
     return () => clearTimeout(t);
   }, [timeLeft, game?.turn_seconds, game?.status, isOnline]);
@@ -140,7 +141,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
       } else {
         const res = await submitRosterGuess(game.id, player.player_id);
         setGame(res.game);
-        if (["round_won","round_complete","match_won"].includes(res.result)) startRoundTransition(res.result, res.game);
+        if (["round_won","round_complete","match_won","board_complete"].includes(res.result)) startRoundTransition(res.result, res.game);
         else setLastResult(res.result);
       }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
@@ -169,7 +170,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
       if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ action: "respond_end", accept }));
       else {
         const r = await respondEndRound(game.id, accept); setGame(r.game);
-        if (accept && ["round_won","round_complete","match_won"].includes(r.result)) startRoundTransition(r.result, r.game);
+        if (accept && ["round_won","round_complete","match_won","board_complete"].includes(r.result)) startRoundTransition(r.result, r.game);
         else setLastResult(accept ? "end_accepted" : "end_declined");
       }
     } catch (e) { setError(e.message); } finally { setLoading(false); }
@@ -180,7 +181,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
     if (e.key === "Enter" && searchResults.length === 1) handlePlayerSelect(searchResults[0]);
   }
 
-  const resultMessages = { correct: "\u2705 Correct!", incorrect: "\u274c Wrong player.", round_won: "\ud83c\udfc6 Round over!", round_complete: "\ud83c\udfc6 Round over!", match_won: "\ud83c\udf89 Match won!", end_offered: "\ud83e\udd1d End offered.", end_accepted: "\ud83e\udd1d Round ended!", end_declined: "Declined.", time_expired: "\u23f0 Time\u2019s up!", given_up: "\ud83c\udff3\ufe0f Gave up \u2014 full roster revealed." };
+  const resultMessages = { correct: "\u2705 Correct!", incorrect: "\u274c Wrong player.", round_won: "\ud83c\udfc6 Round over!", round_complete: "\ud83c\udfc6 Round over!", match_won: "\ud83c\udf89 Match won!", board_complete: "\u2705 Roster complete!", end_offered: "\ud83e\udd1d End offered.", end_accepted: "\ud83e\udd1d Round ended!", end_declined: "Declined.", time_expired: "\u23f0 Time\u2019s up!", given_up: "\ud83c\udff3\ufe0f Gave up \u2014 full roster revealed." };
 
   if (game?.status === "waiting_for_opponent") {
     return (<div className="min-h-screen flex flex-col"><div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" /><div className="flex-1 flex items-center justify-center p-4"><div className="text-center animate-fade-in-up"><div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-elq-orange/10 mb-6 animate-pulse-ring"><svg className="w-8 h-8 text-elq-orange animate-spin-slow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg></div><h2 className="font-display text-4xl text-elq-dark mb-3">WAITING FOR OPPONENT</h2><p className="text-elq-muted mb-6">Share this code</p><div className="inline-block bg-elq-bg border-2 border-dashed border-elq-orange/30 rounded-2xl px-10 py-6 mb-6 select-all"><span className="font-mono text-5xl tracking-[0.3em] text-elq-dark font-bold">{game.join_code}</span></div><p className="text-sm text-elq-muted mb-8">Game starts when they join.</p><button onClick={onHome || onNewGame} className="text-sm text-elq-muted hover:text-elq-orange transition-colors underline underline-offset-2">Cancel</button></div></div></div>);
@@ -193,7 +194,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   const sortedSlots = [...round.slots].sort((a, b) => posRank(a.position) - posRank(b.position));
   const canGuess = game.status === "active" && !inTransition && !isRevealing && !game.pending_end && isMyTurn && !roundOver;
 
-  if (game.status === "finished" && !inTransition && !isRevealing) {
+  if (!isSolo && game.status === "finished" && !inTransition && !isRevealing) {
     return (<div className="min-h-screen flex flex-col"><div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" /><div className="flex-1 flex items-center justify-center p-4"><div className="text-center animate-fade-in-up"><div className="text-5xl mb-3">{"\ud83c\udfc6"}</div><h2 className="font-display text-4xl text-elq-dark mb-2">{game.winner_player === 1 ? game.player1_name : game.player2_name} WINS!</h2><p className="text-elq-muted mb-6">{game.player1_name} {game.player1_score} &ndash; {game.player2_score} {game.player2_name}</p><div className="flex gap-3 justify-center"><button onClick={onNewGame} className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all">Play Again</button>{onHome && <button onClick={onHome} className="px-8 py-3 bg-white border border-elq-border text-elq-text font-bold rounded-xl hover:bg-elq-bg transition-all">Home</button>}</div></div></div></div>);
   }
 
@@ -204,10 +205,17 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
         <div className="max-w-5xl mx-auto px-3 py-2 flex items-center justify-between">
           <button onClick={onHome || onNewGame} className="text-xs text-elq-muted hover:text-elq-text transition-colors flex items-center gap-1"><svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" /></svg>Home</button>
           <span className="font-display text-base tracking-wide text-elq-dark">ROSTER GUESS</span>
-          <span className="text-[11px] text-elq-muted">Rd {game.round_number} &middot; First to {game.target_wins}</span>
+          <span className="text-[11px] text-elq-muted">{isSolo ? "" : `Rd ${game.round_number} \u00b7 First to ${game.target_wins}`}</span>
         </div>
       </div>
       {isOnline && (<div className="bg-elq-bg text-center py-1 text-[11px] text-elq-muted border-b border-elq-border flex-shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block mr-1.5" />You are <strong>{game[`player${myPlayer}_name`]}</strong>{!isMyTurn && <span className="text-elq-orange ml-1">&mdash; Opponent&apos;s turn</span>}</div>)}
+      {isSolo ? (
+      <div className="bg-white border-b border-elq-border flex-shrink-0">
+        <div className="max-w-5xl mx-auto px-3 py-2 text-center">
+          <span className="font-semibold text-sm text-elq-player1">{game.player1_name}</span>
+        </div>
+      </div>
+      ) : (
       <div className="bg-white border-b border-elq-border flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 flex-1 min-w-0"><span className={`font-semibold text-sm truncate ${game.current_player === 1 && game.status === "active" ? "text-elq-player1" : "text-elq-muted"}`}>{game.player1_name}</span><span className="text-xl font-bold text-elq-dark">{game.player1_score}</span>{game.current_player === 1 && game.status === "active" && <span className="w-1.5 h-1.5 rounded-full bg-elq-player1 animate-pulse flex-shrink-0" />}</div>
@@ -215,12 +223,13 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
           <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">{game.current_player === 2 && game.status === "active" && <span className="w-1.5 h-1.5 rounded-full bg-elq-player2 animate-pulse flex-shrink-0" />}<span className="text-xl font-bold text-elq-dark">{game.player2_score}</span><span className={`font-semibold text-sm truncate ${game.current_player === 2 && game.status === "active" ? "text-elq-player2" : "text-elq-muted"}`}>{game.player2_name}</span></div>
         </div>
       </div>
+      )}
       <div className="bg-elq-dark flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2.5 flex items-center justify-between gap-3">
           <div className="flex items-baseline gap-2 min-w-0"><span className="font-display text-xl sm:text-2xl text-white tracking-wide truncate">{round.team_name}</span><span className="text-elq-orange font-semibold text-sm whitespace-nowrap">{round.season_year}/{String(round.season_year + 1).slice(2)}</span></div>
           <div className="flex items-center gap-3 text-[11px] text-white/60 whitespace-nowrap">
             <span>{round.guessed_count}/{round.total_slots}</span>
-            {(round.player1_correct > 0 || round.player2_correct > 0) && (<span><span className="text-blue-300">{round.player1_correct}</span> &ndash; <span className="text-red-300">{round.player2_correct}</span></span>)}
+            {!isSolo && (round.player1_correct > 0 || round.player2_correct > 0) && (<span><span className="text-blue-300">{round.player1_correct}</span> &ndash; <span className="text-red-300">{round.player2_correct}</span></span>)}
             {isRevealing && <span className="text-elq-orange font-semibold">{revealCountdown}s</span>}
           </div>
         </div>
@@ -242,7 +251,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
           </div>
         </div>
       )}
-      {(lastResult || error) && (<div className="flex-shrink-0 px-3 pt-2 max-w-5xl mx-auto w-full">{lastResult && (<div className={`px-3 py-1.5 rounded-lg text-center text-xs font-medium animate-slide-down ${["round_won","match_won","round_complete"].includes(lastResult) ? "bg-elq-orange/10 text-elq-orange" : lastResult === "correct" ? "bg-emerald-50 text-emerald-700" : lastResult === "incorrect" || lastResult === "time_expired" ? "bg-red-50 text-red-600" : lastResult === "given_up" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{resultMessages[lastResult] || lastResult}{inTransition && <span className="ml-2 font-bold">Next in {roundTransition.countdown}...</span>}</div>)}{error && <div className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs text-center mt-1">{error}</div>}</div>)}
+      {(lastResult || error) && (<div className="flex-shrink-0 px-3 pt-2 max-w-5xl mx-auto w-full">{lastResult && (<div className={`px-3 py-1.5 rounded-lg text-center text-xs font-medium animate-slide-down ${["round_won","match_won","round_complete","board_complete"].includes(lastResult) ? "bg-elq-orange/10 text-elq-orange" : lastResult === "correct" ? "bg-emerald-50 text-emerald-700" : lastResult === "incorrect" || lastResult === "time_expired" ? "bg-red-50 text-red-600" : lastResult === "given_up" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{resultMessages[lastResult] || lastResult}{inTransition && <span className="ml-2 font-bold">{isSolo ? `Next roster in ${roundTransition.countdown}...` : `Next in ${roundTransition.countdown}...`}</span>}</div>)}{error && <div className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs text-center mt-1">{error}</div>}</div>)}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-3 py-2">
           <table className="w-full text-sm border-collapse">

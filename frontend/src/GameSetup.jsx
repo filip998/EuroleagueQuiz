@@ -55,9 +55,9 @@ export default function GameSetup({ onGameCreated, onBack }) {
       const resp = await createGame({
         mode,
         target_wins: targetWins,
-        timer_mode: timerMode,
+        timer_mode: mode === "single_player" ? "unlimited" : timerMode,
         player1_name: player1Name || null,
-        player2_name: mode !== "online_friend" ? (player2Name || null) : null,
+        player2_name: mode === "local_two_player" ? (player2Name || null) : null,
       });
       if (mode === "online_friend") {
         onGameCreated(resp, { playerNumber: 1, isOnline: true });
@@ -224,6 +224,7 @@ export default function GameSetup({ onGameCreated, onBack }) {
               <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
                 Settings
               </label>
+              {mode !== "single_player" && (
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div>
                   <label className="block text-sm text-elq-text mb-1.5">First to</label>
@@ -250,12 +251,13 @@ export default function GameSetup({ onGameCreated, onBack }) {
                   </select>
                 </div>
               </div>
+              )}
 
               {/* Player names */}
               <div className="space-y-4 mb-8">
                 <div>
                   <label className="block text-sm text-elq-text mb-1.5">
-                    {mode === "online_friend" ? "Your Name" : "Player 1"}
+                    {mode === "online_friend" || mode === "single_player" ? "Your Name" : "Player 1"}
                   </label>
                   <input
                     value={player1Name}
@@ -264,7 +266,7 @@ export default function GameSetup({ onGameCreated, onBack }) {
                     className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
                   />
                 </div>
-                {mode !== "online_friend" && (
+                {mode === "local_two_player" && (
                   <div>
                     <label className="block text-sm text-elq-text mb-1.5">Player 2</label>
                     <input

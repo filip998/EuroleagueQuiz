@@ -37,6 +37,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
   const isOnline = onlineInfo?.isOnline;
   const myPlayer = onlineInfo?.playerNumber;
+  const isSolo = game?.mode === "single_player";
 
   // Connect WebSocket for online games (with auto-reconnect)
   useEffect(() => {
@@ -58,7 +59,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           delete gameData.completed_round;
           setGame(gameData);
           setError(null);
-          if (result && completedRound && ["round_won", "round_drawn", "match_won"].includes(result)) {
+          if (result && completedRound && ["round_won", "round_drawn", "match_won", "board_complete"].includes(result)) {
             startRoundTransition(result, completedRound);
           } else if (result) {
             setLastResult(result);
@@ -145,10 +146,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     if (isOnline) return;
     if (!game?.turn_seconds || game.status !== "active" || timeLeft === null) return;
     if (timeLeft <= 0) {
-      setGame((prev) => ({
-        ...prev,
-        current_player: prev.current_player === 1 ? 2 : 1,
-      }));
+      if (!isSolo) {
+        setGame((prev) => ({
+          ...prev,
+          current_player: prev.current_player === 1 ? 2 : 1,
+        }));
+      }
       setLastResult("time_expired");
       setSelectedCell(null);
       return;
@@ -219,7 +222,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           player_id: player.player_id,
         });
         setGame(res.game);
-        if (res.completed_round && ["round_won", "round_drawn", "match_won"].includes(res.result)) {
+        if (res.completed_round && ["round_won", "round_drawn", "match_won", "board_complete"].includes(res.result)) {
           startRoundTransition(res.result, res.completed_round);
         } else {
           setLastResult(res.result);
@@ -325,15 +328,16 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const isMyTurn = !isOnline || game.current_player === myPlayer;
 
   const resultMessages = {
-    correct: "\u2705 Correct! Turn switches.",
-    incorrect: "\u274c Incorrect. Turn switches.",
+    correct: isSolo ? "\u2705 Correct!" : "\u2705 Correct! Turn switches.",
+    incorrect: isSolo ? "\u274c Incorrect." : "\u274c Incorrect. Turn switches.",
     round_won: "\ud83c\udfc6 Round won!",
     round_drawn: "\ud83e\udd1d Round drawn \u2014 new board!",
     match_won: "\ud83c\udf89 Match won!",
+    board_complete: "\u2705 Board complete!",
     draw_offered: "\ud83e\udd1d Draw offered.",
     draw_accepted: "\ud83e\udd1d Draw accepted \u2014 new board!",
     draw_declined: "Draw declined \u2014 game continues.",
-    time_expired: "\u23f0 Time\u2019s up! Turn switches.",
+    time_expired: isSolo ? "\u23f0 Time\u2019s up!" : "\u23f0 Time\u2019s up! Turn switches.",
   };
 
   return (
@@ -357,7 +361,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
             EUROLEAGUE QUIZ
           </span>
           <span className="text-xs text-elq-muted">
-            Round {game.round_number} &middot; First to {game.target_wins}
+            {isSolo ? "" : `Round ${game.round_number} \u00b7 First to ${game.target_wins}`}
           </span>
         </div>
       </div>
@@ -376,6 +380,15 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       {/* Main content */}
       <div className="flex-1 flex flex-col items-center px-4 py-4 sm:py-6 max-w-2xl mx-auto w-full">
         {/* Scoreboard */}
+        {isSolo ? (
+          <div className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-4 sm:p-5 mb-4 animate-fade-in-up">
+            <div className="text-center">
+              <div className="text-sm font-semibold text-elq-player1">
+                {game.player1_name}
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-4 sm:p-5 mb-4 animate-fade-in-up">
           <div className="flex items-center justify-between">
             {/* Player 1 */}
@@ -424,13 +437,14 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
             </div>
           </div>
         </div>
+        )}
 
         {/* Result banner */}
         {lastResult && (
           <div className="w-full mb-4 animate-slide-down">
             <div
               className={`p-3 rounded-xl text-center text-sm font-medium ${
-                ["round_won", "match_won"].includes(lastResult)
+                ["round_won", "match_won", "board_complete"].includes(lastResult)
                   ? "bg-elq-orange/10 text-elq-orange border border-elq-orange/20"
                   : lastResult === "correct"
                     ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
@@ -442,7 +456,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
               {resultMessages[lastResult] || lastResult}
               {inTransition && (
                 <span className="ml-2 font-bold">
-                  Next round in {roundTransition.countdown}...
+                  {isSolo ? `Next board in ${roundTransition.countdown}...` : `Next round in ${roundTransition.countdown}...`}
                 </span>
               )}
             </div>
@@ -553,7 +567,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         </div>
 
         {/* Draw controls */}
-        {game.status === "active" && !inTransition && (
+        {!isSolo && game.status === "active" && !inTransition && (
           <div className="mt-6 text-center">
             {game.pending_draw ? (
               <div className="bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
@@ -605,7 +619,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         )}
 
         {/* Match finished */}
-        {game.status === "finished" && !inTransition && (
+        {!isSolo && game.status === "finished" && !inTransition && (
           <div className="mt-8 text-center animate-fade-in-up">
             <div className="text-4xl mb-2">{"\ud83c\udfc6"}</div>
             <h2 className="font-display text-3xl text-elq-dark mb-4">

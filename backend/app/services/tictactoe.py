@@ -414,9 +414,12 @@ def submit_move(
         and _player_matches_axis(db, player_id, col_axis)
     )
 
+    is_solo = game.mode == "single_player"
+
     if not is_correct:
         now = datetime.utcnow()
-        game.current_player = _other_player(acting_player)
+        if not is_solo:
+            game.current_player = _other_player(acting_player)
         game.turn_started_at = now
         game.updated_at = now
         db.flush()
@@ -425,6 +428,19 @@ def submit_move(
     cell.claimed_by_player = acting_player
     cell.claimed_player_id = player_id
     cell.claimed_at = datetime.utcnow()
+
+    if is_solo:
+        # Solo: no match scoring — just complete the board
+        if _has_three_in_row(round_obj, acting_player) or _is_board_full(round_obj):
+            round_obj.status = "completed" if _has_three_in_row(round_obj, acting_player) else "drawn"
+            round_obj.winner_player = acting_player if round_obj.status == "completed" else None
+            create_next_round(db, game, started_by_player=1)
+            db.flush()
+            return "board_complete"
+
+        game.updated_at = datetime.utcnow()
+        db.flush()
+        return "correct"
 
     if _has_three_in_row(round_obj, acting_player):
         round_obj.status = "completed"
@@ -622,7 +638,7 @@ def serialize_game_state(
     return {
         "id": game.id,
         "mode": game.mode,
-        "resolved_mode": "local_two_player" if game.mode in LOCAL_PLAY_MODES else game.mode,
+        "resolved_mode": game.mode if game.mode == "single_player" else ("local_two_player" if game.mode in LOCAL_PLAY_MODES else game.mode),
         "status": game.status,
         "join_code": game.join_code,
         "target_wins": game.target_wins,

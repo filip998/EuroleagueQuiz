@@ -61,7 +61,7 @@ export default function RosterGuessSetup({ onGameCreated, onBack }) {
         target_wins: targetWins,
         timer_mode: mode === "single_player" ? "unlimited" : timerMode,
         player1_name: player1Name || null,
-        player2_name: mode !== "online_friend" ? (player2Name || null) : null,
+        player2_name: mode === "local_two_player" ? (player2Name || null) : null,
         season_range_start: seasonStart,
         season_range_end: seasonEnd,
       });
@@ -201,7 +201,8 @@ export default function RosterGuessSetup({ onGameCreated, onBack }) {
 
               {/* Settings */}
               <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">Settings</label>
-              <div className={`grid gap-4 mb-6 ${mode === "single_player" ? "grid-cols-1" : "grid-cols-2"}`}>
+              {mode !== "single_player" && (
+              <div className="grid grid-cols-2 gap-4 mb-6">
                 <div>
                   <label className="block text-sm text-elq-text mb-1.5">First to</label>
                   <select value={targetWins} onChange={(e) => setTargetWins(Number(e.target.value))}
@@ -212,28 +213,27 @@ export default function RosterGuessSetup({ onGameCreated, onBack }) {
                     <option value={5}>5 wins</option>
                   </select>
                 </div>
-                {mode !== "single_player" && (
-                  <div>
-                    <label className="block text-sm text-elq-text mb-1.5">Turn timer</label>
-                    <select value={timerMode} onChange={(e) => setTimerMode(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer"
-                    >
-                      <option value="15s">15 seconds</option>
-                      <option value="40s">40 seconds</option>
-                      <option value="unlimited">Unlimited</option>
-                    </select>
-                  </div>
-                )}
+                <div>
+                  <label className="block text-sm text-elq-text mb-1.5">Turn timer</label>
+                  <select value={timerMode} onChange={(e) => setTimerMode(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer"
+                  >
+                    <option value="15s">15 seconds</option>
+                    <option value="40s">40 seconds</option>
+                    <option value="unlimited">Unlimited</option>
+                  </select>
+                </div>
               </div>
+              )}
 
               {/* Names */}
               <div className="space-y-4 mb-8">
                 <div>
-                  <label className="block text-sm text-elq-text mb-1.5">{mode === "online_friend" ? "Your Name" : "Player 1"}</label>
+                  <label className="block text-sm text-elq-text mb-1.5">{mode === "online_friend" || mode === "single_player" ? "Your Name" : "Player 1"}</label>
                   <input value={player1Name} onChange={(e) => setPlayer1Name(e.target.value)} placeholder="Player 1"
                     className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors" />
                 </div>
-                {mode !== "online_friend" && (
+                {mode === "local_two_player" && (
                   <div>
                     <label className="block text-sm text-elq-text mb-1.5">Player 2</label>
                     <input value={player2Name} onChange={(e) => setPlayer2Name(e.target.value)} placeholder="Player 2"
