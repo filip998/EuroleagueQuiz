@@ -14,6 +14,10 @@ from app.models.roster_guess import (
     RosterGuessRound,
     RosterGuessSlot,
 )
+from app.models.higher_lower import (
+    HigherLowerGame,
+    HigherLowerScore,
+)
 
 __all__ = [
     "Season",
@@ -31,4 +35,6 @@ __all__ = [
     "RosterGuessGame",
     "RosterGuessRound",
     "RosterGuessSlot",
+    "HigherLowerGame",
+    "HigherLowerScore",
 ]

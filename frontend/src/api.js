@@ -122,3 +122,19 @@ export function connectRosterWebSocket(gameId, playerNumber, onMessage, onClose)
   };
   return ws;
 }
+
+// ---------------------------------------------------------------------------
+// Higher or Lower API
+// ---------------------------------------------------------------------------
+
+export function createHigherLowerGame(payload) {
+  return request("POST", "/quiz/higher-lower/games", payload);
+}
+
+export function submitHigherLowerAnswer(gameId, choice) {
+  return request("POST", `/quiz/higher-lower/games/${gameId}/answer`, { choice });
+}
+
+export function getHigherLowerLeaderboard(tier) {
+  return request("GET", `/quiz/higher-lower/leaderboard/${tier}`);
+}

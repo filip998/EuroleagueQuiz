@@ -3,6 +3,8 @@ import GameSetup from "./GameSetup";
 import GameBoard from "./GameBoard";
 import RosterGuessSetup from "./RosterGuessSetup";
 import RosterGuessBoard from "./RosterGuessBoard";
+import HigherLowerSetup from "./HigherLowerSetup";
+import HigherLowerBoard from "./HigherLowerBoard";
 
 function App() {
   const [screen, setScreen] = useState("select");
@@ -50,6 +52,20 @@ function App() {
     );
   }
 
+  // Higher or Lower flow
+  if (screen === "higherlower") {
+    if (!game) {
+      return <HigherLowerSetup onGameCreated={(resp) => setGame(resp)} onBack={goHome} />;
+    }
+    return (
+      <HigherLowerBoard
+        initialState={game}
+        onNewGame={() => setGame(null)}
+        onHome={goHome}
+      />
+    );
+  }
+
   // Game selection screen
   return (
     <div className="min-h-screen flex flex-col">
@@ -75,7 +91,7 @@ function App() {
           </div>
 
           {/* Game cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 animate-fade-in-up" style={{ animationDelay: "150ms" }}>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 animate-fade-in-up" style={{ animationDelay: "150ms" }}>
             {/* TicTacToe card */}
             <button
               onClick={() => setScreen("tictactoe")}
@@ -108,6 +124,25 @@ function App() {
               <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">ROSTER GUESS</h2>
               <p className="text-sm text-elq-muted leading-relaxed">
                 Guess the full roster of a EuroLeague team from a specific season using hints.
+              </p>
+              <div className="mt-4 text-xs font-semibold text-elq-orange opacity-0 group-hover:opacity-100 transition-opacity">
+                PLAY →
+              </div>
+            </button>
+
+            {/* Higher or Lower card */}
+            <button
+              onClick={() => setScreen("higherlower")}
+              className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center mb-4 group-hover:bg-emerald-200 transition-colors">
+                <svg className="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
+                </svg>
+              </div>
+              <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">HIGHER OR LOWER</h2>
+              <p className="text-sm text-elq-muted leading-relaxed">
+                Who has the bigger stat? Guess right to build your streak. One mistake and it's over!
               </p>
               <div className="mt-4 text-xs font-semibold text-elq-orange opacity-0 group-hover:opacity-100 transition-opacity">
                 PLAY →
