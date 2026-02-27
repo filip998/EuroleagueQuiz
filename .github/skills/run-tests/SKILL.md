@@ -11,7 +11,7 @@ Run the Python test suite for the backend.
 
 ```bash
 cd backend
-.venv\Scripts\activate
+source .venv/bin/activate
 ```
 
 Run all tests:

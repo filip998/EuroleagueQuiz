@@ -11,7 +11,7 @@ Fetch player, team, game, and box score data from the EuroLeague API.
 
 ```bash
 cd backend
-.venv\Scripts\activate
+source .venv/bin/activate
 ```
 
 Full ingestion (all seasons):
@@ -37,7 +37,7 @@ python -m ingestion.ingest --step rosters --start-season 2024 --end-season 2024
 
 Set `ELQ_API_RATE_LIMIT_SECONDS` to control delay between API calls (default: 1.0s):
 ```bash
-$env:ELQ_API_RATE_LIMIT_SECONDS = "0.25"
+export ELQ_API_RATE_LIMIT_SECONDS="0.25"
 python -m ingestion.ingest --start-season 2024 --end-season 2025
 ```
 

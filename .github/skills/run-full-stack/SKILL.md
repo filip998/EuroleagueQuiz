@@ -32,7 +32,7 @@ Then open http://localhost:5173 to use the app.
 
 ```bash
 # Terminal 1
-cd backend && .venv\Scripts\activate && alembic upgrade head && uvicorn app.main:app --reload
+cd backend && source .venv/bin/activate && alembic upgrade head && uvicorn app.main:app --reload
 
 # Terminal 2
 cd frontend && npm run dev
