@@ -21,6 +21,7 @@ from app.services.roster_guess import (
     respond_end,
     serialize_game_state,
     autocomplete_players,
+    give_up,
 )
 from app.services.roster_timer_manager import start_turn_timer, cancel_timer
 
@@ -176,6 +177,24 @@ async def respond_end_round(
             start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
 
         _try_broadcast(game_id, state)
+        return {"result": result, "game": state}
+    except RosterGuessError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/roster-guess/games/{game_id}/give-up")
+async def give_up_round(
+    game_id: int,
+    db: Session = Depends(get_db),
+):
+    try:
+        game = get_game_or_404(db, game_id)
+        result = give_up(db, game)
+        db.commit()
+        db.refresh(game)
+        state = serialize_game_state(db, game)
+        state["last_result"] = result
         return {"result": result, "game": state}
     except RosterGuessError as exc:
         db.rollback()

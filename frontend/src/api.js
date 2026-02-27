@@ -100,6 +100,10 @@ export function respondEndRound(gameId, accept) {
   });
 }
 
+export function giveUpRosterRound(gameId) {
+  return request("POST", `/quiz/roster-guess/games/${gameId}/give-up`);
+}
+
 export function autocompleteRosterPlayer(q, limit = 15) {
   const params = new URLSearchParams({ q, limit });
   return request("GET", `/quiz/roster-guess/players/autocomplete?${params}`);

@@ -517,6 +517,25 @@ def handle_time_expired(
 
 
 # ---------------------------------------------------------------------------
+# Give up (single player)
+# ---------------------------------------------------------------------------
+
+
+def give_up(db: Session, game: RosterGuessGame) -> str:
+    """Single-player gives up on the current round. Reveals the full roster."""
+    _ensure_game_playable(game)
+    if game.mode != "single_player":
+        raise RosterGuessConflictError("Give up is only available in single player mode")
+
+    round_obj = get_active_round(db, game.id)
+    round_obj.status = "given_up"
+    round_obj.winner_player = None
+    game.updated_at = datetime.utcnow()
+    db.flush()
+    return "given_up"
+
+
+# ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
 
@@ -581,6 +600,7 @@ def serialize_game_state(db: Session, game: RosterGuessGame) -> dict:
 def _serialize_round(round_obj: RosterGuessRound) -> dict:
     slots = round_obj.slots
     guessed_count = sum(1 for s in slots if s.guessed_by_player is not None)
+    round_over = round_obj.status in ("completed", "given_up")
 
     return {
         "team_code": round_obj.team_code,
@@ -590,6 +610,7 @@ def _serialize_round(round_obj: RosterGuessRound) -> dict:
         "player2_correct": round_obj.player2_correct,
         "total_slots": len(slots),
         "guessed_count": guessed_count,
+        "status": round_obj.status,
         "slots": [
             {
                 "id": slot.id,
@@ -598,7 +619,7 @@ def _serialize_round(round_obj: RosterGuessRound) -> dict:
                 "nationality": slot.nationality,
                 "height_cm": slot.height_cm,
                 "guessed_by_player": slot.guessed_by_player,
-                "player_name": slot.player_name if slot.guessed_by_player is not None else None,
+                "player_name": slot.player_name if (slot.guessed_by_player is not None or round_over) else None,
             }
             for slot in slots
         ],
