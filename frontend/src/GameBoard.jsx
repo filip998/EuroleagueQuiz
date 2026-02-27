@@ -25,7 +25,7 @@ function AxisLabel({ axis }) {
   );
 }
 
-export default function GameBoard({ initialState, onNewGame, onlineInfo }) {
+export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo }) {
   const [game, setGame] = useState(initialState?.game || initialState);
   const [selectedCell, setSelectedCell] = useState(null);
   const [lastResult, setLastResult] = useState(null);

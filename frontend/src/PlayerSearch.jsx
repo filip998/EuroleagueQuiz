@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { autocompletePlayer } from "./api";
+import { autocompletePlayer, autocompleteRosterPlayer } from "./api";
 
 export default function PlayerSearch({
   rowTeamCode,
   colTeamCode,
   onSelect,
   onCancel,
+  rosterMode,
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -24,11 +25,9 @@ export default function PlayerSearch({
       }
       setLoading(true);
       try {
-        const data = await autocompletePlayer(
-          query,
-          null,
-          null
-        );
+        const data = rosterMode
+          ? await autocompleteRosterPlayer(query)
+          : await autocompletePlayer(query, null, null);
         setResults(data.players || []);
       } catch {
         setResults([]);
@@ -37,7 +36,7 @@ export default function PlayerSearch({
       }
     }, 250);
     return () => clearTimeout(timer);
-  }, [query, rowTeamCode, colTeamCode]);
+  }, [query, rowTeamCode, colTeamCode, rosterMode]);
 
   function handleKeyDown(e) {
     if (e.key === "Escape") onCancel();
@@ -82,10 +81,14 @@ export default function PlayerSearch({
             </button>
           </div>
           <p className="text-xs text-elq-muted mb-4">
-            Find a player who played for both{" "}
-            <span className="font-semibold text-elq-text">{rowTeamCode}</span>{" "}
-            and{" "}
-            <span className="font-semibold text-elq-text">{colTeamCode}</span>
+            {rosterMode
+              ? "Search for a player you think was on this roster"
+              : <>Find a player who played for both{" "}
+                  <span className="font-semibold text-elq-text">{rowTeamCode}</span>{" "}
+                  and{" "}
+                  <span className="font-semibold text-elq-text">{colTeamCode}</span>
+                </>
+            }
           </p>
 
           {/* Search input */}

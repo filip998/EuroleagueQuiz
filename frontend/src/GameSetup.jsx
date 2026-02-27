@@ -34,7 +34,7 @@ const MODES = [
   },
 ];
 
-export default function GameSetup({ onGameCreated }) {
+export default function GameSetup({ onGameCreated, onBack }) {
   const [mode, setMode] = useState("single_player");
   const [targetWins, setTargetWins] = useState(3);
   const [timerMode, setTimerMode] = useState("40s");
@@ -162,6 +162,17 @@ export default function GameSetup({ onGameCreated }) {
 
       <div className="flex-1 flex items-center justify-center p-4 py-8">
         <div className="w-full max-w-lg">
+          {/* Back to games */}
+          {onBack && (
+            <div className="mb-4 animate-fade-in-up">
+              <button onClick={onBack} className="text-sm text-elq-muted hover:text-elq-text transition-colors flex items-center gap-1.5">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+                </svg>
+                All Games
+              </button>
+            </div>
+          )}
           {/* Header */}
           <div className="text-center mb-8 animate-fade-in-up">
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-elq-orange/10 mb-4">

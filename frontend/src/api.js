@@ -64,3 +64,57 @@ export function connectWebSocket(gameId, playerNumber, onMessage, onClose) {
   };
   return ws;
 }
+
+// ---------------------------------------------------------------------------
+// Roster Guess API
+// ---------------------------------------------------------------------------
+
+export function createRosterGame(payload) {
+  return request("POST", "/quiz/roster-guess/games", payload);
+}
+
+export function getRosterGame(gameId) {
+  return request("GET", `/quiz/roster-guess/games/${gameId}`);
+}
+
+export function joinRosterGame(joinCode, playerName) {
+  return request("POST", "/quiz/roster-guess/games/join", {
+    join_code: joinCode,
+    player_name: playerName,
+  });
+}
+
+export function submitRosterGuess(gameId, playerId) {
+  return request("POST", `/quiz/roster-guess/games/${gameId}/guess`, {
+    player_id: playerId,
+  });
+}
+
+export function offerEndRound(gameId) {
+  return request("POST", `/quiz/roster-guess/games/${gameId}/end-offer`);
+}
+
+export function respondEndRound(gameId, accept) {
+  return request("POST", `/quiz/roster-guess/games/${gameId}/end-response`, {
+    accept,
+  });
+}
+
+export function autocompleteRosterPlayer(q, limit = 15) {
+  const params = new URLSearchParams({ q, limit });
+  return request("GET", `/quiz/roster-guess/players/autocomplete?${params}`);
+}
+
+export function connectRosterWebSocket(gameId, playerNumber, onMessage, onClose) {
+  const ws = new WebSocket(
+    `${WS_BASE}/quiz/roster-guess/ws/${gameId}?player=${playerNumber}`
+  );
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    onMessage(data);
+  };
+  ws.onclose = () => {
+    if (onClose) onClose();
+  };
+  return ws;
+}
