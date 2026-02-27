@@ -61,6 +61,24 @@ This runs `.github/workflows/deploy.yml` which:
 - Builds the **frontend** with `npm ci && npm run build` and deploys to Azure Static Web Apps
 Always run `npm run build` in `frontend/` locally before pushing to catch build errors early.
 
+### Upload Database to Azure (required after schema or data changes)
+The SQLite database (`backend/data/euroleague.db`) is `.gitignore`d and NOT deployed via CI/CD.
+**You must manually upload it to Azure whenever:**
+- New tables are added (Alembic migrations)
+- Data ingestion is re-run
+- Any schema change is made
+
+Steps:
+1. Run migrations locally: `cd backend && alembic upgrade head`
+2. Upload via Azure CLI (SSH/FTP to App Service):
+   ```bash
+   az webapp deploy --resource-group <RG> --name euroleague-quiz-backend-app --src-path backend/data/euroleague.db --target-path data/euroleague.db --type static
+   ```
+   Or use the Azure Portal → App Service → SSH/FTPS to upload `backend/data/euroleague.db` to the `data/` directory.
+3. Restart the App Service after upload.
+
+**IMPORTANT:** Always remind the user to upload the database after making schema or data changes.
+
 ### Create Migration
 ```bash
 cd backend
