@@ -49,9 +49,15 @@ def _eligible_player_ids(
     db: Session,
     season_start: int,
     season_end: int,
-    min_games: int = 20,
+    min_games: int | None = None,
 ) -> list[int]:
-    """Return player IDs with ≥ min_games career games and at least 1 season in range."""
+    """Return player IDs with ≥ min_games career games and at least 1 season in range.
+
+    If min_games is None, uses dynamic threshold: min(30, seasons_selected * 10).
+    """
+    if min_games is None:
+        seasons_count = season_end - season_start + 1
+        min_games = min(30, seasons_count * 10)
     season_ids = (
         db.query(Season.id)
         .filter(Season.year >= season_start, Season.year <= season_end)
