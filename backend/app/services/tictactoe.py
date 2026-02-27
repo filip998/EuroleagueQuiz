@@ -770,9 +770,16 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
                 "value": a.value,
                 "display_label": a.display_label,
             }
-            if a.axis_type == "team" and legacy_team:
-                info["team_code"] = legacy_team.euroleague_code
-                info["team_name"] = legacy_team.name
+            if a.axis_type == "team":
+                if legacy_team:
+                    info["team_code"] = legacy_team.euroleague_code
+                    info["team_name"] = legacy_team.name
+                else:
+                    # Look up team by ID from axis value
+                    t = db.query(Team).filter(Team.id == int(a.value)).first()
+                    if t:
+                        info["team_code"] = t.euroleague_code
+                        info["team_name"] = t.name
             return info
         # Fallback: legacy team-only columns
         if legacy_team:

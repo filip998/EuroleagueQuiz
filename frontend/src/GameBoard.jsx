@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getGame, submitMove, offerDraw, respondDraw, connectWebSocket } from "./api";
 import PlayerSearch from "./PlayerSearch";
 import { LogoMini } from "./Logo";
+import ClubLogo from "./ClubLogo";
 
 function AxisLabel({ axis }) {
+  const isTeam = axis.axis_type === "team";
   const prefix =
     axis.axis_type === "nationality"
       ? "\ud83c\udf0d "
@@ -18,10 +20,15 @@ function AxisLabel({ axis }) {
         : "bg-slate-50 text-slate-700 border-slate-200";
   return (
     <div
-      className={`px-2 py-3 text-[11px] sm:text-xs font-semibold text-center rounded-lg border ${bgColor} leading-tight flex items-center justify-center`}
+      className={`px-2 py-3 text-[11px] sm:text-xs font-semibold text-center rounded-lg border ${bgColor} leading-tight flex flex-col items-center justify-center gap-1`}
     >
-      {prefix}
-      {axis.display_label || axis.team_name}
+      {isTeam && axis.team_code && (
+        <ClubLogo code={axis.team_code} size={28} />
+      )}
+      <span>
+        {prefix}
+        {axis.display_label || axis.team_name}
+      </span>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { getRosterGame, submitRosterGuess, offerEndRound, respondEndRound, connectRosterWebSocket, autocompleteRosterPlayer, giveUpRosterRound } from "./api";
 import { LogoMini } from "./Logo";
+import ClubLogo from "./ClubLogo";
 
 const POSITION_ORDER = { "Guard": 0, "Guard-Forward": 1, "Forward": 2, "Forward-Center": 3, "Center": 4 };
 function posRank(p) { return POSITION_ORDER[p] ?? 5; }
@@ -227,7 +228,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
       )}
       <div className="bg-elq-dark flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2.5 flex items-center justify-between gap-3">
-          <div className="flex items-baseline gap-2 min-w-0"><span className="font-display text-xl sm:text-2xl text-white tracking-wide truncate">{round.team_name}</span><span className="text-elq-orange font-semibold text-sm whitespace-nowrap">{round.season_year}/{String(round.season_year + 1).slice(2)}</span></div>
+          <div className="flex items-center gap-2 min-w-0"><ClubLogo code={round.team_code} size={28} className="flex-shrink-0" /><span className="font-display text-xl sm:text-2xl text-white tracking-wide truncate">{round.team_name}</span><span className="text-elq-orange font-semibold text-sm whitespace-nowrap">{round.season_year}/{String(round.season_year + 1).slice(2)}</span></div>
           <div className="flex items-center gap-3 text-[11px] text-white/60 whitespace-nowrap">
             <span>{round.guessed_count}/{round.total_slots}</span>
             {!isSolo && (round.player1_correct > 0 || round.player2_correct > 0) && (<span><span className="text-blue-300">{round.player1_correct}</span> &ndash; <span className="text-red-300">{round.player2_correct}</span></span>)}
