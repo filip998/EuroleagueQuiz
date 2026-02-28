@@ -19,6 +19,7 @@ from app.services.tictactoe import (
     autocomplete_players,
     create_game,
     get_game_or_404,
+    give_up_game,
     join_game,
     offer_draw,
     respond_draw,
@@ -317,6 +318,20 @@ async def respond_tictactoe_draw(
             broadcast_data["completed_round"] = response["completed_round"]
         await ws_manager.broadcast(game_id, broadcast_data)
         return response
+    except TicTacToeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/tictactoe/games/{game_id}/give-up")
+def give_up_tictactoe_game(game_id: int, db: Session = Depends(get_db)):
+    try:
+        game = get_game_or_404(db, game_id)
+        solo_stats = give_up_game(db, game)
+        db.commit()
+        db.refresh(game)
+        state = serialize_game_state(db, game)
+        return {"result": "gave_up", "game": state, "solo_stats": solo_stats}
     except TicTacToeError as exc:
         db.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

@@ -44,6 +44,10 @@ export function respondDraw(gameId, accept) {
   });
 }
 
+export function giveUpGame(gameId) {
+  return request("POST", `/quiz/tictactoe/games/${gameId}/give-up`);
+}
+
 export function autocompletePlayer(q, teamCode1, teamCode2, limit = 15) {
   const params = new URLSearchParams({ q, limit });
   if (teamCode1) params.set("team_code_1", teamCode1);

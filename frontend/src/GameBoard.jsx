@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getGame, submitMove, offerDraw, respondDraw, connectWebSocket } from "./api";
+import { getGame, submitMove, offerDraw, respondDraw, giveUpGame, connectWebSocket } from "./api";
 import PlayerSearch from "./PlayerSearch";
 import { LogoMini } from "./Logo";
 import ClubLogo from "./ClubLogo";
@@ -277,6 +277,22 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           setLastResult(accept ? "draw_accepted" : "draw_declined");
         }
       }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleGiveUp() {
+    if (!window.confirm("Are you sure you want to give up?")) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await giveUpGame(game.id);
+      setGame(res.game);
+      setLastResult(null);
+      setSelectedCell(null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -572,6 +588,19 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           ))}
         </div>
 
+        {/* Give Up button for solo mode */}
+        {isSolo && game.status === "active" && !inTransition && (
+          <div className="mt-6 text-center">
+            <button
+              onClick={handleGiveUp}
+              disabled={loading}
+              className="text-sm text-elq-muted hover:text-red-500 transition-colors underline underline-offset-2"
+            >
+              Give Up
+            </button>
+          </div>
+        )}
+
         {/* Draw controls */}
         {!isSolo && game.status === "active" && !inTransition && (
           <div className="mt-6 text-center">
@@ -637,6 +666,42 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
             >
               New Game
             </button>
+          </div>
+        )}
+
+        {/* Solo results */}
+        {isSolo && game.status === "finished" && !inTransition && (
+          <div className="mt-8 w-full animate-fade-in-up">
+            <div className="bg-white rounded-2xl border border-elq-border shadow-sm p-6 text-center">
+              <div className="text-4xl mb-2">{"\ud83d\udcca"}</div>
+              <h2 className="font-display text-2xl text-elq-dark mb-5">GAME RESULTS</h2>
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="bg-elq-bg rounded-xl p-4">
+                  <div className="text-3xl font-bold text-elq-dark">
+                    {game.solo_stats?.boards_completed ?? 0}
+                  </div>
+                  <div className="text-xs text-elq-muted mt-1">Boards Played</div>
+                </div>
+                <div className="bg-elq-bg rounded-xl p-4">
+                  <div className="text-3xl font-bold text-emerald-600">
+                    {game.solo_stats?.boards_won ?? 0}
+                  </div>
+                  <div className="text-xs text-elq-muted mt-1">Boards Won</div>
+                </div>
+                <div className="bg-elq-bg rounded-xl p-4">
+                  <div className="text-3xl font-bold text-elq-orange">
+                    {game.solo_stats?.cells_correct ?? 0}
+                  </div>
+                  <div className="text-xs text-elq-muted mt-1">Correct Answers</div>
+                </div>
+              </div>
+              <button
+                onClick={onNewGame}
+                className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all text-lg"
+              >
+                New Game
+              </button>
+            </div>
           </div>
         )}
       </div>
