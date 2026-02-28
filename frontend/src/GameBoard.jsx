@@ -171,6 +171,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   // Round transition countdown
   useEffect(() => {
     if (!roundTransition) return;
+    if (roundTransition.countdown === null) return; // paused (solo give-up)
     if (roundTransition.countdown <= 0) {
       setRoundTransition(null);
       return;
@@ -285,14 +286,16 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   }
 
   async function handleGiveUp() {
-    if (!window.confirm("Are you sure you want to give up?")) return;
     setLoading(true);
     setError(null);
     try {
       const res = await giveUpGame(game.id);
       setGame(res.game);
-      setLastResult(null);
-      setSelectedCell(null);
+      if (res.completed_round) {
+        setRoundTransition({ countdown: null, completedRound: res.completed_round, result: "gave_up" });
+        setLastResult("gave_up");
+        setSelectedCell(null);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -358,6 +361,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     round_drawn: "\ud83e\udd1d Round drawn \u2014 new board!",
     match_won: "\ud83c\udf89 Match won!",
     board_complete: "\u2705 Board complete!",
+    gave_up: "\ud83c\udff3\ufe0f Round given up.",
     draw_offered: "\ud83e\udd1d Draw offered.",
     draw_accepted: "\ud83e\udd1d Draw accepted \u2014 new board!",
     draw_declined: "Draw declined \u2014 game continues.",
@@ -476,12 +480,22 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
               }`}
             >
               {resultMessages[lastResult] || lastResult}
-              {inTransition && (
+              {inTransition && roundTransition.countdown !== null && (
                 <span className="ml-2 font-bold">
                   {isSolo ? `Next board in ${roundTransition.countdown}...` : `Next round in ${roundTransition.countdown}...`}
                 </span>
               )}
             </div>
+            {inTransition && roundTransition.countdown === null && (
+              <div className="text-center mt-3">
+                <button
+                  onClick={() => { setRoundTransition(null); setLastResult(null); }}
+                  className="px-6 py-2.5 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all"
+                >
+                  Start New Round
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -666,42 +680,6 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
             >
               New Game
             </button>
-          </div>
-        )}
-
-        {/* Solo results */}
-        {isSolo && game.status === "finished" && !inTransition && (
-          <div className="mt-8 w-full animate-fade-in-up">
-            <div className="bg-white rounded-2xl border border-elq-border shadow-sm p-6 text-center">
-              <div className="text-4xl mb-2">{"\ud83d\udcca"}</div>
-              <h2 className="font-display text-2xl text-elq-dark mb-5">GAME RESULTS</h2>
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-elq-bg rounded-xl p-4">
-                  <div className="text-3xl font-bold text-elq-dark">
-                    {game.solo_stats?.boards_completed ?? 0}
-                  </div>
-                  <div className="text-xs text-elq-muted mt-1">Boards Played</div>
-                </div>
-                <div className="bg-elq-bg rounded-xl p-4">
-                  <div className="text-3xl font-bold text-emerald-600">
-                    {game.solo_stats?.boards_won ?? 0}
-                  </div>
-                  <div className="text-xs text-elq-muted mt-1">Boards Won</div>
-                </div>
-                <div className="bg-elq-bg rounded-xl p-4">
-                  <div className="text-3xl font-bold text-elq-orange">
-                    {game.solo_stats?.cells_correct ?? 0}
-                  </div>
-                  <div className="text-xs text-elq-muted mt-1">Correct Answers</div>
-                </div>
-              </div>
-              <button
-                onClick={onNewGame}
-                className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all text-lg"
-              >
-                New Game
-              </button>
-            </div>
           </div>
         )}
       </div>

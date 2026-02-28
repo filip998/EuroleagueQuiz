@@ -19,7 +19,7 @@ from app.services.tictactoe import (
     autocomplete_players,
     create_game,
     get_game_or_404,
-    give_up_game,
+    give_up_round,
     join_game,
     offer_draw,
     respond_draw,
@@ -327,11 +327,15 @@ async def respond_tictactoe_draw(
 def give_up_tictactoe_game(game_id: int, db: Session = Depends(get_db)):
     try:
         game = get_game_or_404(db, game_id)
-        solo_stats = give_up_game(db, game)
+        given_up_round = give_up_round(db, game)
         db.commit()
         db.refresh(game)
         state = serialize_game_state(db, game)
-        return {"result": "gave_up", "game": state, "solo_stats": solo_stats}
+        completed = serialize_completed_round(db, game_id, given_up_round)
+        response = {"result": "gave_up", "game": state}
+        if completed:
+            response["completed_round"] = completed
+        return response
     except TicTacToeError as exc:
         db.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

@@ -480,58 +480,20 @@ def submit_move(
     return "correct"
 
 
-def give_up_game(db: Session, game: QuizTicTacToeGame) -> dict:
-    """End a solo game and return stats."""
+def give_up_round(db: Session, game: QuizTicTacToeGame) -> int:
+    """Give up the current round in a solo game. Returns the round number that was given up."""
     if game.mode != "single_player":
         raise TicTacToeError("Give up is only available in single player mode")
     _ensure_game_playable(game)
 
-    # Mark active round as completed
-    active_round = (
-        db.query(QuizTicTacToeRound)
-        .filter(
-            QuizTicTacToeRound.game_id == game.id,
-            QuizTicTacToeRound.status == "active",
-        )
-        .first()
-    )
-    if active_round:
-        active_round.status = "drawn"
+    round_obj = get_active_round(db, game.id)
+    given_up_round_number = round_obj.round_number
+    round_obj.status = "drawn"
+    round_obj.winner_player = None
 
-    game.status = "finished"
-    game.updated_at = datetime.utcnow()
+    create_next_round(db, game, started_by_player=1)
     db.flush()
-    return _compute_solo_stats(db, game)
-
-
-def _compute_solo_stats(db: Session, game: QuizTicTacToeGame) -> dict:
-    """Compute solo mode statistics from round/cell data."""
-    rounds = (
-        db.query(QuizTicTacToeRound)
-        .filter(QuizTicTacToeRound.game_id == game.id)
-        .all()
-    )
-    boards_completed = sum(1 for r in rounds if r.status != "active")
-    boards_won = sum(1 for r in rounds if r.status == "completed" and r.winner_player == 1)
-
-    round_ids = [r.id for r in rounds]
-    cells_correct = 0
-    if round_ids:
-        cells_correct = (
-            db.query(func.count(QuizTicTacToeCell.id))
-            .filter(
-                QuizTicTacToeCell.round_id.in_(round_ids),
-                QuizTicTacToeCell.claimed_by_player.isnot(None),
-            )
-            .scalar()
-            or 0
-        )
-
-    return {
-        "boards_completed": boards_completed,
-        "boards_won": boards_won,
-        "cells_correct": cells_correct,
-    }
+    return given_up_round_number
 
 
 def offer_draw(db: Session, game: QuizTicTacToeGame, *, acting_player: Optional[int] = None) -> None:
@@ -712,7 +674,6 @@ def serialize_game_state(
         if game.pending_draw_from is not None
         else None,
         "round": round_payload,
-        "solo_stats": _compute_solo_stats(db, game) if game.mode == "single_player" else None,
     }
 
 
