@@ -20,6 +20,7 @@ from app.services.roster_guess import (
     offer_end,
     respond_end,
     serialize_game_state,
+    serialize_completed_round,
     autocomplete_players,
     give_up,
 )
@@ -190,12 +191,15 @@ async def give_up_round(
 ):
     try:
         game = get_game_or_404(db, game_id)
-        result = give_up(db, game)
+        given_up_round_number = give_up(db, game)
         db.commit()
         db.refresh(game)
         state = serialize_game_state(db, game)
-        state["last_result"] = result
-        return {"result": result, "game": state}
+        completed = serialize_completed_round(db, game.id, given_up_round_number)
+        response = {"result": "given_up", "game": state}
+        if completed:
+            response["completed_round"] = completed
+        return response
     except RosterGuessError as exc:
         db.rollback()
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

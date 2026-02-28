@@ -528,18 +528,21 @@ def handle_time_expired(
 # ---------------------------------------------------------------------------
 
 
-def give_up(db: Session, game: RosterGuessGame) -> str:
-    """Single-player gives up on the current round. Reveals the full roster."""
+def give_up(db: Session, game: RosterGuessGame) -> int:
+    """Single-player gives up on the current round. Reveals the full roster
+    and creates the next round (like tic-tac-toe). Returns the given-up
+    round number so the caller can serialize it as ``completed_round``."""
     _ensure_game_playable(game)
     if game.mode != "single_player":
         raise RosterGuessConflictError("Give up is only available in single player mode")
 
     round_obj = get_active_round(db, game.id)
+    given_up_round_number = round_obj.round_number
     round_obj.status = "given_up"
     round_obj.winner_player = None
-    game.updated_at = datetime.utcnow()
+    _create_next_round(db, game)
     db.flush()
-    return "given_up"
+    return given_up_round_number
 
 
 # ---------------------------------------------------------------------------
@@ -631,6 +634,23 @@ def _serialize_round(round_obj: RosterGuessRound) -> dict:
             for slot in slots
         ],
     }
+
+
+def serialize_completed_round(
+    db: Session, game_id: int, round_number: int
+) -> dict | None:
+    """Return serialized data for a completed/given-up round (used after give-up)."""
+    round_obj = (
+        db.query(RosterGuessRound)
+        .filter(
+            RosterGuessRound.game_id == game_id,
+            RosterGuessRound.round_number == round_number,
+        )
+        .first()
+    )
+    if not round_obj:
+        return None
+    return _serialize_round(round_obj)
 
 
 # ---------------------------------------------------------------------------
