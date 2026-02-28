@@ -98,8 +98,7 @@ jobs:
         working-directory: backend
         run: |
           python -m venv .venv
-          source .venv/bin/activate
-          pip install .
+          .venv/bin/pip install .
 
       - name: Install frontend
         working-directory: frontend

@@ -135,8 +135,21 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest httpx
 
-      - name: Wait for deployment to stabilize
-        run: sleep 30
+      - name: Wait for deployment to be ready
+        run: |
+          URL="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/"
+          echo "Waiting for $URL to respond..."
+          for i in $(seq 1 20); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$URL" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ API is ready (attempt $i)"
+              exit 0
+            fi
+            echo "  Attempt $i: HTTP $STATUS — retrying in 15s..."
+            sleep 15
+          done
+          echo "❌ API did not become ready after 20 attempts"
+          exit 1
 
       - name: Run smoke tests
         working-directory: backend
