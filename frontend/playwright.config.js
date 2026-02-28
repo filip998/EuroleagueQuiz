@@ -1,0 +1,32 @@
+import { defineConfig } from "@playwright/test";
+
+export default defineConfig({
+  testDir: "./e2e",
+  timeout: 30000,
+  retries: 1,
+  use: {
+    baseURL: "http://localhost:5173",
+    headless: true,
+    screenshot: "only-on-failure",
+  },
+  projects: [
+    {
+      name: "chromium",
+      use: { browserName: "chromium" },
+    },
+  ],
+  webServer: [
+    {
+      command: "cd ../backend && source .venv/bin/activate && uvicorn app.main:app --port 8000",
+      port: 8000,
+      reuseExistingServer: !process.env.CI,
+      timeout: 30000,
+    },
+    {
+      command: "npm run dev",
+      port: 5173,
+      reuseExistingServer: !process.env.CI,
+      timeout: 15000,
+    },
+  ],
+});

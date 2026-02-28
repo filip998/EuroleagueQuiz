@@ -33,13 +33,31 @@ Frontend runs at http://localhost:5173.
 Open two terminals and run `scripts\start-backend.bat` and `scripts\start-frontend.bat`.
 
 ### Run Tests
+
+**Backend (pytest):**
 ```bash
 cd backend
 .venv\Scripts\activate
-pytest                           # all tests
-pytest tests/test_api.py         # API tests only
+pytest                              # all tests (excludes smoke)
+pytest tests/test_api.py            # API tests only
 pytest tests/test_tictactoe_api.py  # TicTacToe tests only
+pytest tests/smoke/ --base-url http://localhost:8000  # smoke tests against live API
 ```
+
+**Frontend unit tests (Vitest + React Testing Library):**
+```bash
+cd frontend
+npm test          # run once
+npm run test:watch  # watch mode
+```
+Test files live in `frontend/src/test/`. Tests cover: App navigation, API layer, GameSetup, PlayerSearch, HigherLowerBoard.
+
+**Frontend E2E tests (Playwright):**
+```bash
+cd frontend
+npm run test:e2e
+```
+E2E tests live in `frontend/e2e/`. Playwright auto-starts both backend and frontend via `webServer` config. Requires the backend venv to exist (`backend/.venv`).
 
 ### Run Data Ingestion
 ```bash
@@ -50,16 +68,31 @@ python -m ingestion.ingest --step rosters --start-season 2024 --end-season 2024 
 ```
 
 ### Deploy to Production
-After making changes, commit and push to `main` to trigger automatic deployment via GitHub Actions:
+
+**Workflow: push to a branch → open PR → merge to `main`**
+
+1. **Open a PR to `main`** → `.github/workflows/ci.yml` runs automatically:
+   - Backend tests (pytest)
+   - Frontend unit tests (vitest, 41 tests)
+   - Frontend build check (npm run build)
+   - Frontend E2E tests (Playwright, 6 tests) — runs after backend tests + build pass
+   - ❌ If any check fails, the PR is blocked.
+
+2. **Merge the PR** → `.github/workflows/deploy.yml` runs automatically:
+   - Runs backend + frontend tests again as a safety gate
+   - Deploys **backend** to Azure App Service (`euroleague-quiz-backend-app`)
+   - Builds and deploys **frontend** to Azure Static Web Apps
+   - Runs **post-deploy smoke tests** against the live API to verify the deployment
+
+**Do NOT push directly to `main`.** Always use a PR so CI checks run first.
+
+To run checks locally before pushing:
 ```bash
-git add -A
-git commit -m "description of changes"
-git push origin main
+cd backend && pytest tests/ --ignore=tests/smoke  # backend tests
+cd frontend && npm test                             # frontend unit tests
+cd frontend && npm run test:e2e                     # E2E tests (needs backend venv)
+cd frontend && npm run build                        # build check
 ```
-This runs `.github/workflows/deploy.yml` which:
-- Deploys the **backend** to Azure App Service (`euroleague-quiz-backend-app`)
-- Builds the **frontend** with `npm ci && npm run build` and deploys to Azure Static Web Apps
-Always run `npm run build` in `frontend/` locally before pushing to catch build errors early.
 
 ### Upload Database to Azure (required after schema or data changes)
 The SQLite database (`backend/data/euroleague.db`) is `.gitignore`d and NOT deployed via CI/CD.
@@ -123,4 +156,6 @@ Entities are identified by `euroleague_code` (string codes like `"BAR"` for team
 - **Routers**: One router per domain in `backend/app/routers/`, mounted in `app/main.py` with a URL prefix matching the domain name.
 - **Services**: Game logic in `backend/app/services/` (e.g., `tictactoe.py`). Services are pure domain logic, called by routers.
 - **Ingestion**: Each step is a separate module (`fetch_seasons.py`, `fetch_rosters.py`, `fetch_boxscores.py`, `aggregate_stats.py`). They accept a SQLAlchemy session and a `RateLimiter`, and commit is handled by the caller in `ingest.py`.
-- **Tests**: Use FastAPI's `TestClient`. TicTacToe tests use isolated in-memory SQLite; API tests use the real database.
+- **Tests (backend)**: Use FastAPI's `TestClient`. TicTacToe tests use isolated in-memory SQLite; API tests use the real database. Smoke tests (`tests/smoke/`) use `httpx` against a live URL.
+- **Tests (frontend)**: Vitest + React Testing Library for unit tests (`src/test/`). Playwright for E2E tests (`e2e/`). Mock API calls in unit tests; E2E tests run against the real backend.
+- **Documentation**: When making significant changes (new features, new game modes, architecture changes, new workflows, or API changes), update both `README.md` and this instructions file to keep them in sync.
