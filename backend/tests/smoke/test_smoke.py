@@ -73,7 +73,12 @@ class TestGameCreation:
     def test_create_higher_lower_game(self, client):
         r = client.post(
             "/quiz/higher-lower/games",
-            json={"tier": "easy", "nickname": "smoke-test"},
+            json={
+                "tier": "easy",
+                "nickname": "smoke-test",
+                "season_range_start": 2020,
+                "season_range_end": 2025,
+            },
         )
         assert r.status_code == 200
         data = r.json()
