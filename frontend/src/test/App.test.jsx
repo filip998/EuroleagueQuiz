@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import App from "../App";
 
 // Mock all child components to isolate App logic
@@ -36,7 +37,7 @@ vi.mock("../HigherLowerBoard", () => ({
 
 describe("App", () => {
   it("renders the game selection screen with all three game modes", () => {
-    render(<App />);
+    render(<MemoryRouter><App /></MemoryRouter>);
     expect(screen.getByText("TICTACTOE")).toBeInTheDocument();
     expect(screen.getByText("ROSTER GUESS")).toBeInTheDocument();
     expect(screen.getByText("HIGHER OR LOWER")).toBeInTheDocument();
@@ -44,25 +45,25 @@ describe("App", () => {
   });
 
   it("navigates to TicTacToe setup when clicking the card", () => {
-    render(<App />);
+    render(<MemoryRouter><App /></MemoryRouter>);
     fireEvent.click(screen.getByText("TICTACTOE"));
     expect(screen.getByTestId("game-setup")).toBeInTheDocument();
   });
 
   it("navigates to Roster Guess setup when clicking the card", () => {
-    render(<App />);
+    render(<MemoryRouter><App /></MemoryRouter>);
     fireEvent.click(screen.getByText("ROSTER GUESS"));
     expect(screen.getByTestId("roster-setup")).toBeInTheDocument();
   });
 
   it("navigates to Higher or Lower setup when clicking the card", () => {
-    render(<App />);
+    render(<MemoryRouter><App /></MemoryRouter>);
     fireEvent.click(screen.getByText("HIGHER OR LOWER"));
     expect(screen.getByTestId("hl-setup")).toBeInTheDocument();
   });
 
   it("navigates back to selection when onBack is called", () => {
-    render(<App />);
+    render(<MemoryRouter><App /></MemoryRouter>);
     fireEvent.click(screen.getByText("TICTACTOE"));
     expect(screen.getByTestId("game-setup")).toBeInTheDocument();
 
