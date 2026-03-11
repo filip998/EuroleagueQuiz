@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { Routes, Route, useNavigate, useParams, useLocation, Link } from "react-router-dom";
 import GameSetup from "./GameSetup";
 import GameBoard from "./GameBoard";
 import RosterGuessSetup from "./RosterGuessSetup";
@@ -6,68 +7,58 @@ import RosterGuessBoard from "./RosterGuessBoard";
 import HigherLowerSetup from "./HigherLowerSetup";
 import HigherLowerBoard from "./HigherLowerBoard";
 import { LogoFull } from "./Logo";
+import { getGame, getRosterGame } from "./api";
 
-function App() {
-  const [screen, setScreen] = useState("select");
-  const [game, setGame] = useState(null);
-  const [onlineInfo, setOnlineInfo] = useState(null);
+// ---------------------------------------------------------------------------
+// Helpers for persisting online game info across page refreshes
+// ---------------------------------------------------------------------------
 
-  function handleGameCreated(gameResp, online) {
-    setGame(gameResp);
-    setOnlineInfo(online || null);
-  }
-
-  function goHome() {
-    setScreen("select");
-    setGame(null);
-    setOnlineInfo(null);
-  }
-
-  // TicTacToe flow
-  if (screen === "tictactoe") {
-    if (!game) {
-      return <GameSetup onGameCreated={handleGameCreated} onBack={goHome} />;
-    }
-    return (
-      <GameBoard
-        initialState={game}
-        onNewGame={() => setGame(null)}
-        onHome={goHome}
-        onlineInfo={onlineInfo}
-      />
+function saveOnlineInfo(gameId, online) {
+  if (online) {
+    sessionStorage.setItem(
+      `elq_game_${gameId}`,
+      JSON.stringify({ playerNumber: online.playerNumber, isOnline: true })
     );
   }
+}
 
-  // Roster Guess flow
-  if (screen === "roster") {
-    if (!game) {
-      return <RosterGuessSetup onGameCreated={handleGameCreated} onBack={goHome} />;
-    }
-    return (
-      <RosterGuessBoard
-        initialState={game}
-        onNewGame={() => setGame(null)}
-        onHome={goHome}
-        onlineInfo={onlineInfo}
-      />
-    );
+function loadOnlineInfo(gameId) {
+  try {
+    const stored = sessionStorage.getItem(`elq_game_${gameId}`);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
   }
+}
 
-  // Higher or Lower flow
-  if (screen === "higherlower") {
-    if (!game) {
-      return <HigherLowerSetup onGameCreated={(resp) => setGame(resp)} onBack={goHome} />;
-    }
-    return (
-      <HigherLowerBoard
-        initialState={game}
-        onNewGame={() => setGame(null)}
-        onHome={goHome}
-      />
-    );
-  }
+// ---------------------------------------------------------------------------
+// Loading screen shown while recovering game state after a page refresh
+// ---------------------------------------------------------------------------
 
-  // Game selection screen
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen flex flex-col">
+      <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-elq-orange/10 mb-6">
+            <svg className="w-8 h-8 text-elq-orange animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+          <p className="text-elq-muted text-sm">Loading game…</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Home — game selection
+// ---------------------------------------------------------------------------
+
+function HomePage() {
   return (
     <div className="min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
@@ -83,8 +74,8 @@ function App() {
           {/* Game cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 animate-fade-in-up" style={{ animationDelay: "150ms" }}>
             {/* TicTacToe card */}
-            <button
-              onClick={() => setScreen("tictactoe")}
+            <Link
+              to="/tictactoe"
               className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-xl bg-elq-player1/10 flex items-center justify-center mb-4 group-hover:bg-elq-player1/20 transition-colors">
@@ -99,11 +90,11 @@ function App() {
               <div className="mt-4 text-xs font-semibold text-elq-orange opacity-0 group-hover:opacity-100 transition-opacity">
                 PLAY →
               </div>
-            </button>
+            </Link>
 
             {/* Roster Guess card */}
-            <button
-              onClick={() => setScreen("roster")}
+            <Link
+              to="/roster"
               className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-xl bg-elq-player2/10 flex items-center justify-center mb-4 group-hover:bg-elq-player2/20 transition-colors">
@@ -118,11 +109,11 @@ function App() {
               <div className="mt-4 text-xs font-semibold text-elq-orange opacity-0 group-hover:opacity-100 transition-opacity">
                 PLAY →
               </div>
-            </button>
+            </Link>
 
             {/* Higher or Lower card */}
-            <button
-              onClick={() => setScreen("higherlower")}
+            <Link
+              to="/higherlower"
               className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] active:scale-[0.98]"
             >
               <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center mb-4 group-hover:bg-emerald-200 transition-colors">
@@ -137,11 +128,158 @@ function App() {
               <div className="mt-4 text-xs font-semibold text-elq-orange opacity-0 group-hover:opacity-100 transition-opacity">
                 PLAY →
               </div>
-            </button>
+            </Link>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TicTacToe pages
+// ---------------------------------------------------------------------------
+
+function TicTacToeSetupPage() {
+  const navigate = useNavigate();
+
+  function handleGameCreated(resp, online) {
+    const gameData = resp.game || resp;
+    const id = gameData.id;
+    saveOnlineInfo(id, online);
+    navigate(`/tictactoe/${id}`);
+  }
+
+  return <GameSetup onGameCreated={handleGameCreated} onBack={() => navigate("/")} />;
+}
+
+function TicTacToeGamePage() {
+  const { gameId } = useParams();
+  const navigate = useNavigate();
+  const [game, setGame] = useState(null);
+  const [onlineInfo, setOnlineInfo] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getGame(gameId)
+      .then((data) => {
+        setGame(data);
+        setOnlineInfo(loadOnlineInfo(gameId));
+      })
+      .catch(() => navigate("/tictactoe", { replace: true }))
+      .finally(() => setLoading(false));
+  }, [gameId, navigate]);
+
+  if (loading) return <LoadingScreen />;
+  if (!game) return null;
+
+  return (
+    <GameBoard
+      initialState={game}
+      onNewGame={() => navigate("/tictactoe")}
+      onHome={() => navigate("/")}
+      onlineInfo={onlineInfo}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Roster Guess pages
+// ---------------------------------------------------------------------------
+
+function RosterSetupPage() {
+  const navigate = useNavigate();
+
+  function handleGameCreated(resp, online) {
+    const gameData = resp.game || resp;
+    const id = gameData.id;
+    saveOnlineInfo(id, online);
+    navigate(`/roster/${id}`);
+  }
+
+  return <RosterGuessSetup onGameCreated={handleGameCreated} onBack={() => navigate("/")} />;
+}
+
+function RosterGamePage() {
+  const { gameId } = useParams();
+  const navigate = useNavigate();
+  const [game, setGame] = useState(null);
+  const [onlineInfo, setOnlineInfo] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getRosterGame(gameId)
+      .then((data) => {
+        setGame(data);
+        setOnlineInfo(loadOnlineInfo(gameId));
+      })
+      .catch(() => navigate("/roster", { replace: true }))
+      .finally(() => setLoading(false));
+  }, [gameId, navigate]);
+
+  if (loading) return <LoadingScreen />;
+  if (!game) return null;
+
+  return (
+    <RosterGuessBoard
+      initialState={game}
+      onNewGame={() => navigate("/roster")}
+      onHome={() => navigate("/")}
+      onlineInfo={onlineInfo}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Higher or Lower pages (single-player only — no server-side GET, so state
+// is passed via router location state and cannot survive a hard refresh)
+// ---------------------------------------------------------------------------
+
+function HigherLowerSetupPage() {
+  const navigate = useNavigate();
+
+  function handleGameCreated(resp) {
+    navigate("/higherlower/play", { state: { initialState: resp } });
+  }
+
+  return <HigherLowerSetup onGameCreated={handleGameCreated} onBack={() => navigate("/")} />;
+}
+
+function HigherLowerGamePage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const initialState = location.state?.initialState;
+
+  useEffect(() => {
+    if (!initialState) navigate("/higherlower", { replace: true });
+  }, [initialState, navigate]);
+
+  if (!initialState) return null;
+
+  return (
+    <HigherLowerBoard
+      initialState={initialState}
+      onNewGame={() => navigate("/higherlower")}
+      onHome={() => navigate("/")}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Root — route definitions
+// ---------------------------------------------------------------------------
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/tictactoe" element={<TicTacToeSetupPage />} />
+      <Route path="/tictactoe/:gameId" element={<TicTacToeGamePage />} />
+      <Route path="/roster" element={<RosterSetupPage />} />
+      <Route path="/roster/:gameId" element={<RosterGamePage />} />
+      <Route path="/higherlower" element={<HigherLowerSetupPage />} />
+      <Route path="/higherlower/play" element={<HigherLowerGamePage />} />
+    </Routes>
   );
 }
 
