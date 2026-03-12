@@ -882,6 +882,7 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
                     f"{cell.claimed_player.first_name or ''} {cell.claimed_player.last_name or ''}"
                 ).strip()
 
+            claimed_player_image_url = cell.claimed_player.image_url if cell.claimed_player else None
             cell_data = {
                 "row_index": row_index,
                 "col_index": col_index,
@@ -890,6 +891,7 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
                 "claimed_by_player": cell.claimed_by_player,
                 "claimed_player_id": cell.claimed_player_id,
                 "claimed_player_name": claimed_player_name,
+                "claimed_player_image_url": claimed_player_image_url,
             }
             # Add sample answers when round is over
             if round_obj.status in ("completed", "drawn") and db is not None:
