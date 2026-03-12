@@ -322,16 +322,19 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
                     {posAbbr(slot.position)}
                   </span>
 
-                  {/* Nationality flag */}
-                  <div className="flex-shrink-0 w-7 flex justify-center">
+                  {/* Nationality flag + code */}
+                  <div className="flex-shrink-0 flex items-center gap-1">
                     {slot.country_code ? (
-                      <img
-                        src={`https://flagcdn.com/w40/${slot.country_code.toLowerCase()}.png`}
-                        alt={slot.nationality}
-                        title={slot.nationality}
-                        className="w-6 h-4 object-cover rounded-[3px] border border-slate-200/80"
-                        onError={(e) => { e.target.style.display = "none"; }}
-                      />
+                      <>
+                        <img
+                          src={`https://flagcdn.com/w40/${slot.country_code.toLowerCase()}.png`}
+                          alt={slot.nationality}
+                          title={slot.nationality}
+                          className="w-5 h-3.5 object-cover rounded-[2px] border border-slate-200/80"
+                          onError={(e) => { e.target.style.display = "none"; }}
+                        />
+                        <span className="text-[10px] text-slate-400 font-medium">{slot.country_code}</span>
+                      </>
                     ) : (
                       <span className="text-[10px] text-slate-400">{slot.nationality ? slot.nationality.slice(0, 3).toUpperCase() : "\u2014"}</span>
                     )}

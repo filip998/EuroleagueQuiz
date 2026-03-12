@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import random
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -8,6 +9,14 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, get_db
 from app.main import app
 from app.models import Player, PlayerSeasonTeam, Season, Team
+
+
+@pytest.fixture(autouse=True)
+def _seed_random():
+    """Fix random seed so board generation is deterministic in tests."""
+    random.seed(42)
+    yield
+    random.seed()
 
 
 def _find_cell(game_state: dict, row_index: int, col_index: int) -> dict:
