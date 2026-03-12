@@ -574,7 +574,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                           <img
                             src={cell.claimed_player_image_url}
                             alt={cell.claimed_player_name || ""}
-                            className="w-8 h-8 rounded-full object-cover object-top border border-slate-200"
+                            className="w-6 h-6 rounded-full object-cover object-top border border-slate-200"
                             onError={(e) => { e.target.style.display = "none"; }}
                           />
                         )}
