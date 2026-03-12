@@ -30,7 +30,7 @@ function AxisLabel({ axis }) {
         <img
           src={axis.image_url}
           alt={axis.display_label}
-          className="w-9 h-9 rounded-full object-cover border border-amber-300"
+          className="w-9 h-9 rounded-full object-cover object-top border border-amber-300"
           onError={(e) => { e.target.style.display = "none"; }}
         />
       )}
@@ -569,7 +569,15 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                     className={`relative aspect-square rounded-xl border-2 flex items-center justify-center transition-all duration-200 text-center p-1.5 ${cellBg}`}
                   >
                     {claimed ? (
-                      <div className="animate-cell-claim">
+                      <div className="animate-cell-claim flex flex-col items-center gap-0.5">
+                        {cell.claimed_player_image_url && !inTransition && (
+                          <img
+                            src={cell.claimed_player_image_url}
+                            alt={cell.claimed_player_name || ""}
+                            className="w-8 h-8 rounded-full object-cover object-top border border-slate-200"
+                            onError={(e) => { e.target.style.display = "none"; }}
+                          />
+                        )}
                         <div
                           className={`text-xs sm:text-sm font-bold ${
                             claimed === 1 ? "text-elq-player1" : "text-elq-player2"
