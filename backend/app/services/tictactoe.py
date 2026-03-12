@@ -16,7 +16,9 @@ from app.models import (
     QuizTicTacToeCell,
     QuizTicTacToeGame,
     QuizTicTacToeRound,
+    Season,
     Team,
+    TeamSeason,
 )
 
 SUPPORTED_MODES = {"single_player", "local_two_player", "online_friend"}
@@ -53,26 +55,62 @@ class TicTacToeNotImplementedError(TicTacToeError):
 AXIS_WEIGHTS = {"team": 0.65, "nationality": 0.15, "played_with": 0.20}
 MIN_NATIONALITY_PLAYERS = 5
 PLAYED_WITH_TOP_N = 50
+TEAM_CANDIDATE_LIMIT = 40
+RECENCY_PENALTY_PER_YEAR = 0.05  # 5% score reduction per year since last active
+RECENCY_FLOOR = 0.10
 
 
 def _get_team_candidates(db: Session) -> list[dict]:
-    """Get candidate teams with enough player history."""
+    """Get candidate teams ranked by recency-weighted player count.
+
+    Score = total_distinct_players × recency_factor, where
+    recency_factor = max(RECENCY_FLOOR, 1.0 - years_since_last_season × 0.05).
+    This ensures currently active teams (Monaco, Paris, Dubai…) rank above
+    historically large but long-inactive teams (Olimpija, Cibona…).
+    Display label uses the team's most recent season name.
+    """
+    current_year = date.today().year
+
+    # Raw aggregates per team
     rows = (
         db.query(
             Team.id,
             Team.name,
             func.count(distinct(PlayerSeasonTeam.player_id)).label("player_count"),
+            func.max(Season.year).label("last_season_year"),
         )
         .join(PlayerSeasonTeam, PlayerSeasonTeam.team_id == Team.id)
+        .join(Season, Season.id == PlayerSeasonTeam.season_id)
         .group_by(Team.id)
         .having(func.count(distinct(PlayerSeasonTeam.player_id)) >= 3)
-        .order_by(func.count(distinct(PlayerSeasonTeam.player_id)).desc())
-        .limit(24)
         .all()
     )
+
+    # Latest display name per team (team_name_that_season from most recent year)
+    latest_names: dict[int, str] = {}
+    name_rows = (
+        db.query(TeamSeason.team_id, TeamSeason.team_name_that_season, Season.year)
+        .join(Season, Season.id == TeamSeason.season_id)
+        .order_by(Season.year.desc())
+        .all()
+    )
+    for team_id, name, _ in name_rows:
+        if team_id not in latest_names and name:
+            latest_names[team_id] = name
+
+    # Score and rank
+    scored = []
+    for r in rows:
+        years_since = current_year - r.last_season_year
+        recency = max(RECENCY_FLOOR, 1.0 - years_since * RECENCY_PENALTY_PER_YEAR)
+        score = r.player_count * recency
+        display = latest_names.get(r.id, r.name)
+        scored.append((r.id, display, score))
+
+    scored.sort(key=lambda x: -x[2])
     return [
-        {"axis_type": "team", "value": str(r.id), "display_label": r.name}
-        for r in rows
+        {"axis_type": "team", "value": str(tid), "display_label": name}
+        for tid, name, _ in scored[:TEAM_CANDIDATE_LIMIT]
     ]
 
 
