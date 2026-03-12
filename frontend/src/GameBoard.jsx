@@ -566,7 +566,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                     type="button"
                     onClick={() => isClickable && handleCellClick(cell)}
                     disabled={!isClickable}
-                    className={`relative aspect-square rounded-xl border-2 flex items-center justify-center transition-all duration-200 text-center p-1.5 ${cellBg}`}
+                    className={`relative aspect-square rounded-xl border-2 flex items-center justify-center transition-all duration-200 text-center p-1.5 overflow-hidden min-w-0 ${cellBg}`}
                   >
                     {claimed ? (
                       <div className="animate-cell-claim flex flex-col items-center gap-0.5">
@@ -579,7 +579,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                           />
                         )}
                         <div
-                          className={`text-xs sm:text-sm font-bold ${
+                          className={`text-xs sm:text-sm font-bold truncate w-full ${
                             claimed === 1 ? "text-elq-player1" : "text-elq-player2"
                           }`}
                         >
