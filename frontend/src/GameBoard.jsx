@@ -67,7 +67,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           delete gameData.completed_round;
           setGame(gameData);
           setError(null);
-          if (result && completedRound && ["round_won", "round_drawn", "match_won", "board_complete"].includes(result)) {
+          if (result && completedRound && ["round_won", "round_drawn", "match_won", "board_complete", "draw_accepted"].includes(result)) {
             startRoundTransition(result, completedRound);
           } else if (result) {
             setLastResult(result);

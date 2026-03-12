@@ -466,17 +466,26 @@ async def tictactoe_websocket(websocket: WebSocket, game_id: int, player: int = 
                     db.commit()
                     db.refresh(game)
                 elif action == "respond_draw":
-                    respond_draw(
-                        db, game, accept=data.get("accept", False),
+                    accept = data.get("accept", False)
+                    prev_round_number = game.round_number
+                    result = respond_draw(
+                        db, game, accept=accept,
                         acting_player=player,
                     )
                     db.commit()
                     db.refresh(game)
+                    state = serialize_game_state(db, game)
+                    state["last_result"] = f"draw_{result}"
+                    if result == "accepted":
+                        completed = serialize_completed_round(db, game_id, prev_round_number)
+                        if completed:
+                            state["completed_round"] = completed
                     if game.status == "finished":
                         cancel_timer(game_id)
                     elif game.status == "active":
-                        # Draw declined or new round after draw — restart timer
                         start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
+                    await ws_manager.broadcast(game_id, state)
+                    continue
                 elif action == "time_expired":
                     # Client-sent time_expired is ignored for online games;
                     # the server timer handles expiry authoritatively.
