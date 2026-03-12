@@ -106,6 +106,37 @@ def _get_team_candidates(db: Session) -> list[dict]:
     ]
 
 
+# Mapping of EuroLeague nationality names → ISO 3166-1 alpha-2 codes
+NATIONALITY_TO_COUNTRY_CODE: dict[str, str] = {
+    "Albania": "AL", "Algeria": "DZ", "Andorra": "AD", "Angola": "AO",
+    "Argentina": "AR", "Australia": "AU", "Austria": "AT", "Bahamas": "BS",
+    "Belarus": "BY", "Belgium": "BE", "Belize": "BZ",
+    "Bosnia and Herzegovina": "BA", "Brazil": "BR", "Bulgaria": "BG",
+    "Burkina Faso": "BF", "Cabo Verde": "CV", "Cameroon": "CM",
+    "Canada": "CA", "Central African Republic": "CF", "Chad": "TD",
+    "Chile": "CL", "China": "CN", "Colombia": "CO", "Congo": "CG",
+    "Cote D'Ivoire": "CI", "Croatia": "HR", "Cuba": "CU", "Cyprus": "CY",
+    "Czech Republic": "CZ", "Democratic Republic of the Congo": "CD",
+    "Democratic Republic of the Congo (Zaire)": "CD", "Denmark": "DK",
+    "Dominican Republic": "DO", "England": "GB", "Estonia": "EE",
+    "Finland": "FI", "France": "FR", "Gabon": "GA", "Georgia": "GE",
+    "Germany": "DE", "Ghana": "GH", "Greece": "GR", "Guinea": "GN",
+    "Hungary": "HU", "Iceland": "IS", "Iran": "IR", "Ireland": "IE",
+    "Israel": "IL", "Italy": "IT", "Ivory Coast": "CI", "Jamaica": "JM",
+    "Latvia": "LV", "Lithuania": "LT", "Luxembourg": "LU", "Mali": "ML",
+    "Mexico": "MX", "Montenegro": "ME", "Netherlands": "NL",
+    "New Zealand": "NZ", "Niger": "NE", "Nigeria": "NG",
+    "North Macedonia": "MK", "Panama": "PA", "Poland": "PL",
+    "Portugal": "PT", "Puerto Rico": "PR", "Romania": "RO",
+    "Russian Federation": "RU", "Senegal": "SN", "Serbia": "RS",
+    "Seychelles": "SC", "Sierra Leone": "SL", "Slovakia": "SK",
+    "Slovenia": "SI", "Spain": "ES", "Sweden": "SE", "Switzerland": "CH",
+    "Trinidad and Tobago": "TT", "Tunisia": "TN", "Turkiye": "TR",
+    "Ukraine": "UA", "United Kingdom": "GB",
+    "United States of America": "US", "Uruguay": "UY", "Venezuela": "VE",
+}
+
+
 def _get_nationality_candidates(db: Session) -> list[dict]:
     """Get candidate nationalities using sqrt weighting."""
     rows = (
@@ -118,15 +149,19 @@ def _get_nationality_candidates(db: Session) -> list[dict]:
         .having(func.count(Player.id) >= MIN_NATIONALITY_PLAYERS)
         .all()
     )
-    return [
-        {
+    candidates = []
+    for r in rows:
+        c = {
             "axis_type": "nationality",
             "value": r.nationality,
             "display_label": r.nationality,
             "_weight": math.sqrt(r.cnt),
         }
-        for r in rows
-    ]
+        code = NATIONALITY_TO_COUNTRY_CODE.get(r.nationality)
+        if code:
+            c["country_code"] = code
+        candidates.append(c)
+    return candidates
 
 
 def _get_played_with_candidates(db: Session) -> list[dict]:
@@ -907,6 +942,10 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
                 p = db.query(Player.image_url).filter(Player.id == int(a.value)).first()
                 if p and p.image_url:
                     info["image_url"] = p.image_url
+            elif a.axis_type == "nationality":
+                code = NATIONALITY_TO_COUNTRY_CODE.get(a.value)
+                if code:
+                    info["country_code"] = code
             return info
         # Fallback: legacy team-only columns
         if legacy_team:
