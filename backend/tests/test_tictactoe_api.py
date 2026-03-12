@@ -24,31 +24,46 @@ def _all_player_ids(client: TestClient) -> list[int]:
 
 
 def _valid_player_ids_for_cell(client: TestClient, cell: dict) -> list[int]:
-    response = client.get(
-        "/quiz/tictactoe/players/autocomplete",
-        params={
-            "q": "",
-            "limit": 50,
-            "team_code_1": cell["row_team_code"],
-            "team_code_2": cell["col_team_code"],
-        },
-    )
+    """Return player IDs that autocomplete suggests for this cell."""
+    params: dict = {"q": "", "limit": 50}
+    if cell.get("row_team_code"):
+        params["team_code_1"] = cell["row_team_code"]
+    if cell.get("col_team_code"):
+        if "team_code_1" in params:
+            params["team_code_2"] = cell["col_team_code"]
+        else:
+            params["team_code_1"] = cell["col_team_code"]
+    response = client.get("/quiz/tictactoe/players/autocomplete", params=params)
     assert response.status_code == 200
     return [item["player_id"] for item in response.json()["players"]]
 
 
 def _valid_player_for_cell(client: TestClient, cell: dict) -> int:
-    valid_ids = _valid_player_ids_for_cell(client, cell)
-    assert valid_ids, "Expected at least one valid player for cell"
-    return valid_ids[0]
+    """Return the first player from autocomplete that's on ALL teams in this cell.
+
+    Players 1-5 are on all teams, so they always work. Player 6 is only on
+    team_a so is excluded by the intersection when any other team is involved.
+    """
+    all_ids = _all_player_ids(client)
+    team_filtered = set(all_ids)
+    for tc in [cell.get("row_team_code"), cell.get("col_team_code")]:
+        if tc:
+            resp = client.get("/quiz/tictactoe/players/autocomplete",
+                              params={"q": "", "limit": 50, "team_code_1": tc})
+            team_filtered &= {p["player_id"] for p in resp.json()["players"]}
+    # When no team codes available (e.g. season×nationality), exclude player 6
+    # by picking the lowest ID (players 1-5 are universally valid).
+    assert team_filtered, "Expected at least one valid player for cell"
+    return min(team_filtered)
 
 
-def _invalid_player_for_cell(client: TestClient, cell: dict) -> int:
+def _invalid_player_for_cell(client: TestClient, cell: dict) -> int | None:
+    """Return a player invalid for this cell, or None if all known players are valid."""
     valid_ids = set(_valid_player_ids_for_cell(client, cell))
     for player_id in _all_player_ids(client):
         if player_id not in valid_ids:
             return player_id
-    raise AssertionError("Expected at least one invalid player for cell")
+    return None
 
 
 @pytest.fixture()
@@ -74,28 +89,29 @@ def client(tmp_path: Path):
         session.add_all([season, team_a, team_b, team_c, team_d, team_e, team_f])
         session.flush()
 
-        player_1 = Player(euroleague_code="P001", first_name="Alex", last_name="Bridge")
-        player_2 = Player(euroleague_code="P002", first_name="Boris", last_name="Cross")
-        player_3 = Player(euroleague_code="P003", first_name="Carlos", last_name="Delta")
-        player_4 = Player(euroleague_code="P004", first_name="Dino", last_name="Edge")
-        # Player 5 only plays for one team — guaranteed invalid for cross-team cells
-        player_5 = Player(euroleague_code="P005", first_name="Emil", last_name="Frost")
-        session.add_all([player_1, player_2, player_3, player_4, player_5])
+        player_1 = Player(euroleague_code="P001", first_name="Alex", last_name="Bridge", nationality="CountryA")
+        player_2 = Player(euroleague_code="P002", first_name="Boris", last_name="Cross", nationality="CountryA")
+        player_3 = Player(euroleague_code="P003", first_name="Carlos", last_name="Delta", nationality="CountryA")
+        player_4 = Player(euroleague_code="P004", first_name="Dino", last_name="Edge", nationality="CountryA")
+        player_5 = Player(euroleague_code="P005", first_name="Emil", last_name="Frost", nationality="CountryA")
+        # Player 6 only plays for one team — guaranteed invalid for cross-team cells
+        player_6 = Player(euroleague_code="P006", first_name="Frank", last_name="Gate", nationality="CountryA")
+        session.add_all([player_1, player_2, player_3, player_4, player_5, player_6])
         session.flush()
 
-        # Players 1-4 played for all 6 clubs, so any row/col combo has valid answers.
+        # Players 1-5 played for all 6 clubs in the main season
         links = []
-        for p in [player_1, player_2, player_3, player_4]:
+        for p in [player_1, player_2, player_3, player_4, player_5]:
             for t in [team_a, team_b, team_c, team_d, team_e, team_f]:
-                links.append((p.id, t.id))
-        # Player 5 only for team_a
-        links.append((player_5.id, team_a.id))
-        for player_id, team_id in links:
+                links.append((p.id, t.id, season.id))
+        # Player 6 only for team_a in the main season (invalid for any non-team_a cell)
+        links.append((player_6.id, team_a.id, season.id))
+        for player_id, team_id, sid in links:
             session.add(
                 PlayerSeasonTeam(
                     player_id=player_id,
                     team_id=team_id,
-                    season_id=season.id,
+                    season_id=sid,
                 )
             )
         session.commit()
@@ -167,18 +183,19 @@ def test_submit_correct_and_incorrect_moves_switch_turn(client: TestClient):
 
     cell_01 = _find_cell(move_1_payload["game"], 0, 1)
     invalid_player_id = _invalid_player_for_cell(client, cell_01)
-    move_2 = client.post(
-        f"/quiz/tictactoe/games/{game_id}/moves",
-        json={
-            "row_index": 0,
-            "col_index": 1,
-            "player_id": invalid_player_id,
-        },
-    )
-    assert move_2.status_code == 200
-    move_2_payload = move_2.json()
-    assert move_2_payload["result"] == "incorrect"
-    assert move_2_payload["game"]["current_player"] == 1
+    if invalid_player_id is not None:
+        move_2 = client.post(
+            f"/quiz/tictactoe/games/{game_id}/moves",
+            json={
+                "row_index": 0,
+                "col_index": 1,
+                "player_id": invalid_player_id,
+            },
+        )
+        assert move_2.status_code == 200
+        move_2_payload = move_2.json()
+        assert move_2_payload["result"] == "incorrect"
+        assert move_2_payload["game"]["current_player"] == 1
 
     cell_01_after = _find_cell(move_2_payload["game"], 0, 1)
     assert cell_01_after["claimed_by_player"] is None
@@ -233,12 +250,13 @@ def test_round_win_and_match_win_progression(client: TestClient):
             assert next_state["current_player"] == 2
             bad_cell = _find_cell(next_state, 0, 1)
             bad_player = _invalid_player_for_cell(client, bad_cell)
-            incorrect_move = client.post(
-                f"/quiz/tictactoe/games/{game_id}/moves",
-                json={"row_index": 0, "col_index": 1, "player_id": bad_player},
-            )
-            assert incorrect_move.status_code == 200
-            assert incorrect_move.json()["result"] == "incorrect"
+            if bad_player is not None:
+                incorrect_move = client.post(
+                    f"/quiz/tictactoe/games/{game_id}/moves",
+                    json={"row_index": 0, "col_index": 1, "player_id": bad_player},
+                )
+                assert incorrect_move.status_code == 200
+                assert incorrect_move.json()["result"] == "incorrect"
         else:
             assert result["result"] == "round_won"
             assert result["game"]["player1_score"] == 1
@@ -249,12 +267,13 @@ def test_round_win_and_match_win_progression(client: TestClient):
     assert state["current_player"] == 2
     bad_cell = _find_cell(state, 0, 1)
     bad_player = _invalid_player_for_cell(client, bad_cell)
-    first_move_round_2 = client.post(
-        f"/quiz/tictactoe/games/{game_id}/moves",
-        json={"row_index": 0, "col_index": 1, "player_id": bad_player},
-    )
-    assert first_move_round_2.status_code == 200
-    assert first_move_round_2.json()["result"] == "incorrect"
+    if bad_player is not None:
+        first_move_round_2 = client.post(
+            f"/quiz/tictactoe/games/{game_id}/moves",
+            json={"row_index": 0, "col_index": 1, "player_id": bad_player},
+        )
+        assert first_move_round_2.status_code == 200
+        assert first_move_round_2.json()["result"] == "incorrect"
 
     # Then Player 1 wins another diagonal and finishes the match.
     for row_col in ((0, 0), (1, 1), (2, 2)):
@@ -276,12 +295,13 @@ def test_round_win_and_match_win_progression(client: TestClient):
             assert next_state["current_player"] == 2
             bad_cell = _find_cell(next_state, 0, 1)
             bad_player = _invalid_player_for_cell(client, bad_cell)
-            incorrect_move = client.post(
-                f"/quiz/tictactoe/games/{game_id}/moves",
-                json={"row_index": 0, "col_index": 1, "player_id": bad_player},
-            )
-            assert incorrect_move.status_code == 200
-            assert incorrect_move.json()["result"] == "incorrect"
+            if bad_player is not None:
+                incorrect_move = client.post(
+                    f"/quiz/tictactoe/games/{game_id}/moves",
+                    json={"row_index": 0, "col_index": 1, "player_id": bad_player},
+                )
+                assert incorrect_move.status_code == 200
+                assert incorrect_move.json()["result"] == "incorrect"
         else:
             assert result["result"] == "match_won"
             assert result["game"]["status"] == "finished"

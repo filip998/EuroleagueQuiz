@@ -51,11 +51,13 @@ class TicTacToeNotImplementedError(TicTacToeError):
 # ---------------------------------------------------------------------------
 
 # Weights for axis type selection (must sum to 1.0)
-AXIS_WEIGHTS = {"team": 0.65, "nationality": 0.15, "played_with": 0.20}
+AXIS_WEIGHTS = {"team": 0.58, "nationality": 0.12, "played_with": 0.20, "season": 0.10}
 MIN_NATIONALITY_PLAYERS = 5
 PLAYED_WITH_TOP_N = 100  # raw PIR query limit (filtered down after scoring)
 PLAYED_WITH_CANDIDATE_LIMIT = 80
 TEAM_CANDIDATE_LIMIT = 40
+SEASON_LOOKBACK_YEARS = 10
+SEASON_RECENCY_DECAY = 0.10  # 10% weight reduction per year from current
 RECENCY_PENALTY_PER_YEAR = 0.05  # 5% score reduction per year since last active
 RECENCY_FLOOR = 0.10
 TEAM_DIVERSITY_BONUS = 0.10  # 10% score bonus per additional team played for
@@ -179,6 +181,37 @@ def _get_played_with_candidates(db: Session) -> list[dict]:
 
     scored.sort(key=lambda c: -c["_score"])
     return scored[:PLAYED_WITH_CANDIDATE_LIMIT]
+
+
+def _get_season_candidates(db: Session) -> list[dict]:
+    """Get recent seasons as axis candidates with recency-weighted selection.
+
+    Returns the last SEASON_LOOKBACK_YEARS seasons, each weighted so the
+    current season is most likely to appear and older seasons decay by
+    SEASON_RECENCY_DECAY per year.
+    """
+    current_year = date.today().year
+    min_year = current_year - SEASON_LOOKBACK_YEARS
+
+    rows = (
+        db.query(Season)
+        .filter(Season.year >= min_year)
+        .order_by(Season.year.desc())
+        .all()
+    )
+
+    candidates = []
+    for s in rows:
+        years_ago = current_year - s.year
+        weight = max(0.1, 1.0 - years_ago * SEASON_RECENCY_DECAY)
+        label = f"{s.year}/{str(s.year + 1)[2:]}"
+        candidates.append({
+            "axis_type": "season",
+            "value": str(s.id),
+            "display_label": label,
+            "_weight": weight,
+        })
+    return candidates
 
 
 def _pick_weighted(candidates: list[dict]) -> dict:
@@ -330,6 +363,16 @@ def _player_matches_axis(db: Session, player_id: int, axis: dict) -> bool:
                 ):
                     return True
         return False
+    elif axis["axis_type"] == "season":
+        season_id = int(axis["value"])
+        return (
+            db.query(PlayerSeasonTeam)
+            .filter(
+                PlayerSeasonTeam.player_id == player_id,
+                PlayerSeasonTeam.season_id == season_id,
+            )
+            .first()
+        ) is not None
     return False
 
 
@@ -1037,6 +1080,7 @@ def _select_board_axes(db: Session) -> list[dict]:
     team_candidates = _get_team_candidates(db)
     nationality_candidates = _get_nationality_candidates(db)
     played_with_candidates = _get_played_with_candidates(db)
+    season_candidates = _get_season_candidates(db)
 
     if len(team_candidates) < 6:
         raise TicTacToeConflictError(
@@ -1125,6 +1169,19 @@ def _select_board_axes(db: Session) -> list[dict]:
                             teammates.add(r.player_id)
                 pw_player_sets[str(star_id)] = teammates
 
+    # Precompute season player sets
+    season_player_sets: dict[str, set[int]] = {}
+    if season_candidates:
+        season_ids = [int(c["value"]) for c in season_candidates]
+        season_rows = (
+            db.query(PlayerSeasonTeam.season_id, PlayerSeasonTeam.player_id)
+            .filter(PlayerSeasonTeam.season_id.in_(season_ids))
+            .distinct()
+            .all()
+        )
+        for sid, pid in season_rows:
+            season_player_sets.setdefault(str(sid), set()).add(pid)
+
     def _player_set_for(axis: dict) -> set[int]:
         if axis["axis_type"] == "team":
             return team_player_sets.get(axis["value"], set())
@@ -1132,6 +1189,8 @@ def _select_board_axes(db: Session) -> list[dict]:
             return nat_player_sets.get(axis["value"], set())
         elif axis["axis_type"] == "played_with":
             return pw_player_sets.get(axis["value"], set())
+        elif axis["axis_type"] == "season":
+            return season_player_sets.get(axis["value"], set())
         return set()
 
     # Build candidate map by type for axis selection
@@ -1139,6 +1198,7 @@ def _select_board_axes(db: Session) -> list[dict]:
         "team": team_candidates,
         "nationality": nationality_candidates,
         "played_with": played_with_candidates,
+        "season": season_candidates,
     }
 
     axis_types = list(AXIS_WEIGHTS.keys())
@@ -1165,7 +1225,7 @@ def _select_board_axes(db: Session) -> list[dict]:
                 if not available:
                     break
                 axis = random.choice(available)
-            elif chosen_type == "nationality":
+            elif chosen_type in ("nationality", "season"):
                 axis = _pick_weighted(available)
             else:
                 axis = random.choice(available)
