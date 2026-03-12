@@ -757,13 +757,15 @@ def autocomplete_players(
     query = db.query(Player)
 
     if q:
-        pattern = f"%{q}%"
-        query = query.filter(
-            or_(
-                Player.first_name.ilike(pattern),
-                Player.last_name.ilike(pattern),
+        words = q.split()
+        for word in words:
+            pattern = f"%{word}%"
+            query = query.filter(
+                or_(
+                    Player.first_name.ilike(pattern),
+                    Player.last_name.ilike(pattern),
+                )
             )
-        )
 
     team_ids: list[int] = []
     for team_code in (team_code_1, team_code_2):
