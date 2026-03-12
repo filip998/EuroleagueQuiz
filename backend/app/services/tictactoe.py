@@ -298,6 +298,15 @@ def _get_player_set_for_axis(db: Session, axis: dict) -> set[int]:
                     result.add(row.player_id)
                     break
         return result
+    elif axis["axis_type"] == "season":
+        season_id = int(axis["value"])
+        rows = (
+            db.query(PlayerSeasonTeam.player_id)
+            .filter(PlayerSeasonTeam.season_id == season_id)
+            .distinct()
+            .all()
+        )
+        return {r.player_id for r in rows}
     return set()
 
 
@@ -1169,18 +1178,35 @@ def _select_board_axes(db: Session) -> list[dict]:
                             teammates.add(r.player_id)
                 pw_player_sets[str(star_id)] = teammates
 
-    # Precompute season player sets
+    # Precompute season player sets AND team-season cross-index
     season_player_sets: dict[str, set[int]] = {}
+    team_season_player_sets: dict[tuple[str, str], set[int]] = {}
     if season_candidates:
         season_ids = [int(c["value"]) for c in season_candidates]
         season_rows = (
-            db.query(PlayerSeasonTeam.season_id, PlayerSeasonTeam.player_id)
+            db.query(PlayerSeasonTeam.season_id, PlayerSeasonTeam.team_id, PlayerSeasonTeam.player_id)
             .filter(PlayerSeasonTeam.season_id.in_(season_ids))
             .distinct()
             .all()
         )
-        for sid, pid in season_rows:
+        for sid, tid, pid in season_rows:
             season_player_sets.setdefault(str(sid), set()).add(pid)
+            team_season_player_sets.setdefault((str(tid), str(sid)), set()).add(pid)
+
+    def _cell_player_set(ra: dict, ca: dict) -> set[int]:
+        """Compute the TRUE set of valid players for a row×col cell.
+
+        For team×season combinations, we use the cross-indexed set
+        (players who played for that team IN that season) instead of
+        naively intersecting all-time team players with all-season players.
+        """
+        # Fast path: team × season (or season × team) — use cross-index
+        if ra["axis_type"] == "team" and ca["axis_type"] == "season":
+            return team_season_player_sets.get((ra["value"], ca["value"]), set())
+        if ra["axis_type"] == "season" and ca["axis_type"] == "team":
+            return team_season_player_sets.get((ca["value"], ra["value"]), set())
+        # Default: intersect the two independent player sets
+        return _player_set_for(ra) & _player_set_for(ca)
 
     def _player_set_for(axis: dict) -> set[int]:
         if axis["axis_type"] == "team":
@@ -1242,7 +1268,7 @@ def _select_board_axes(db: Session) -> list[dict]:
         valid = True
         for ra in row_axes:
             for ca in col_axes:
-                if not (_player_set_for(ra) & _player_set_for(ca)):
+                if not _cell_player_set(ra, ca):
                     valid = False
                     break
             if not valid:
