@@ -10,6 +10,7 @@ class Team(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     euroleague_code = Column(String, unique=True, nullable=False, index=True)
     name = Column(String, nullable=False)
+    short_name = Column(String, nullable=True)
     country = Column(String, nullable=True)
     logo_url = Column(String, nullable=True)
 

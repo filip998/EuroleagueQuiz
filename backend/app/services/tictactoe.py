@@ -18,7 +18,6 @@ from app.models import (
     QuizTicTacToeRound,
     Season,
     Team,
-    TeamSeason,
 )
 
 SUPPORTED_MODES = {"single_player", "local_two_player", "online_friend"}
@@ -67,7 +66,7 @@ def _get_team_candidates(db: Session) -> list[dict]:
     recency_factor = max(RECENCY_FLOOR, 1.0 - years_since_last_season × 0.05).
     This ensures currently active teams (Monaco, Paris, Dubai…) rank above
     historically large but long-inactive teams (Olimpija, Cibona…).
-    Display label uses the team's most recent season name.
+    Display label uses Team.short_name (falling back to Team.name).
     """
     current_year = date.today().year
 
@@ -76,6 +75,7 @@ def _get_team_candidates(db: Session) -> list[dict]:
         db.query(
             Team.id,
             Team.name,
+            Team.short_name,
             func.count(distinct(PlayerSeasonTeam.player_id)).label("player_count"),
             func.max(Season.year).label("last_season_year"),
         )
@@ -86,25 +86,13 @@ def _get_team_candidates(db: Session) -> list[dict]:
         .all()
     )
 
-    # Latest display name per team (team_name_that_season from most recent year)
-    latest_names: dict[int, str] = {}
-    name_rows = (
-        db.query(TeamSeason.team_id, TeamSeason.team_name_that_season, Season.year)
-        .join(Season, Season.id == TeamSeason.season_id)
-        .order_by(Season.year.desc())
-        .all()
-    )
-    for team_id, name, _ in name_rows:
-        if team_id not in latest_names and name:
-            latest_names[team_id] = name
-
     # Score and rank
     scored = []
     for r in rows:
         years_since = current_year - r.last_season_year
         recency = max(RECENCY_FLOOR, 1.0 - years_since * RECENCY_PENALTY_PER_YEAR)
         score = r.player_count * recency
-        display = latest_names.get(r.id, r.name)
+        display = r.short_name or r.name
         scored.append((r.id, display, score))
 
     scored.sort(key=lambda x: -x[2])
@@ -827,22 +815,22 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
             if a.axis_type == "team":
                 if legacy_team:
                     info["team_code"] = legacy_team.euroleague_code
-                    info["team_name"] = legacy_team.name
+                    info["team_name"] = legacy_team.short_name or legacy_team.name
                 else:
                     # Look up team by ID from axis value
                     t = db.query(Team).filter(Team.id == int(a.value)).first()
                     if t:
                         info["team_code"] = t.euroleague_code
-                        info["team_name"] = t.name
+                        info["team_name"] = t.short_name or t.name
             return info
         # Fallback: legacy team-only columns
         if legacy_team:
             return {
                 "axis_type": "team",
                 "value": str(legacy_team.id),
-                "display_label": legacy_team.name,
+                "display_label": legacy_team.short_name or legacy_team.name,
                 "team_code": legacy_team.euroleague_code,
-                "team_name": legacy_team.name,
+                "team_name": legacy_team.short_name or legacy_team.name,
             }
         return {"axis_type": "unknown", "value": "", "display_label": "?"}
 
