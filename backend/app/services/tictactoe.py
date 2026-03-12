@@ -142,6 +142,7 @@ def _get_played_with_candidates(db: Session) -> list[dict]:
         db.query(
             Player.id,
             (Player.first_name + " " + Player.last_name).label("name"),
+            Player.image_url,
             func.sum(PlayerSeasonStats.pir).label("career_pir"),
             func.count(distinct(PlayerSeasonTeam.team_id)).label("team_count"),
             func.max(Season.year).label("last_season_year"),
@@ -166,12 +167,15 @@ def _get_played_with_candidates(db: Session) -> list[dict]:
         recency = max(RECENCY_FLOOR, 1.0 - years_since * RECENCY_PENALTY_PER_YEAR)
         diversity = 1.0 + (r.team_count - 1) * TEAM_DIVERSITY_BONUS
         score = r.career_pir * recency * diversity
-        scored.append({
+        candidate = {
             "axis_type": "played_with",
             "value": str(r.id),
             "display_label": r.name,
             "_score": score,
-        })
+        }
+        if r.image_url:
+            candidate["image_url"] = r.image_url
+        scored.append(candidate)
 
     scored.sort(key=lambda c: -c["_score"])
     return scored[:PLAYED_WITH_CANDIDATE_LIMIT]
@@ -845,6 +849,10 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
                     if t:
                         info["team_code"] = t.euroleague_code
                         info["team_name"] = t.short_name or t.name
+            elif a.axis_type == "played_with":
+                p = db.query(Player.image_url).filter(Player.id == int(a.value)).first()
+                if p and p.image_url:
+                    info["image_url"] = p.image_url
             return info
         # Fallback: legacy team-only columns
         if legacy_team:

@@ -62,6 +62,7 @@ def fetch_rosters(session: Session, year: int, rate_limiter: RateLimiter) -> Non
             nationality = (person.get("country") or {}).get("name")
             position = entry.get("positionName")
             jersey = str(entry.get("dorsal", "")) or None
+            image_url = (entry.get("images") or {}).get("headshot")
 
             reg_start = _parse_date(entry.get("startDate"))
             reg_end = _parse_date(entry.get("endDate"))
@@ -79,6 +80,7 @@ def fetch_rosters(session: Session, year: int, rate_limiter: RateLimiter) -> Non
                     nationality=nationality,
                     height_cm=height_cm,
                     position=position,
+                    image_url=image_url,
                 )
                 session.add(player)
                 session.flush()
@@ -96,6 +98,8 @@ def fetch_rosters(session: Session, year: int, rate_limiter: RateLimiter) -> Non
                     player.height_cm = height_cm
                 if position:
                     player.position = position
+                if image_url:
+                    player.image_url = image_url
 
             # Upsert PlayerSeasonTeam
             pst = (

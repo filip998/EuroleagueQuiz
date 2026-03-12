@@ -15,6 +15,7 @@ class Player(Base):
     nationality = Column(String, nullable=True)
     height_cm = Column(Integer, nullable=True)
     position = Column(String, nullable=True)
+    image_url = Column(String, nullable=True)
 
     player_season_teams = relationship("PlayerSeasonTeam", back_populates="player")
 

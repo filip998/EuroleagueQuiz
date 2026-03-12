@@ -6,16 +6,17 @@ import ClubLogo from "./ClubLogo";
 
 function AxisLabel({ axis }) {
   const isTeam = axis.axis_type === "team";
+  const isPlayedWith = axis.axis_type === "played_with";
   const prefix =
     axis.axis_type === "nationality"
       ? "\ud83c\udf0d "
-      : axis.axis_type === "played_with"
+      : isPlayedWith && !axis.image_url
         ? "\ud83e\udd1d "
         : "";
   const bgColor =
     axis.axis_type === "nationality"
       ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-      : axis.axis_type === "played_with"
+      : isPlayedWith
         ? "bg-amber-50 text-amber-800 border-amber-200"
         : "bg-slate-50 text-slate-700 border-slate-200";
   return (
@@ -24,6 +25,14 @@ function AxisLabel({ axis }) {
     >
       {isTeam && axis.team_code && (
         <ClubLogo code={axis.team_code} size={28} />
+      )}
+      {isPlayedWith && axis.image_url && (
+        <img
+          src={axis.image_url}
+          alt={axis.display_label}
+          className="w-9 h-9 rounded-full object-cover border border-amber-300"
+          onError={(e) => { e.target.style.display = "none"; }}
+        />
       )}
       <span>
         {prefix}
