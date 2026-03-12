@@ -1304,6 +1304,8 @@ def _select_board_axes(db: Session) -> list[dict]:
 
     # Precompute played_with player sets (teammates with date overlap)
     pw_player_sets: dict[str, set[int]] = {}
+    star_stint_map: dict[int, list] = {}
+    roster_by_key: dict[tuple[int, int], list] = {}
     if played_with_candidates:
         star_ids = [int(c["value"]) for c in played_with_candidates]
         star_stints = (
@@ -1378,16 +1380,49 @@ def _select_board_axes(db: Session) -> list[dict]:
     def _cell_player_set(ra: dict, ca: dict) -> set[int]:
         """Compute the TRUE set of valid players for a row×col cell.
 
-        For team×season combinations, we use the cross-indexed set
-        (players who played for that team IN that season) instead of
-        naively intersecting all-time team players with all-season players.
+        For season cross-constraints, we compute the precise set rather than
+        naively intersecting independent all-time player sets.
         """
-        # Fast path: team × season (or season × team) — use cross-index
-        if ra["axis_type"] == "team" and ca["axis_type"] == "season":
-            return team_season_player_sets.get((ra["value"], ca["value"]), set())
-        if ra["axis_type"] == "season" and ca["axis_type"] == "team":
-            return team_season_player_sets.get((ca["value"], ra["value"]), set())
-        # Default: intersect the two independent player sets
+        # Identify if one axis is a season
+        season_axis = None
+        other_axis = None
+        if ra["axis_type"] == "season" and ca["axis_type"] != "season":
+            season_axis, other_axis = ra, ca
+        elif ca["axis_type"] == "season" and ra["axis_type"] != "season":
+            season_axis, other_axis = ca, ra
+
+        if season_axis:
+            sid = season_axis["value"]
+            if other_axis["axis_type"] == "team":
+                # Team × Season: players on that team in that season
+                return team_season_player_sets.get((other_axis["value"], sid), set())
+            elif other_axis["axis_type"] == "played_with":
+                # Played_with × Season: teammates restricted to that season
+                all_teammates = pw_player_sets.get(other_axis["value"], set())
+                season_players = season_player_sets.get(sid, set())
+                # Filter to teammates who were actually teammates IN that season
+                star_id = int(other_axis["value"])
+                star_season_teams = {
+                    (s.team_id, s.season_id)
+                    for s in star_stint_map.get(star_id, [])
+                    if str(s.season_id) == sid
+                }
+                if not star_season_teams:
+                    return set()
+                # Only include teammates from rosters matching star's teams in this season
+                result = set()
+                for team_id, s_id in star_season_teams:
+                    for r in roster_by_key.get((team_id, s_id), []):
+                        if r.player_id != star_id and r.player_id in all_teammates:
+                            result.add(r.player_id)
+                return result
+            elif other_axis["axis_type"] == "nationality":
+                # Nationality × Season
+                season_players = season_player_sets.get(sid, set())
+                nat_players = nat_player_sets.get(other_axis["value"], set())
+                return season_players & nat_players
+
+        # No season cross-constraint — standard intersection
         return _player_set_for(ra) & _player_set_for(ca)
 
     def _player_set_for(axis: dict) -> set[int]:

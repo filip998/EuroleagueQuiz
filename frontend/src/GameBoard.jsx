@@ -4,21 +4,14 @@ import PlayerSearch from "./PlayerSearch";
 import { LogoMini } from "./Logo";
 import ClubLogo from "./ClubLogo";
 
-function countryCodeToFlag(code) {
-  if (!code || code.length !== 2) return null;
-  return String.fromCodePoint(
-    ...code.toUpperCase().split("").map(c => 0x1F1E6 + c.charCodeAt(0) - 65)
-  );
-}
-
 function AxisLabel({ axis }) {
   const isTeam = axis.axis_type === "team";
   const isPlayedWith = axis.axis_type === "played_with";
   const isSeason = axis.axis_type === "season";
   const isNationality = axis.axis_type === "nationality";
-  const flag = isNationality ? countryCodeToFlag(axis.country_code) : null;
+  const countryCode = isNationality ? axis.country_code : null;
   const prefix =
-    isNationality && !flag
+    isNationality && !countryCode
       ? "\ud83c\udf0d "
       : isPlayedWith && !axis.image_url
         ? "\ud83e\udd1d "
@@ -48,7 +41,14 @@ function AxisLabel({ axis }) {
           onError={(e) => { e.target.style.display = "none"; }}
         />
       )}
-      {flag && <span className="text-2xl leading-none">{flag}</span>}
+      {countryCode && (
+        <img
+          src={`https://flagcdn.com/w80/${countryCode.toLowerCase()}.png`}
+          alt={axis.display_label}
+          className="w-8 h-6 object-cover rounded-sm border border-emerald-200"
+          onError={(e) => { e.target.style.display = "none"; }}
+        />
+      )}
       <span>
         {prefix}
         {axis.display_label || axis.team_name}
