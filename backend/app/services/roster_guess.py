@@ -622,18 +622,36 @@ def _serialize_round(round_obj: RosterGuessRound) -> dict:
         "guessed_count": guessed_count,
         "status": round_obj.status,
         "slots": [
-            {
-                "id": slot.id,
-                "jersey_number": slot.jersey_number,
-                "position": slot.position,
-                "nationality": slot.nationality,
-                "height_cm": slot.height_cm,
-                "guessed_by_player": slot.guessed_by_player,
-                "player_name": slot.player_name if (slot.guessed_by_player is not None or round_over) else None,
-            }
+            _serialize_slot(slot, round_over)
             for slot in slots
         ],
     }
+
+
+# Reuse the TicTacToe nationality mapping for flag images
+from app.services.tictactoe import NATIONALITY_TO_COUNTRY_CODE
+
+
+def _serialize_slot(slot, round_over: bool) -> dict:
+    show_answer = slot.guessed_by_player is not None or round_over
+    data = {
+        "id": slot.id,
+        "jersey_number": slot.jersey_number,
+        "position": slot.position,
+        "nationality": slot.nationality,
+        "height_cm": slot.height_cm,
+        "guessed_by_player": slot.guessed_by_player,
+        "player_name": slot.player_name if show_answer else None,
+    }
+    # Include country code for flag display
+    if slot.nationality:
+        code = NATIONALITY_TO_COUNTRY_CODE.get(slot.nationality)
+        if code:
+            data["country_code"] = code
+    # Include player image when answer is revealed
+    if show_answer and slot.player and slot.player.image_url:
+        data["image_url"] = slot.player.image_url
+    return data
 
 
 def serialize_completed_round(

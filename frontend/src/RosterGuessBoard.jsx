@@ -252,27 +252,99 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
       )}
       {(lastResult || error) && (<div className="flex-shrink-0 px-3 pt-2 max-w-5xl mx-auto w-full">{lastResult && (<div className={`px-3 py-1.5 rounded-lg text-center text-xs font-medium animate-slide-down ${["round_won","match_won","round_complete","board_complete"].includes(lastResult) ? "bg-elq-orange/10 text-elq-orange" : lastResult === "correct" ? "bg-emerald-50 text-emerald-700" : lastResult === "incorrect" || lastResult === "time_expired" ? "bg-red-50 text-red-600" : lastResult === "given_up" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{resultMessages[lastResult] || lastResult}{inTransition && roundTransition.countdown !== null && <span className="ml-2 font-bold">{isSolo ? `Next roster in ${roundTransition.countdown}...` : `Next in ${roundTransition.countdown}...`}</span>}</div>)}{inTransition && roundTransition.countdown === null && (<div className="text-center mt-3"><button onClick={() => { setRoundTransition(null); setLastResult(null); }} className="px-6 py-2.5 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all">Start New Round</button></div>)}{error && <div className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs text-center mt-1">{error}</div>}</div>)}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-3 py-2">
-          <table className="w-full text-sm border-collapse">
-            <thead><tr className="border-b-2 border-elq-dark/20 bg-slate-50"><th className="text-center py-2.5 px-2 font-bold text-xs uppercase tracking-wider text-elq-dark">Player</th><th className="text-center py-2.5 px-2 w-10 font-bold text-xs uppercase tracking-wider text-elq-dark">#</th><th className="text-center py-2.5 px-2 w-12 font-bold text-xs uppercase tracking-wider text-elq-dark">Pos</th><th className="text-center py-2.5 px-2 font-bold text-xs uppercase tracking-wider text-elq-dark">Nationality</th><th className="text-center py-2.5 px-2 w-20 font-bold text-xs uppercase tracking-wider text-elq-dark hidden sm:table-cell">Ht (cm)</th></tr></thead>
-            <tbody>
-              {sortedSlots.map((slot, i) => {
-                const guessed = slot.guessed_by_player != null;
-                const revealed = !guessed && displayRoundOver && slot.player_name;
-                const p1 = slot.guessed_by_player === 1;
-                const p2 = slot.guessed_by_player === 2;
-                return (
-                  <tr key={slot.id} className={`border-b border-elq-border/40 transition-colors ${p1 ? "bg-blue-50/70" : p2 ? "bg-red-50/70" : revealed ? "bg-amber-50/50" : i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}>
-                    <td className="py-1.5 px-2 text-center">{guessed ? (<span className={`font-semibold text-sm ${p1 ? "text-elq-player1" : "text-elq-player2"}`}>{slot.player_name}</span>) : revealed ? (<span className="text-sm text-amber-700 font-medium italic">{slot.player_name}</span>) : (<span className="text-slate-300 text-sm">???</span>)}</td>
-                    <td className="py-1.5 px-2 text-center"><span className={`inline-flex items-center justify-center w-7 h-7 rounded-md text-[11px] font-bold font-mono ${p1 ? "bg-elq-player1/10 text-elq-player1" : p2 ? "bg-elq-player2/10 text-elq-player2" : "bg-slate-100 text-slate-500"}`}>{slot.jersey_number || "?"}</span></td>
-                    <td className="py-1.5 px-2 text-center text-xs text-elq-muted font-medium">{posAbbr(slot.position)}</td>
-                    <td className="py-1.5 px-2 text-center text-xs text-elq-muted">{slot.nationality || "\u2014"}</td>
-                    <td className="py-1.5 px-2 text-center text-xs text-elq-muted hidden sm:table-cell">{slot.height_cm || "\u2014"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="max-w-5xl mx-auto px-3 py-3">
+          <div className="grid gap-1.5">
+            {sortedSlots.map((slot, i) => {
+              const guessed = slot.guessed_by_player != null;
+              const revealed = !guessed && displayRoundOver && slot.player_name;
+              const showPlayer = guessed || revealed;
+              const p1 = slot.guessed_by_player === 1;
+              const p2 = slot.guessed_by_player === 2;
+              const bgClass = p1
+                ? "bg-blue-50 border-elq-player1/30"
+                : p2
+                  ? "bg-red-50 border-elq-player2/30"
+                  : revealed
+                    ? "bg-amber-50/70 border-amber-200/60"
+                    : "bg-white border-elq-border/50";
+              return (
+                <div
+                  key={slot.id}
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border ${bgClass} transition-all duration-300`}
+                >
+                  {/* Player photo or mystery silhouette */}
+                  <div className="flex-shrink-0 w-10 h-10 rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center">
+                    {showPlayer && slot.image_url ? (
+                      <img
+                        src={slot.image_url}
+                        alt={slot.player_name}
+                        className="w-full h-full object-cover object-top"
+                        onError={(e) => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }}
+                      />
+                    ) : null}
+                    <svg
+                      className={`w-5 h-5 text-slate-300 ${showPlayer && slot.image_url ? "hidden" : ""}`}
+                      fill="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" />
+                    </svg>
+                  </div>
+
+                  {/* Jersey number */}
+                  <span className={`flex-shrink-0 w-8 text-center font-mono font-bold text-sm ${
+                    p1 ? "text-elq-player1" : p2 ? "text-elq-player2" : "text-slate-400"
+                  }`}>
+                    {slot.jersey_number || "?"}
+                  </span>
+
+                  {/* Player name or mystery */}
+                  <div className="flex-1 min-w-0">
+                    {guessed ? (
+                      <span className={`font-semibold text-sm truncate block ${p1 ? "text-elq-player1" : "text-elq-player2"}`}>
+                        {slot.player_name}
+                      </span>
+                    ) : revealed ? (
+                      <span className="text-sm text-amber-700 font-medium italic truncate block">
+                        {slot.player_name}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-slate-300 font-medium">???</span>
+                    )}
+                  </div>
+
+                  {/* Position badge */}
+                  <span className={`flex-shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                    p1 ? "bg-elq-player1/10 text-elq-player1"
+                    : p2 ? "bg-elq-player2/10 text-elq-player2"
+                    : "bg-slate-100 text-slate-500"
+                  }`}>
+                    {posAbbr(slot.position)}
+                  </span>
+
+                  {/* Nationality flag */}
+                  <div className="flex-shrink-0 w-7 flex justify-center">
+                    {slot.country_code ? (
+                      <img
+                        src={`https://flagcdn.com/w40/${slot.country_code.toLowerCase()}.png`}
+                        alt={slot.nationality}
+                        title={slot.nationality}
+                        className="w-6 h-4 object-cover rounded-[3px] border border-slate-200/80"
+                        onError={(e) => { e.target.style.display = "none"; }}
+                      />
+                    ) : (
+                      <span className="text-[10px] text-slate-400">{slot.nationality ? slot.nationality.slice(0, 3).toUpperCase() : "\u2014"}</span>
+                    )}
+                  </div>
+
+                  {/* Height */}
+                  <span className="flex-shrink-0 w-10 text-right text-[11px] text-slate-400 tabular-nums hidden sm:block">
+                    {slot.height_cm ? `${slot.height_cm}` : "\u2014"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
       <div className="bg-white border-t border-elq-border flex-shrink-0">
