@@ -53,10 +53,12 @@ class TicTacToeNotImplementedError(TicTacToeError):
 # Weights for axis type selection (must sum to 1.0)
 AXIS_WEIGHTS = {"team": 0.65, "nationality": 0.15, "played_with": 0.20}
 MIN_NATIONALITY_PLAYERS = 5
-PLAYED_WITH_TOP_N = 50
+PLAYED_WITH_TOP_N = 100  # raw PIR query limit (filtered down after scoring)
+PLAYED_WITH_CANDIDATE_LIMIT = 80
 TEAM_CANDIDATE_LIMIT = 40
 RECENCY_PENALTY_PER_YEAR = 0.05  # 5% score reduction per year since last active
 RECENCY_FLOOR = 0.10
+TEAM_DIVERSITY_BONUS = 0.10  # 10% score bonus per additional team played for
 
 
 def _get_team_candidates(db: Session) -> list[dict]:
@@ -126,32 +128,53 @@ def _get_nationality_candidates(db: Session) -> list[dict]:
 
 
 def _get_played_with_candidates(db: Session) -> list[dict]:
-    """Get top players by career PIR as 'played with' axis candidates."""
+    """Get top players as 'played with' axis candidates.
+
+    Ranked by score = career_PIR × recency × team_diversity, where
+    recency decays 5% per year since last active season and
+    team_diversity gives a 10% bonus per additional team played for.
+    This favours active players who moved between clubs (= richer
+    teammate pools) over retired one-club legends.
+    """
+    current_year = date.today().year
+
     rows = (
         db.query(
             Player.id,
             (Player.first_name + " " + Player.last_name).label("name"),
             func.sum(PlayerSeasonStats.pir).label("career_pir"),
+            func.count(distinct(PlayerSeasonTeam.team_id)).label("team_count"),
+            func.max(Season.year).label("last_season_year"),
         )
         .join(PlayerSeasonTeam, PlayerSeasonTeam.player_id == Player.id)
         .join(
             PlayerSeasonStats,
             PlayerSeasonStats.player_season_team_id == PlayerSeasonTeam.id,
         )
+        .join(Season, Season.id == PlayerSeasonTeam.season_id)
         .group_by(Player.id)
         .order_by(func.sum(PlayerSeasonStats.pir).desc())
         .limit(PLAYED_WITH_TOP_N)
         .all()
     )
-    return [
-        {
+
+    scored = []
+    for r in rows:
+        if r.career_pir is None:
+            continue
+        years_since = current_year - r.last_season_year
+        recency = max(RECENCY_FLOOR, 1.0 - years_since * RECENCY_PENALTY_PER_YEAR)
+        diversity = 1.0 + (r.team_count - 1) * TEAM_DIVERSITY_BONUS
+        score = r.career_pir * recency * diversity
+        scored.append({
             "axis_type": "played_with",
             "value": str(r.id),
             "display_label": r.name,
-        }
-        for r in rows
-        if r.career_pir is not None
-    ]
+            "_score": score,
+        })
+
+    scored.sort(key=lambda c: -c["_score"])
+    return scored[:PLAYED_WITH_CANDIDATE_LIMIT]
 
 
 def _pick_weighted(candidates: list[dict]) -> dict:
