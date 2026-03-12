@@ -265,7 +265,7 @@ async def submit_tictactoe_move(
 
         # Include completed round with sample answers on round-ending moves
         response = {"result": result, "game": state}
-        if result in ("round_won", "round_drawn", "match_won"):
+        if result in ("round_won", "round_drawn", "match_won", "board_complete"):
             completed = serialize_completed_round(db, game_id, prev_round_number)
             if completed:
                 response["completed_round"] = completed
