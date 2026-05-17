@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 
 from app.database import SessionLocal
+from app.game_actions import GAME_ACTION_NOOP, run_game_action
 from app.models.roster_guess import RosterGuessGame
 
 logger = logging.getLogger(__name__)
@@ -21,24 +22,29 @@ async def _expire_turn(game_id: int, expected_player: int, expected_round: int):
 
     db = SessionLocal()
     try:
-        game = db.query(RosterGuessGame).filter(
-            RosterGuessGame.id == game_id
-        ).first()
-        if not game:
-            return
+        def action():
+            game = db.query(RosterGuessGame).filter(
+                RosterGuessGame.id == game_id
+            ).first()
+            if not game:
+                return GAME_ACTION_NOOP
 
-        if (
-            game.status != "active"
-            or game.current_player != expected_player
-            or game.round_number != expected_round
-        ):
-            return
+            if (
+                game.status != "active"
+                or game.current_player != expected_player
+                or game.round_number != expected_round
+            ):
+                return GAME_ACTION_NOOP
 
-        game.current_player = _other_player(expected_player)
-        now = datetime.utcnow()
-        game.turn_started_at = now
-        game.updated_at = now
-        db.commit()
+            game.current_player = _other_player(expected_player)
+            now = datetime.utcnow()
+            game.turn_started_at = now
+            game.updated_at = now
+            return game
+
+        game = run_game_action(db, action)
+        if game is GAME_ACTION_NOOP:
+            return
         db.refresh(game)
 
         try:
@@ -53,7 +59,6 @@ async def _expire_turn(game_id: int, expected_player: int, expected_round: int):
             _schedule_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
     except Exception:
         logger.exception("Error in roster-guess timer for game %s", game_id)
-        db.rollback()
     finally:
         db.close()
 

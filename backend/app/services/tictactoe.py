@@ -8,6 +8,12 @@ from typing import Optional
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import Session
 
+from app.game_actions import (
+    ConflictGameActionError,
+    InvalidGameActionError,
+    NotFoundGameActionError,
+    UnsupportedGameActionError,
+)
 from app.models import (
     Player,
     PlayerSeasonStats,
@@ -26,24 +32,10 @@ TARGET_WINS_OPTIONS = {2, 3, 5}
 TIMER_MODE_TO_SECONDS = {"15s": 15, "40s": 40, "unlimited": None}
 
 
-class TicTacToeError(Exception):
-    status_code = 400
-
-    def __init__(self, detail: str):
-        super().__init__(detail)
-        self.detail = detail
-
-
-class TicTacToeNotFoundError(TicTacToeError):
-    status_code = 404
-
-
-class TicTacToeConflictError(TicTacToeError):
-    status_code = 409
-
-
-class TicTacToeNotImplementedError(TicTacToeError):
-    status_code = 501
+TicTacToeError = InvalidGameActionError
+TicTacToeNotFoundError = NotFoundGameActionError
+TicTacToeConflictError = ConflictGameActionError
+TicTacToeNotImplementedError = UnsupportedGameActionError
 
 
 # ---------------------------------------------------------------------------

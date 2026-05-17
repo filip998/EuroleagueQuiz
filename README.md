@@ -58,6 +58,12 @@ python -m ingestion.ingest --start-season 2000 --end-season 2025
 
 Once the server is running, visit `http://localhost:8000/docs` for the interactive API documentation.
 
+### Architecture Notes
+
+Mutating quiz operations use a **Game action** seam in `backend/app/game_actions.py`.
+Routers, WebSocket handlers, and timer jobs run game actions through this helper so the
+application layer owns commit/rollback and game modules stay HTTP-agnostic.
+
 ## Frontend
 
 ### Setup
