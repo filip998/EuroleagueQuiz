@@ -7,6 +7,10 @@ from typing import Literal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.game_actions import (
+    InvalidGameActionError,
+    NotFoundGameActionError,
+)
 from app.models.game import Game
 from app.models.higher_lower import HigherLowerGame, HigherLowerScore
 from app.models.player import Player, PlayerSeasonTeam
@@ -268,7 +272,7 @@ def create_game(
     """Create a new Higher or Lower game and return the first pair."""
     eligible = _eligible_player_ids(db, season_range_start, season_range_end)
     if len(eligible) < 2:
-        raise ValueError("Not enough eligible players for the selected season range")
+        raise InvalidGameActionError("Not enough eligible players for the selected season range")
 
     pair = _generate_pair(db, eligible, tier, season_range_start, season_range_end)
 
@@ -308,9 +312,9 @@ def submit_answer(
     """Validate the player's answer and return the result."""
     game = db.query(HigherLowerGame).filter(HigherLowerGame.id == game_id).first()
     if not game:
-        raise ValueError("Game not found")
+        raise NotFoundGameActionError("Game not found")
     if game.status != "active":
-        raise ValueError("Game is already finished")
+        raise InvalidGameActionError("Game is already finished")
 
     left_val = game.left_value
     right_val = game.right_value

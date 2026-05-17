@@ -6,6 +6,11 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.game_actions import (
+    ConflictGameActionError,
+    InvalidGameActionError,
+    NotFoundGameActionError,
+)
 from app.models import Player, PlayerSeasonTeam, Season, Team, TeamSeason
 from app.models.roster_guess import RosterGuessGame, RosterGuessRound, RosterGuessSlot
 
@@ -27,20 +32,9 @@ MAX_ROSTER_RETRIES = 10
 # ---------------------------------------------------------------------------
 
 
-class RosterGuessError(Exception):
-    status_code = 400
-
-    def __init__(self, detail: str):
-        super().__init__(detail)
-        self.detail = detail
-
-
-class RosterGuessNotFoundError(RosterGuessError):
-    status_code = 404
-
-
-class RosterGuessConflictError(RosterGuessError):
-    status_code = 409
+RosterGuessError = InvalidGameActionError
+RosterGuessNotFoundError = NotFoundGameActionError
+RosterGuessConflictError = ConflictGameActionError
 
 
 # ---------------------------------------------------------------------------
