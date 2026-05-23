@@ -1,18 +1,17 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import func
 
-from app.database import get_db, SessionLocal
+from app.database import get_db
 from app.game_actions import (
     GameActionError,
     raise_http_game_action_error,
-    run_game_action,
     run_http_game_action,
-    websocket_error_payload,
 )
 from app.models import Player, PlayerSeasonTeam, PlayerSeasonStats, Team, Season
+from app.schemas.realtime import RealtimeResult
 from app.schemas.player import PlayerDetail, SeasonStatsEntry
 from app.schemas.quiz_ttt import (
     TicTacToeCreateGameRequest,
@@ -32,27 +31,11 @@ from app.services.tictactoe import (
     serialize_game_state,
     submit_move,
 )
-from app.services.timer_manager import start_turn_timer, cancel_timer
+from app.services.realtime import OnlineGameRealtimeModule
+from app.services.realtime_adapters import TicTacToeRealtimeAdapter
 
 router = APIRouter()
-
-
-import asyncio
-
-
-def _try_broadcast(game_id: int, state: dict):
-    """Best-effort broadcast game state to connected WebSocket clients."""
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(ws_manager.broadcast(game_id, state))
-    except RuntimeError:
-        # No running loop in this thread — use run_coroutine_threadsafe
-        try:
-            import uvicorn
-            loop = asyncio.get_event_loop()
-            asyncio.run_coroutine_threadsafe(ws_manager.broadcast(game_id, state), loop)
-        except Exception:
-            pass
+tictactoe_realtime = OnlineGameRealtimeModule(TicTacToeRealtimeAdapter())
 
 
 @router.get("/random-player")
@@ -275,8 +258,18 @@ async def submit_tictactoe_move(
         if completed:
             response["completed_round"] = completed
 
-    await ws_manager.broadcast(game_id, {**state, "last_result": result,
-        **({"completed_round": response.get("completed_round")} if "completed_round" in response else {})})
+    if game.mode == "online_friend":
+        if result == RealtimeResult.MATCH_WON:
+            tictactoe_realtime.cancel_timer(game_id)
+        else:
+            tictactoe_realtime.start_timer_from_game(game)
+
+    await tictactoe_realtime.broadcast_state(
+        game_id,
+        state,
+        result=result,
+        completed_round=response.get("completed_round"),
+    )
     return response
 
 
@@ -290,7 +283,7 @@ async def offer_tictactoe_draw(game_id: int, db: Session = Depends(get_db)):
     game = run_http_game_action(db, action)
     db.refresh(game)
     state = serialize_game_state(db, game)
-    await ws_manager.broadcast(game_id, state)
+    await tictactoe_realtime.broadcast_state(game_id, state)
     return {"result": "offered", "game": state}
 
 
@@ -316,10 +309,18 @@ async def respond_tictactoe_draw(
         if completed:
             response["completed_round"] = completed
 
-    broadcast_data = {**state, "last_result": f"draw_{result}"}
-    if "completed_round" in response:
-        broadcast_data["completed_round"] = response["completed_round"]
-    await ws_manager.broadcast(game_id, broadcast_data)
+    if game.mode == "online_friend":
+        if game.status == "finished":
+            tictactoe_realtime.cancel_timer(game_id)
+        elif game.status == "active":
+            tictactoe_realtime.start_timer_from_game(game)
+
+    await tictactoe_realtime.broadcast_state(
+        game_id,
+        state,
+        result=f"draw_{result}",
+        completed_round=response.get("completed_round"),
+    )
     return response
 
 
@@ -376,143 +377,15 @@ async def join_tictactoe_game(
     )
     db.refresh(game)
     state = serialize_game_state(db, game)
-    await ws_manager.broadcast(game.id, state)
+    await tictactoe_realtime.broadcast_state(game.id, state)
     # Start server-side turn timer for the online game
-    start_turn_timer(game.id, game.turn_seconds, game.current_player, game.round_number)
+    tictactoe_realtime.start_timer_from_game(game)
     return {"game_id": game.id, "game": state}
-
-
-# ---------------------------------------------------------------------------
-# WebSocket connection manager
-# ---------------------------------------------------------------------------
-
-class ConnectionManager:
-    def __init__(self):
-        # {game_id: {player_number: WebSocket}}
-        self.connections: dict[int, dict[int, WebSocket]] = {}
-
-    async def connect(self, game_id: int, player: int, ws: WebSocket):
-        await ws.accept()
-        self.connections.setdefault(game_id, {})[player] = ws
-
-    def disconnect(self, game_id: int, player: int):
-        if game_id in self.connections:
-            self.connections[game_id].pop(player, None)
-            if not self.connections[game_id]:
-                del self.connections[game_id]
-
-    async def broadcast(self, game_id: int, state: dict):
-        conns = self.connections.get(game_id, {})
-        for ws in list(conns.values()):
-            try:
-                await ws.send_json(state)
-            except Exception:
-                pass
-
-
-ws_manager = ConnectionManager()
 
 
 @router.websocket("/tictactoe/ws/{game_id}")
 async def tictactoe_websocket(websocket: WebSocket, game_id: int, player: int = 1):
-    db = SessionLocal()
-    try:
-        game = get_game_or_404(db, game_id)
-        await ws_manager.connect(game_id, player, websocket)
-        # Send current state on connect
-        state = serialize_game_state(db, game)
-        await websocket.send_json(state)
-
-        while True:
-            data = await websocket.receive_json()
-            action = data.get("action")
-            try:
-                # Refresh game from DB to pick up changes from REST endpoints
-                db.expire(game)
-                db.refresh(game)
-
-                if action == "move":
-                    player_id = data["player_id"]
-                    row_idx = data["row_index"]
-                    col_idx = data["col_index"]
-                    prev_round_number, result = run_game_action(
-                        db,
-                        lambda: (
-                            game.round_number,
-                            submit_move(
-                                db, game=game, row_index=row_idx, col_index=col_idx,
-                                player_id=player_id, acting_player=player,
-                            ),
-                        ),
-                    )
-                    db.refresh(game)
-                    state = serialize_game_state(db, game)
-                    state["last_result"] = result
-                    if result in ("round_won", "round_drawn", "match_won"):
-                        completed = serialize_completed_round(db, game_id, prev_round_number)
-                        if completed:
-                            state["completed_round"] = completed
-                        if result == "match_won":
-                            cancel_timer(game_id)
-                        else:
-                            # New round started — timer for next turn
-                            start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
-                    else:
-                        # Turn switched (correct or incorrect) — timer for next turn
-                        start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
-                    await ws_manager.broadcast(game_id, state)
-                    continue
-                elif action == "offer_draw":
-                    run_game_action(
-                        db,
-                        lambda: offer_draw(db, game, acting_player=player),
-                    )
-                    db.refresh(game)
-                elif action == "respond_draw":
-                    accept = data.get("accept", False)
-                    prev_round_number, result = run_game_action(
-                        db,
-                        lambda: (
-                            game.round_number,
-                            respond_draw(
-                                db, game, accept=accept,
-                                acting_player=player,
-                            ),
-                        ),
-                    )
-                    db.refresh(game)
-                    state = serialize_game_state(db, game)
-                    state["last_result"] = f"draw_{result}"
-                    if result == "accepted":
-                        completed = serialize_completed_round(db, game_id, prev_round_number)
-                        if completed:
-                            state["completed_round"] = completed
-                    if game.status == "finished":
-                        cancel_timer(game_id)
-                    elif game.status == "active":
-                        start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
-                    await ws_manager.broadcast(game_id, state)
-                    continue
-                elif action == "time_expired":
-                    # Client-sent time_expired is ignored for online games;
-                    # the server timer handles expiry authoritatively.
-                    continue
-                else:
-                    await websocket.send_json({"error": f"Unknown action: {action}"})
-                    continue
-
-                state = serialize_game_state(db, game)
-                await ws_manager.broadcast(game_id, state)
-
-            except GameActionError as exc:
-                await websocket.send_json(websocket_error_payload(exc))
-
-    except WebSocketDisconnect:
-        ws_manager.disconnect(game_id, player)
-    except Exception:
-        ws_manager.disconnect(game_id, player)
-    finally:
-        db.close()
+    await tictactoe_realtime.connect(websocket, game_id, player)
 
 
 def _build_season_entries(db: Session, player_id: int) -> List[SeasonStatsEntry]:

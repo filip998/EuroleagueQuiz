@@ -83,5 +83,6 @@ def test_run_http_game_action_maps_domain_error():
 
 def test_websocket_error_payload_preserves_public_message():
     assert websocket_error_payload(ConflictGameActionError("not your turn")) == {
-        "error": "not your turn",
+        "type": "error",
+        "payload": {"code": "conflict", "message": "not your turn"},
     }

@@ -64,6 +64,16 @@ Mutating quiz operations use a **Game action** seam in `backend/app/game_actions
 Routers, WebSocket handlers, and timer jobs run game actions through this helper so the
 application layer owns commit/rollback and game modules stay HTTP-agnostic.
 
+Online TicTacToe and Roster Guess share an **Online Game Realtime Module**. The backend
+Module in `backend/app/services/realtime.py` owns WebSocket connection cleanup,
+broadcast envelopes, server-side turn timers, timer expiry, and schema-compliant
+error/result messages. Game-specific Adapters in `backend/app/services/realtime_adapters.py`
+map TicTacToe and Roster Guess rules into that shared Interface.
+
+The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
+`frontend/src/useOnlineGameRealtime.js`, so reconnect, background state sync,
+waiting-for-opponent polling, cleanup, and action dispatch stay out of the game boards.
+
 ## Frontend
 
 ### Setup
