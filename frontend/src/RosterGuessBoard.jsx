@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { getRosterGame, submitRosterGuess, offerEndRound, respondEndRound, connectRosterWebSocket, autocompleteRosterPlayer, giveUpRosterRound } from "./api";
+import { getRosterGame, submitRosterGuess, offerEndRound, respondEndRound, connectRosterGuessRealtime, autocompleteRosterPlayer, giveUpRosterRound } from "./api";
+import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
+import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import { LogoMini } from "./Logo";
 import ClubLogo from "./ClubLogo";
 
@@ -23,7 +25,6 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   const [timeLeft, setTimeLeft] = useState(null);
   const [roundTransition, setRoundTransition] = useState(null);
   const [revealCountdown, setRevealCountdown] = useState(null);
-  const wsRef = useRef(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -33,38 +34,29 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   const isOnline = onlineInfo?.isOnline;
   const myPlayer = onlineInfo?.playerNumber;
   const isSolo = game?.mode === "single_player";
+  const realtimeUnavailableMessage = "Realtime connection unavailable. Reconnecting...";
 
-  useEffect(() => {
-    if (!isOnline || !game?.id) return;
-    let ws = null, reconnectTimeout = null, closed = false;
-    function connect() {
-      if (closed) return;
-      ws = connectRosterWebSocket(game.id, myPlayer, (data) => {
-        if (data.error) { setError(data.error); } else {
-          const result = data.last_result;
-          const gameData = { ...data }; delete gameData.last_result;
-          setGame(gameData); setError(null);
-          if (result && ["round_won","round_complete","match_won","board_complete"].includes(result)) startRoundTransition(result, gameData);
-          else if (result) setLastResult(result);
-        }
-      }, () => { if (!closed) reconnectTimeout = setTimeout(connect, 2000); });
-      wsRef.current = ws;
+  function handleRealtimeState(message) {
+    const result = message.result;
+    setGame(message.state);
+    setError(null);
+    if (result && ["round_won","round_complete","match_won","board_complete"].includes(result)) {
+      startRoundTransition(result, message.completedRound || message.state);
+    } else if (result) {
+      setLastResult(result);
     }
-    connect();
-    return () => { closed = true; clearTimeout(reconnectTimeout); if (ws) ws.close(); wsRef.current = null; };
-  }, [isOnline, game?.id, myPlayer]);
+  }
 
-  useEffect(() => {
-    if (!isOnline || !game?.id || game?.status === "waiting_for_opponent") return;
-    const iv = setInterval(async () => { try { setGame(await getRosterGame(game.id)); } catch {} }, 10000);
-    return () => clearInterval(iv);
-  }, [isOnline, game?.id, game?.status]);
-
-  useEffect(() => {
-    if (!isOnline || game?.status !== "waiting_for_opponent") return;
-    const iv = setInterval(async () => { try { const f = await getRosterGame(game.id); if (f.status === "active") setGame(f); } catch {} }, 2000);
-    return () => clearInterval(iv);
-  }, [isOnline, game?.id, game?.status]);
+  const realtime = useOnlineGameRealtime({
+    enabled: isOnline,
+    gameId: game?.id,
+    gameStatus: game?.status,
+    playerNumber: myPlayer,
+    connect: connectRosterGuessRealtime,
+    fetchState: getRosterGame,
+    onState: handleRealtimeState,
+    onError: setError,
+  });
 
   const round = game?.round;
 
@@ -84,7 +76,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
     if (timeLeft <= 0) { if (!isSolo) { setGame(p => ({ ...p, current_player: p.current_player === 1 ? 2 : 1 })); } setLastResult("time_expired"); return; }
     const t = setTimeout(() => setTimeLeft(v => v - 1), 1000);
     return () => clearTimeout(t);
-  }, [timeLeft, game?.turn_seconds, game?.status, isOnline]);
+  }, [timeLeft, game?.turn_seconds, game?.status, isOnline, isSolo]);
 
   useEffect(() => {
     if (!roundTransition) return;
@@ -102,12 +94,12 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
     return () => clearTimeout(t);
   }, [revealCountdown]);
 
-  function startRoundTransition(result, gameData) {
-    const g = gameData || game;
-    const unguessed = g?.round?.slots?.filter(s => s.guessed_by_player == null).length || 0;
+  function startRoundTransition(result, completedRoundOrGame) {
+    const completedRound = completedRoundOrGame?.slots ? completedRoundOrGame : completedRoundOrGame?.round;
+    const unguessed = completedRound?.slots?.filter(s => s.guessed_by_player == null).length || 0;
     const revealTime = Math.max(3, unguessed * 2);
     setRevealCountdown(revealTime);
-    setRoundTransition({ countdown: revealTime, result });
+    setRoundTransition({ countdown: revealTime, completedRound, result });
     setLastResult(result);
     setSearchQuery(""); setSearchResults([]);
   }
@@ -131,14 +123,17 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   async function handlePlayerSelect(player) {
     setSearchQuery(""); setSearchResults([]); setLoading(true); setError(null);
     try {
-      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ action: "guess", player_id: player.player_id }));
-      } else {
-        const res = await submitRosterGuess(game.id, player.player_id);
-        setGame(res.game);
-        if (["round_won","round_complete","match_won","board_complete"].includes(res.result)) startRoundTransition(res.result, res.game);
-        else setLastResult(res.result);
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.GUESS, { player_id: player.player_id })) {
+          setError(realtimeUnavailableMessage);
+        }
+        return;
       }
+
+      const res = await submitRosterGuess(game.id, player.player_id);
+      setGame(res.game);
+      if (["round_won","round_complete","match_won","board_complete"].includes(res.result)) startRoundTransition(res.result, res.completed_round || res.game);
+      else setLastResult(res.result);
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 
@@ -156,20 +151,27 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   async function handleOfferEnd() {
     setLoading(true); setError(null);
     try {
-      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ action: "offer_end" }));
-      else { const r = await offerEndRound(game.id); setGame(r.game); setLastResult("end_offered"); }
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.OFFER_END)) setError(realtimeUnavailableMessage);
+        return;
+      }
+      const r = await offerEndRound(game.id); setGame(r.game); setLastResult("end_offered");
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 
   async function handleRespondEnd(accept) {
     setLoading(true); setError(null);
     try {
-      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ action: "respond_end", accept }));
-      else {
-        const r = await respondEndRound(game.id, accept); setGame(r.game);
-        if (accept && ["round_won","round_complete","match_won","board_complete"].includes(r.result)) startRoundTransition(r.result, r.game);
-        else setLastResult(accept ? "end_accepted" : "end_declined");
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.RESPOND_END, { accept })) {
+          setError(realtimeUnavailableMessage);
+        }
+        return;
       }
+
+      const r = await respondEndRound(game.id, accept); setGame(r.game);
+      if (accept && ["round_won","round_complete","match_won","board_complete"].includes(r.result)) startRoundTransition(r.result, r.completed_round || r.game);
+      else setLastResult(accept ? "end_accepted" : "end_declined");
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 
@@ -254,7 +256,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-3 py-3">
           <div className="grid gap-1.5">
-            {sortedSlots.map((slot, i) => {
+            {sortedSlots.map((slot) => {
               const guessed = slot.guessed_by_player != null;
               const revealed = !guessed && displayRoundOver && slot.player_name;
               const showPlayer = guessed || revealed;

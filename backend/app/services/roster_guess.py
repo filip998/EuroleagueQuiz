@@ -330,8 +330,9 @@ def submit_guess(
     if game.pending_end_from is not None:
         raise RosterGuessConflictError("Resolve pending end offer before guessing")
 
-    # Online turn enforcement
-    if game.mode == "online_friend" and acting_player is not None:
+    if game.mode == "online_friend":
+        if acting_player is None:
+            raise RosterGuessConflictError("Online game actions require realtime player identity")
         if acting_player != game.current_player:
             raise RosterGuessConflictError("It is not your turn")
 
@@ -443,7 +444,9 @@ def offer_end(
     if game.pending_end_from is not None:
         raise RosterGuessConflictError("An end offer is already pending")
 
-    if game.mode == "online_friend" and acting_player is not None:
+    if game.mode == "online_friend":
+        if acting_player is None:
+            raise RosterGuessConflictError("Online game actions require realtime player identity")
         if acting_player != game.current_player:
             raise RosterGuessConflictError("It is not your turn")
 
@@ -452,7 +455,9 @@ def offer_end(
     game.pending_end_from = offered_by
     game.pending_end_to = _other_player(offered_by)
     game.current_player = game.pending_end_to
-    game.updated_at = datetime.utcnow()
+    now = datetime.utcnow()
+    game.turn_started_at = now
+    game.updated_at = now
     db.flush()
 
 
@@ -467,7 +472,9 @@ def respond_end(
     if game.pending_end_from is None or game.pending_end_to is None:
         raise RosterGuessConflictError("No pending end offer")
 
-    if game.mode == "online_friend" and acting_player is not None:
+    if game.mode == "online_friend":
+        if acting_player is None:
+            raise RosterGuessConflictError("Online game actions require realtime player identity")
         if acting_player != game.pending_end_to:
             raise RosterGuessConflictError(
                 "Only the recipient can respond to the end offer"
@@ -483,7 +490,9 @@ def respond_end(
 
     game.pending_end_from = None
     game.pending_end_to = None
-    game.updated_at = datetime.utcnow()
+    now = datetime.utcnow()
+    game.turn_started_at = now
+    game.updated_at = now
     db.flush()
     return "declined"
 
@@ -508,6 +517,8 @@ def handle_time_expired(
     if expected_round is not None and game.round_number != expected_round:
         return
 
+    game.pending_end_from = None
+    game.pending_end_to = None
     if game.mode != "single_player":
         game.current_player = _other_player(game.current_player)
 

@@ -1,17 +1,15 @@
-import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket
 from sqlalchemy.orm import Session
 
-from app.database import get_db, SessionLocal
+from app.database import get_db
 from app.game_actions import (
     GameActionError,
     raise_http_game_action_error,
-    run_game_action,
     run_http_game_action,
-    websocket_error_payload,
 )
+from app.schemas.realtime import RealtimeResult
 from app.schemas.roster_guess import (
     RosterGuessCreateRequest,
     RosterGuessGuessRequest,
@@ -30,53 +28,11 @@ from app.services.roster_guess import (
     autocomplete_players,
     give_up,
 )
-from app.services.roster_timer_manager import start_turn_timer, cancel_timer
+from app.services.realtime import OnlineGameRealtimeModule
+from app.services.realtime_adapters import RosterGuessRealtimeAdapter
 
 router = APIRouter()
-
-
-# ---------------------------------------------------------------------------
-# WebSocket connection manager (same pattern as TicTacToe)
-# ---------------------------------------------------------------------------
-
-
-class RGConnectionManager:
-    def __init__(self):
-        self.connections: dict[int, dict[int, WebSocket]] = {}
-
-    async def connect(self, game_id: int, player: int, ws: WebSocket):
-        await ws.accept()
-        self.connections.setdefault(game_id, {})[player] = ws
-
-    def disconnect(self, game_id: int, player: int):
-        if game_id in self.connections:
-            self.connections[game_id].pop(player, None)
-            if not self.connections[game_id]:
-                del self.connections[game_id]
-
-    async def broadcast(self, game_id: int, state: dict):
-        conns = self.connections.get(game_id, {})
-        for ws in list(conns.values()):
-            try:
-                await ws.send_json(state)
-            except Exception:
-                pass
-
-
-rg_ws_manager = RGConnectionManager()
-
-
-def _try_broadcast(game_id: int, state: dict):
-    """Best-effort broadcast game state to connected WebSocket clients."""
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(rg_ws_manager.broadcast(game_id, state))
-    except RuntimeError:
-        try:
-            loop = asyncio.get_event_loop()
-            asyncio.run_coroutine_threadsafe(rg_ws_manager.broadcast(game_id, state), loop)
-        except Exception:
-            pass
+roster_guess_realtime = OnlineGameRealtimeModule(RosterGuessRealtimeAdapter())
 
 
 # ---------------------------------------------------------------------------
@@ -126,21 +82,33 @@ async def submit_roster_guess(
 ):
     def action():
         game = get_game_or_404(db, game_id)
+        prev_round_number = game.round_number
         result = submit_guess(db, game=game, player_id=payload.player_id)
-        return game, result
+        return game, prev_round_number, result
 
-    game, result = run_http_game_action(db, action)
+    game, prev_round_number, result = run_http_game_action(db, action)
     db.refresh(game)
     state = serialize_game_state(db, game)
-    state["last_result"] = result
+    completed = None
+    if result in ("round_won", "round_complete", "match_won", "board_complete"):
+        completed = serialize_completed_round(db, game.id, prev_round_number)
 
-    if result == "match_won":
-        cancel_timer(game_id)
-    elif result in ("round_won", "round_complete"):
-        start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
+    if game.mode == "online_friend":
+        if result == RealtimeResult.MATCH_WON:
+            roster_guess_realtime.cancel_timer(game_id)
+        else:
+            roster_guess_realtime.start_timer_from_game(game)
 
-    _try_broadcast(game_id, state)
-    return {"result": result, "game": state}
+    await roster_guess_realtime.broadcast_state(
+        game_id,
+        state,
+        result=result,
+        completed_round=completed,
+    )
+    response = {"result": result, "game": state}
+    if completed:
+        response["completed_round"] = completed
+    return response
 
 
 @router.post("/roster-guess/games/{game_id}/end-offer")
@@ -156,7 +124,7 @@ async def offer_end_round(
     game = run_http_game_action(db, action)
     db.refresh(game)
     state = serialize_game_state(db, game)
-    _try_broadcast(game_id, state)
+    await roster_guess_realtime.broadcast_state(game_id, state)
     return {"result": "end_offered", "game": state}
 
 
@@ -168,20 +136,33 @@ async def respond_end_round(
 ):
     def action():
         game = get_game_or_404(db, game_id)
+        prev_round_number = game.round_number
         result = respond_end(db, game, accept=payload.accept)
-        return game, result
+        return game, prev_round_number, result
 
-    game, result = run_http_game_action(db, action)
+    game, prev_round_number, result = run_http_game_action(db, action)
     db.refresh(game)
     state = serialize_game_state(db, game)
+    completed = None
+    if result in ("round_won", "round_complete", "match_won", "board_complete"):
+        completed = serialize_completed_round(db, game.id, prev_round_number)
 
-    if game.status == "finished":
-        cancel_timer(game_id)
-    elif game.status == "active":
-        start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
+    if game.mode == "online_friend":
+        if game.status == "finished":
+            roster_guess_realtime.cancel_timer(game_id)
+        elif game.status == "active":
+            roster_guess_realtime.start_timer_from_game(game)
 
-    _try_broadcast(game_id, state)
-    return {"result": result, "game": state}
+    await roster_guess_realtime.broadcast_state(
+        game_id,
+        state,
+        result=("end_declined" if result == "declined" else result),
+        completed_round=completed,
+    )
+    response = {"result": result, "game": state}
+    if completed:
+        response["completed_round"] = completed
+    return response
 
 
 @router.post("/roster-guess/games/{game_id}/give-up")
@@ -215,8 +196,8 @@ async def join_roster_guess_game(
     )
     db.refresh(game)
     state = serialize_game_state(db, game)
-    await rg_ws_manager.broadcast(game.id, state)
-    start_turn_timer(game.id, game.turn_seconds, game.current_player, game.round_number)
+    await roster_guess_realtime.broadcast_state(game.id, state)
+    roster_guess_realtime.start_timer_from_game(game)
     return {"game_id": game.id, "game": state}
 
 
@@ -240,73 +221,4 @@ def roster_guess_autocomplete(
 
 @router.websocket("/roster-guess/ws/{game_id}")
 async def roster_guess_websocket(websocket: WebSocket, game_id: int, player: int = 1):
-    db = SessionLocal()
-    try:
-        game = get_game_or_404(db, game_id)
-        await rg_ws_manager.connect(game_id, player, websocket)
-        state = serialize_game_state(db, game)
-        await websocket.send_json(state)
-
-        while True:
-            data = await websocket.receive_json()
-            action = data.get("action")
-            try:
-                db.expire(game)
-                db.refresh(game)
-
-                if action == "guess":
-                    player_id = data["player_id"]
-                    result = run_game_action(
-                        db,
-                        lambda: submit_guess(
-                            db, game=game, player_id=player_id, acting_player=player,
-                        ),
-                    )
-                    db.refresh(game)
-                    state = serialize_game_state(db, game)
-                    state["last_result"] = result
-                    if result == "match_won":
-                        cancel_timer(game_id)
-                    elif result in ("round_won", "round_complete"):
-                        start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
-                    else:
-                        start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
-                    await rg_ws_manager.broadcast(game_id, state)
-                    continue
-                elif action == "offer_end":
-                    run_game_action(
-                        db,
-                        lambda: offer_end(db, game, acting_player=player),
-                    )
-                    db.refresh(game)
-                elif action == "respond_end":
-                    run_game_action(
-                        db,
-                        lambda: respond_end(
-                            db, game, accept=data.get("accept", False),
-                            acting_player=player,
-                        ),
-                    )
-                    db.refresh(game)
-                    if game.status == "finished":
-                        cancel_timer(game_id)
-                    elif game.status == "active":
-                        start_turn_timer(game_id, game.turn_seconds, game.current_player, game.round_number)
-                elif action == "time_expired":
-                    continue
-                else:
-                    await websocket.send_json({"error": f"Unknown action: {action}"})
-                    continue
-
-                state = serialize_game_state(db, game)
-                await rg_ws_manager.broadcast(game_id, state)
-
-            except GameActionError as exc:
-                await websocket.send_json(websocket_error_payload(exc))
-
-    except WebSocketDisconnect:
-        rg_ws_manager.disconnect(game_id, player)
-    except Exception:
-        rg_ws_manager.disconnect(game_id, player)
-    finally:
-        db.close()
+    await roster_guess_realtime.connect(websocket, game_id, player)

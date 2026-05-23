@@ -1,3 +1,5 @@
+import { parseRealtimeMessage } from "./realtimeSchema";
+
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
 
@@ -55,18 +57,22 @@ export function autocompletePlayer(q, teamCode1, teamCode2, limit = 15) {
   return request("GET", `/quiz/tictactoe/players/autocomplete?${params}`);
 }
 
-export function connectWebSocket(gameId, playerNumber, onMessage, onClose) {
-  const ws = new WebSocket(
-    `${WS_BASE}/quiz/tictactoe/ws/${gameId}?player=${playerNumber}`
+function connectRealtimeWebSocket(path, { onMessage, onClose, WebSocketImpl = WebSocket }) {
+  const ws = new WebSocketImpl(`${WS_BASE}${path}`);
+  ws.onmessage = (event) => onMessage(parseRealtimeMessage(event.data));
+  ws.onclose = () => onClose?.();
+  return {
+    send: (message) => ws.send(JSON.stringify(message)),
+    close: () => ws.close(),
+    isOpen: () => ws.readyState === (WebSocketImpl.OPEN ?? 1),
+  };
+}
+
+export function connectTicTacToeRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+  return connectRealtimeWebSocket(
+    `/quiz/tictactoe/ws/${gameId}?player=${playerNumber}`,
+    { onMessage, onClose, WebSocketImpl }
   );
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    onMessage(data);
-  };
-  ws.onclose = () => {
-    if (onClose) onClose();
-  };
-  return ws;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,18 +119,11 @@ export function autocompleteRosterPlayer(q, limit = 15) {
   return request("GET", `/quiz/roster-guess/players/autocomplete?${params}`);
 }
 
-export function connectRosterWebSocket(gameId, playerNumber, onMessage, onClose) {
-  const ws = new WebSocket(
-    `${WS_BASE}/quiz/roster-guess/ws/${gameId}?player=${playerNumber}`
+export function connectRosterGuessRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+  return connectRealtimeWebSocket(
+    `/quiz/roster-guess/ws/${gameId}?player=${playerNumber}`,
+    { onMessage, onClose, WebSocketImpl }
   );
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    onMessage(data);
-  };
-  ws.onclose = () => {
-    if (onClose) onClose();
-  };
-  return ws;
 }
 
 // ---------------------------------------------------------------------------

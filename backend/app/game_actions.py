@@ -7,6 +7,8 @@ from typing import NoReturn, TypeVar
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.schemas.realtime import error_message
+
 
 class GameActionCode(StrEnum):
     INVALID_INPUT = "invalid_input"
@@ -101,5 +103,5 @@ def run_http_game_action(db: Session, action: Callable[[], T]) -> T:
         raise_http_game_action_error(exc)
 
 
-def websocket_error_payload(exc: GameActionError) -> dict[str, str]:
-    return {"error": exc.detail}
+def websocket_error_payload(exc: GameActionError) -> dict:
+    return error_message(exc.detail, code=exc.code.value)
