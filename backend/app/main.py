@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import seasons, teams, players, games, quiz, roster_guess, higher_lower
+from app.routers import seasons, teams, players, games, quiz, roster_guess, higher_lower, career_quiz
 
 app = FastAPI(
     title="EuroLeague Quiz API",
@@ -25,6 +25,7 @@ app.include_router(games.router, prefix="/games", tags=["Games"])
 app.include_router(quiz.router, prefix="/quiz", tags=["Quiz"])
 app.include_router(roster_guess.router, prefix="/quiz", tags=["Roster Guess"])
 app.include_router(higher_lower.router, prefix="/quiz", tags=["Higher or Lower"])
+app.include_router(career_quiz.router, prefix="/quiz", tags=["Career Quiz"])
 
 
 @app.get("/")

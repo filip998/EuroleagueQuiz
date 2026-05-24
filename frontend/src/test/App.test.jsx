@@ -34,13 +34,24 @@ vi.mock("../HigherLowerSetup", () => ({
 vi.mock("../HigherLowerBoard", () => ({
   default: () => <div data-testid="hl-board" />,
 }));
+vi.mock("../CareerQuizSetup", () => ({
+  default: ({ onBack }) => (
+    <div data-testid="career-setup">
+      <button onClick={onBack}>Back</button>
+    </div>
+  ),
+}));
+vi.mock("../CareerQuizBoard", () => ({
+  default: () => <div data-testid="career-board" />,
+}));
 
 describe("App", () => {
-  it("renders the game selection screen with all three game modes", () => {
+  it("renders the game selection screen with all game modes", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     expect(screen.getByText("TICTACTOE")).toBeInTheDocument();
     expect(screen.getByText("ROSTER GUESS")).toBeInTheDocument();
     expect(screen.getByText("HIGHER OR LOWER")).toBeInTheDocument();
+    expect(screen.getByText("CAREER QUIZ")).toBeInTheDocument();
     expect(screen.getByText("Choose your game")).toBeInTheDocument();
   });
 
@@ -60,6 +71,12 @@ describe("App", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     fireEvent.click(screen.getByText("HIGHER OR LOWER"));
     expect(screen.getByTestId("hl-setup")).toBeInTheDocument();
+  });
+
+  it("navigates to Career Quiz setup when clicking the card", () => {
+    render(<MemoryRouter><App /></MemoryRouter>);
+    fireEvent.click(screen.getByText("CAREER QUIZ"));
+    expect(screen.getByTestId("career-setup")).toBeInTheDocument();
   });
 
   it("navigates back to selection when onBack is called", () => {

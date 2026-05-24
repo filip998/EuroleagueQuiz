@@ -145,3 +145,62 @@ export function submitHigherLowerAnswer(gameId, choice) {
 export function getHigherLowerLeaderboard(tier) {
   return request("GET", `/quiz/higher-lower/leaderboard/${tier}`);
 }
+
+// ---------------------------------------------------------------------------
+// Career Quiz API
+// ---------------------------------------------------------------------------
+
+export function createCareerSoloRound(recentPlayerIds = []) {
+  return request("POST", "/quiz/career/solo/round", {
+    recent_player_ids: recentPlayerIds,
+  });
+}
+
+export function submitCareerSoloGuess(roundToken, playerId) {
+  return request("POST", "/quiz/career/solo/guess", {
+    round_token: roundToken,
+    player_id: playerId,
+  });
+}
+
+export function revealCareerSoloAnswer(roundToken) {
+  return request("POST", "/quiz/career/solo/reveal", {
+    round_token: roundToken,
+  });
+}
+
+export function autocompleteCareerPlayer(q, limit = 15) {
+  const params = new URLSearchParams({ q, limit });
+  return request("GET", `/quiz/career/players/autocomplete?${params}`);
+}
+
+export function createCareerGame(payload) {
+  return request("POST", "/quiz/career/games", payload);
+}
+
+export function getCareerGame(gameId) {
+  return request("GET", `/quiz/career/games/${gameId}`);
+}
+
+export function joinCareerGame(joinCode, playerName) {
+  return request("POST", "/quiz/career/games/join", {
+    join_code: joinCode,
+    player_name: playerName,
+  });
+}
+
+export function submitCareerGuess(gameId, playerNumber, playerId) {
+  return request("POST", `/quiz/career/games/${gameId}/guess?player=${playerNumber}`, {
+    player_id: playerId,
+  });
+}
+
+export function offerCareerNoAnswer(gameId, playerNumber) {
+  return request("POST", `/quiz/career/games/${gameId}/no-answer-offer?player=${playerNumber}`);
+}
+
+export function respondCareerNoAnswer(gameId, playerNumber, accept) {
+  return request("POST", `/quiz/career/games/${gameId}/no-answer-response?player=${playerNumber}`, {
+    accept,
+  });
+}
