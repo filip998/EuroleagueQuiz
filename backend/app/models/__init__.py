@@ -18,6 +18,14 @@ from app.models.higher_lower import (
     HigherLowerGame,
     HigherLowerScore,
 )
+from app.models.career import (
+    CareerDataRevision,
+    CareerQuizGame,
+    CareerQuizGuess,
+    CareerQuizRound,
+    PlayerCareerStint,
+    PlayerWikidataMapping,
+)
 
 __all__ = [
     "Season",
@@ -37,4 +45,10 @@ __all__ = [
     "RosterGuessSlot",
     "HigherLowerGame",
     "HigherLowerScore",
+    "CareerDataRevision",
+    "CareerQuizGame",
+    "CareerQuizGuess",
+    "CareerQuizRound",
+    "PlayerCareerStint",
+    "PlayerWikidataMapping",
 ]

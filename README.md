@@ -29,6 +29,7 @@ Then open `http://localhost:5173` to play.
 - **TicTacToe** — Claim cells on a 3×3 board by naming players who match both row and column team criteria. Solo, local 1v1, and online modes.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo and multiplayer.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
+- **Career Quiz** — Guess the player from a Wikidata-sourced professional club career timeline. Solo practice and 2-player race modes.
 
 ## Backend
 
@@ -54,6 +55,17 @@ cd backend
 python -m ingestion.ingest --start-season 2000 --end-season 2025
 ```
 
+### Run Wikidata Career Ingestion
+
+Career Quiz uses cached Wikidata career data; gameplay does not call Wikidata live.
+
+```bash
+cd backend
+python -m ingestion.wikidata_careers --report data/wikidata-career-report.json
+```
+
+Reviewed match overrides live in `backend/ingestion/wikidata_overrides.json`. The ingestion command fails the feature-enablement threshold when fewer than 200 eligible players are available. After running this ingestion or any migration locally, upload `backend/data/euroleague.db` to Azure before deploying.
+
 ### API Docs
 
 Once the server is running, visit `http://localhost:8000/docs` for the interactive API documentation.
@@ -69,6 +81,12 @@ Module in `backend/app/services/realtime.py` owns WebSocket connection cleanup,
 broadcast envelopes, server-side turn timers, timer expiry, and schema-compliant
 error/result messages. Game-specific Adapters in `backend/app/services/realtime_adapters.py`
 map TicTacToe and Roster Guess rules into that shared Interface.
+
+Career Quiz adds a **Wikidata Career Ingestion Module** under `backend/ingestion/`.
+It matches local EuroLeague players to Wikidata basketball-player entities, filters
+professional club stints, stores cached Career Timelines, and records a Career Data
+Revision. Solo Career Quiz rounds use signed Solo Round Tokens so the answer is not
+stored in browser state or persisted as a solo game row.
 
 The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
 `frontend/src/useOnlineGameRealtime.js`, so reconnect, background state sync,
@@ -109,6 +127,7 @@ pytest                              # all tests (excludes smoke)
 pytest tests/test_api.py            # API tests only
 pytest tests/test_tictactoe_api.py  # TicTacToe tests only
 pytest tests/test_higher_lower.py   # Higher or Lower tests only
+pytest tests/test_career_quiz.py    # Career Quiz tests only
 ```
 
 ### Frontend Unit Tests (Vitest + React Testing Library)

@@ -19,3 +19,27 @@ The Game Action Orchestration Module keeps `run_game_action` as the transaction 
 The Module that owns online game realtime transport, server-authoritative turn timing, reconnect/state-sync semantics, and realtime message/result presentation for online TicTacToe and online Roster Guess.
 
 The Online Game Realtime Module Interface is the shared seam used by game-specific Adapters. TicTacToe and Roster Guess Adapters provide game rules, state serialization, completed-round serialization, and action mapping; the shared Implementation owns WebSocket connections, broadcast cleanup, timer scheduling/cancellation, timer expiry, disconnect cleanup, and schema-compliant error/result messages. This keeps realtime reliability changes local while preserving the Game action transaction seam.
+
+### Career Quiz
+
+A quiz where the clue is a player's professional club career timeline and the answer is the player. Career Quiz timelines come from pre-ingested Wikidata career data matched to existing EuroLeague players; gameplay should not call Wikidata live.
+
+### Career Timeline
+
+The ordered list of professional club stints shown as the Career Quiz clue. Career Timeline entries use season-style labels, include only eligible professional club stints, and may be incomplete when Wikidata data is incomplete.
+
+### Eligible Career Player
+
+A local EuroLeague player who is allowed to appear as a Career Quiz answer. An Eligible Career Player has EuroLeague game/stat data, an accepted Wikidata player mapping, and a valid Career Timeline after filtering.
+
+### Wikidata Career Ingestion Module
+
+The Module that fetches, matches, filters, audits, and caches Wikidata career data for Career Quiz. Its Interface owns player-to-Wikidata matching, professional-club filtering, season-label conversion, review reporting, and the eligible-player threshold check so gameplay modules only read cached career data.
+
+### Solo Round Token
+
+An opaque signed token representing a stateless solo quiz round. The token lets the backend validate a solo guess without persisting a game row or exposing the answer in the browser payload.
+
+### Career Data Revision
+
+A persisted marker for the current cached Career Quiz dataset. Solo Round Tokens include the Career Data Revision so stale tokens are rejected after Wikidata career data is refreshed.
