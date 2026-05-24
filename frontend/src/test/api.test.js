@@ -26,6 +26,17 @@ function mockJsonResponse(data, ok = true) {
   });
 }
 
+function stateEnvelope(game, result = null) {
+  return {
+    type: "state",
+    payload: {
+      game,
+      ...(result ? { result } : {}),
+      terminal: game.status === "finished",
+    },
+  };
+}
+
 beforeEach(() => {
   mockFetch.mockReset();
 });
@@ -33,7 +44,7 @@ beforeEach(() => {
 describe("TicTacToe API", () => {
   it("createGame sends POST with correct payload", async () => {
     const payload = { mode: "single_player", target_wins: 3 };
-    mockFetch.mockReturnValue(mockJsonResponse({ game_id: 1 }));
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 1 })));
 
     const result = await createGame(payload);
 
@@ -44,7 +55,7 @@ describe("TicTacToe API", () => {
         body: JSON.stringify(payload),
       })
     );
-    expect(result.game_id).toBe(1);
+    expect(result.state.id).toBe(1);
   });
 
   it("getGame sends GET to correct path", async () => {
@@ -59,8 +70,8 @@ describe("TicTacToe API", () => {
   });
 
   it("joinGame sends join_code and player_name", async () => {
-    mockFetch.mockReturnValue(mockJsonResponse({ game_id: 5 }));
-    await joinGame("ABC123", "TestPlayer");
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 5 })));
+    const result = await joinGame("ABC123", "TestPlayer");
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/tictactoe/games/join",
@@ -69,12 +80,13 @@ describe("TicTacToe API", () => {
         body: JSON.stringify({ join_code: "ABC123", player_name: "TestPlayer" }),
       })
     );
+    expect(result.state.id).toBe(5);
   });
 
   it("submitMove sends move data", async () => {
     const move = { row_index: 0, col_index: 1, player_id: 123 };
-    mockFetch.mockReturnValue(mockJsonResponse({ result: "correct" }));
-    await submitMove(7, move);
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "correct")));
+    const result = await submitMove(7, move);
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/tictactoe/games/7/moves",
@@ -83,6 +95,7 @@ describe("TicTacToe API", () => {
         body: JSON.stringify(move),
       })
     );
+    expect(result.result).toBe("correct");
   });
 
   it("autocompletePlayer includes team codes in query params", async () => {
@@ -101,18 +114,19 @@ describe("TicTacToe API", () => {
 describe("Roster Guess API", () => {
   it("createRosterGame sends POST", async () => {
     const payload = { mode: "single_player", season_start: 2020, season_end: 2024 };
-    mockFetch.mockReturnValue(mockJsonResponse({ game_id: 10 }));
-    await createRosterGame(payload);
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 })));
+    const result = await createRosterGame(payload);
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/roster-guess/games",
       expect.objectContaining({ method: "POST", body: JSON.stringify(payload) })
     );
+    expect(result.state.id).toBe(10);
   });
 
   it("submitRosterGuess sends player_id", async () => {
-    mockFetch.mockReturnValue(mockJsonResponse({ result: "correct" }));
-    await submitRosterGuess(10, 456);
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 }, "correct")));
+    const result = await submitRosterGuess(10, 456);
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/roster-guess/games/10/guess",
@@ -121,6 +135,7 @@ describe("Roster Guess API", () => {
         body: JSON.stringify({ player_id: 456 }),
       })
     );
+    expect(result.result).toBe("correct");
   });
 
   it("autocompleteRosterPlayer sends query", async () => {
@@ -178,6 +193,22 @@ describe("Error handling", () => {
     );
 
     await expect(getGame(999)).rejects.toThrow("Game not found");
+  });
+
+  it("throws error with realtime error envelope message on non-ok response", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(
+        {
+          type: "error",
+          payload: { code: "conflict", message: "It is not your turn" },
+        },
+        false
+      )
+    );
+
+    await expect(submitMove(7, { row_index: 0, col_index: 0, player_id: 1 })).rejects.toThrow(
+      "It is not your turn"
+    );
   });
 
   it("throws error with status text if no detail", async () => {

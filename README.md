@@ -74,6 +74,13 @@ The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
 `frontend/src/useOnlineGameRealtime.js`, so reconnect, background state sync,
 waiting-for-opponent polling, cleanup, and action dispatch stay out of the game boards.
 
+Mutating TicTacToe and Roster Guess HTTP endpoints now use the same realtime
+message envelopes as WebSocket broadcasts: successful actions return
+`{ "type": "state", "payload": { "game": ..., "result": ..., "completed_round": ..., "terminal": ... } }`
+and Game action errors return `{ "type": "error", "payload": { "code": ..., "message": ... } }`
+with the corresponding HTTP status. Read-only `GET /games/{id}` endpoints still
+return plain game state for polling and refresh hydration.
+
 ## Frontend
 
 ### Setup

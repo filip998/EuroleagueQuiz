@@ -144,7 +144,7 @@ function TicTacToeSetupPage() {
   const navigate = useNavigate();
 
   function handleGameCreated(resp, online) {
-    const gameData = resp.game || resp;
+    const gameData = resp.state || resp.game || resp;
     const id = gameData.id;
     saveOnlineInfo(id, online);
     navigate(`/tictactoe/${id}`);
@@ -191,7 +191,7 @@ function RosterSetupPage() {
   const navigate = useNavigate();
 
   function handleGameCreated(resp, online) {
-    const gameData = resp.game || resp;
+    const gameData = resp.state || resp.game || resp;
     const id = gameData.id;
     saveOnlineInfo(id, online);
     navigate(`/roster/${id}`);

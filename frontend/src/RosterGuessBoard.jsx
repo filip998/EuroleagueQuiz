@@ -131,9 +131,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
       }
 
       const res = await submitRosterGuess(game.id, player.player_id);
-      setGame(res.game);
-      if (["round_won","round_complete","match_won","board_complete"].includes(res.result)) startRoundTransition(res.result, res.completed_round || res.game);
-      else setLastResult(res.result);
+      handleRealtimeState(res);
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 
@@ -141,8 +139,8 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
     setLoading(true); setError(null);
     try {
       const res = await giveUpRosterRound(game.id);
-      setGame(res.game);
-      setRoundTransition({ countdown: null, completedRound: res.completed_round, result: "given_up" });
+      setGame(res.state);
+      setRoundTransition({ countdown: null, completedRound: res.completedRound, result: "given_up" });
       setLastResult("given_up");
       setSearchQuery(""); setSearchResults([]);
     } catch (e) { setError(e.message); } finally { setLoading(false); }
@@ -155,7 +153,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
         if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.OFFER_END)) setError(realtimeUnavailableMessage);
         return;
       }
-      const r = await offerEndRound(game.id); setGame(r.game); setLastResult("end_offered");
+      const r = await offerEndRound(game.id); handleRealtimeState(r);
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 
@@ -169,9 +167,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
         return;
       }
 
-      const r = await respondEndRound(game.id, accept); setGame(r.game);
-      if (accept && ["round_won","round_complete","match_won","board_complete"].includes(r.result)) startRoundTransition(r.result, r.completed_round || r.game);
-      else setLastResult(accept ? "end_accepted" : "end_declined");
+      const r = await respondEndRound(game.id, accept); handleRealtimeState(r);
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 

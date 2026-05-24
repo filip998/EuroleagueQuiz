@@ -12,13 +12,17 @@ async function request(method, path, body = null) {
   const res = await fetch(`${API_BASE}${path}`, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    throw new Error(err.payload?.message || err.detail || `HTTP ${res.status}`);
   }
   return res.json();
 }
 
+async function actionRequest(method, path, body = null) {
+  return parseRealtimeMessage(await request(method, path, body));
+}
+
 export function createGame(payload) {
-  return request("POST", "/quiz/tictactoe/games", payload);
+  return actionRequest("POST", "/quiz/tictactoe/games", payload);
 }
 
 export function getGame(gameId) {
@@ -26,28 +30,28 @@ export function getGame(gameId) {
 }
 
 export function joinGame(joinCode, playerName) {
-  return request("POST", "/quiz/tictactoe/games/join", {
+  return actionRequest("POST", "/quiz/tictactoe/games/join", {
     join_code: joinCode,
     player_name: playerName,
   });
 }
 
 export function submitMove(gameId, move) {
-  return request("POST", `/quiz/tictactoe/games/${gameId}/moves`, move);
+  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/moves`, move);
 }
 
 export function offerDraw(gameId) {
-  return request("POST", `/quiz/tictactoe/games/${gameId}/draw-offer`);
+  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/draw-offer`);
 }
 
 export function respondDraw(gameId, accept) {
-  return request("POST", `/quiz/tictactoe/games/${gameId}/draw-response`, {
+  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/draw-response`, {
     accept,
   });
 }
 
 export function giveUpGame(gameId) {
-  return request("POST", `/quiz/tictactoe/games/${gameId}/give-up`);
+  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/give-up`);
 }
 
 export function autocompletePlayer(q, teamCode1, teamCode2, limit = 15) {
@@ -80,7 +84,7 @@ export function connectTicTacToeRealtime({ gameId, playerNumber, onMessage, onCl
 // ---------------------------------------------------------------------------
 
 export function createRosterGame(payload) {
-  return request("POST", "/quiz/roster-guess/games", payload);
+  return actionRequest("POST", "/quiz/roster-guess/games", payload);
 }
 
 export function getRosterGame(gameId) {
@@ -88,30 +92,30 @@ export function getRosterGame(gameId) {
 }
 
 export function joinRosterGame(joinCode, playerName) {
-  return request("POST", "/quiz/roster-guess/games/join", {
+  return actionRequest("POST", "/quiz/roster-guess/games/join", {
     join_code: joinCode,
     player_name: playerName,
   });
 }
 
 export function submitRosterGuess(gameId, playerId) {
-  return request("POST", `/quiz/roster-guess/games/${gameId}/guess`, {
+  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/guess`, {
     player_id: playerId,
   });
 }
 
 export function offerEndRound(gameId) {
-  return request("POST", `/quiz/roster-guess/games/${gameId}/end-offer`);
+  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/end-offer`);
 }
 
 export function respondEndRound(gameId, accept) {
-  return request("POST", `/quiz/roster-guess/games/${gameId}/end-response`, {
+  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/end-response`, {
     accept,
   });
 }
 
 export function giveUpRosterRound(gameId) {
-  return request("POST", `/quiz/roster-guess/games/${gameId}/give-up`);
+  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/give-up`);
 }
 
 export function autocompleteRosterPlayer(q, limit = 15) {
