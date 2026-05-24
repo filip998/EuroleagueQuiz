@@ -22,7 +22,7 @@ The Online Game Realtime Module Interface is the shared seam used by game-specif
 
 ### Career Quiz
 
-A quiz where the clue is a player's professional club career timeline and the answer is the player. Career Quiz timelines come from pre-ingested Wikidata career data matched to existing EuroLeague players; gameplay should not call Wikidata live.
+A quiz where the clue is a player's professional club career timeline and the answer is the player. Career Quiz timelines come from pre-ingested Wikidata career data merged with local EuroLeague roster data; gameplay should not call Wikidata live.
 
 ### Career Timeline
 
@@ -34,7 +34,7 @@ A local EuroLeague player who is allowed to appear as a Career Quiz answer. An E
 
 ### Wikidata Career Ingestion Module
 
-The Module that fetches, matches, filters, audits, and caches Wikidata career data for Career Quiz. Its Interface owns player-to-Wikidata matching, professional-club filtering, season-label conversion, review reporting, and the eligible-player threshold check so gameplay modules only read cached career data.
+The Module that fetches, matches, filters, audits, and caches Wikidata career data for Career Quiz. Its Interface owns player-to-Wikidata matching, professional-club filtering, local EuroLeague roster-stint merging, season-label conversion, review reporting, and the eligible-player threshold check so gameplay modules only read cached career data.
 
 ### Solo Round Token
 

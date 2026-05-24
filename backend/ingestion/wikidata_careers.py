@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Protocol
 
 import httpx
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
@@ -22,7 +22,10 @@ from app.models import (
     GamePlayerStats,
     Player,
     PlayerCareerStint,
+    PlayerSeasonTeam,
     PlayerWikidataMapping,
+    Season,
+    Team,
 )
 from ingestion.utils import RateLimiter
 
@@ -84,6 +87,8 @@ class PlayerOverride:
     wikidata_qid: str | None = None
     status: str | None = None
     note: str | None = None
+    stint_updates: tuple[dict, ...] = ()
+    extra_stints: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -317,6 +322,8 @@ def load_overrides(path: Path | None) -> dict[int, PlayerOverride]:
             wikidata_qid=entry.get("wikidata_qid"),
             status=entry.get("status"),
             note=entry.get("note"),
+            stint_updates=tuple(entry.get("stint_updates", [])),
+            extra_stints=tuple(entry.get("extra_stints", [])),
         )
     return overrides
 
@@ -351,6 +358,19 @@ def season_year_for_end(value: str | None, precision: int | None) -> int | None:
     if precision is not None and precision <= YEAR_PRECISION:
         return year - 1
     return year if month >= 7 else year - 1
+
+
+def normalized_stint_season_years(
+    membership: WikidataTeamMembership,
+) -> tuple[int | None, int | None]:
+    start_year = season_year_for_start(membership.start, membership.start_precision)
+    end_year = season_year_for_end(membership.end, membership.end_precision)
+    if start_year is not None and end_year is not None and end_year < start_year:
+        if _same_year_precision(membership):
+            end_year = start_year
+        else:
+            end_year = start_year
+    return start_year, end_year
 
 
 def _ingest_player(
@@ -405,7 +425,10 @@ def _ingest_player(
             "candidate_count": len(candidates),
         }
 
-    raw_memberships = adapter.fetch_player_memberships(match.qid)
+    raw_memberships = _merge_local_euroleague_memberships(
+        _apply_stint_overrides(adapter.fetch_player_memberships(match.qid), override),
+        _local_euroleague_memberships(session, player),
+    )
     stints, filtered = _build_stints(mapping, match.qid, raw_memberships)
     _replace_stints(session, mapping, stints)
     eligible = sum(1 for stint in stints if stint.include_in_quiz) >= 3
@@ -418,6 +441,208 @@ def _ingest_player(
         "included_stints": sum(1 for stint in stints if stint.include_in_quiz),
         "filtered_team_rows": filtered,
     }
+
+
+def _apply_stint_overrides(
+    memberships: list[WikidataTeamMembership],
+    override: PlayerOverride | None,
+) -> list[WikidataTeamMembership]:
+    if override is None:
+        return memberships
+
+    updated = list(memberships)
+    for update in override.stint_updates:
+        team_qid = update.get("team_qid")
+        if not team_qid:
+            continue
+        updated = [
+            _updated_membership(membership, update)
+            if membership.team_qid == team_qid
+            else membership
+            for membership in updated
+        ]
+
+    for extra in override.extra_stints:
+        team_qid = extra.get("team_qid")
+        team_label = extra.get("team_label")
+        start_year = extra.get("start_year")
+        if not team_qid or not team_label or start_year is None:
+            continue
+        end_year = extra.get("end_year")
+        updated.append(
+            WikidataTeamMembership(
+                team_qid=team_qid,
+                team_label=team_label,
+                start=_year_time(int(start_year)),
+                start_precision=YEAR_PRECISION,
+                end=_year_time(int(end_year)) if end_year is not None else None,
+                end_precision=YEAR_PRECISION if end_year is not None else None,
+                statement_id=f"override:{team_qid}:{start_year}",
+                is_professional_club=True,
+                is_loan=bool(extra.get("is_loan", False)),
+            )
+        )
+    return updated
+
+
+def _local_euroleague_memberships(
+    session: Session,
+    player: Player,
+) -> list[WikidataTeamMembership]:
+    rows = (
+        session.query(PlayerSeasonTeam, Team, Season)
+        .join(Team, Team.id == PlayerSeasonTeam.team_id)
+        .join(Season, Season.id == PlayerSeasonTeam.season_id)
+        .filter(PlayerSeasonTeam.player_id == player.id)
+        .order_by(Season.year, Team.name)
+        .all()
+    )
+    if not rows:
+        return []
+
+    max_season_year = session.query(func.max(Season.year)).scalar()
+    memberships: list[WikidataTeamMembership] = []
+    current_team_id: int | None = None
+    current_team: Team | None = None
+    start_year: int | None = None
+    end_year: int | None = None
+
+    def flush_current() -> None:
+        if current_team is None or start_year is None or end_year is None:
+            return
+        is_current = max_season_year is not None and end_year >= max_season_year
+        memberships.append(
+            WikidataTeamMembership(
+                team_qid=f"ELQ:{current_team.euroleague_code}",
+                team_label=current_team.name,
+                start=_year_time(start_year),
+                start_precision=YEAR_PRECISION,
+                end=None if is_current else _year_time(end_year + 1),
+                end_precision=None if is_current else YEAR_PRECISION,
+                statement_id=f"local:euroleague:{player.id}:{current_team.id}:{start_year}",
+                is_professional_club=True,
+            )
+        )
+
+    for pst, team, season in rows:
+        if current_team_id != team.id or (
+            end_year is not None and season.year > end_year + 1
+        ):
+            flush_current()
+            current_team_id = team.id
+            current_team = team
+            start_year = season.year
+            end_year = season.year
+        else:
+            end_year = season.year
+            current_team = team
+
+    flush_current()
+    return memberships
+
+
+def _merge_local_euroleague_memberships(
+    wikidata_memberships: list[WikidataTeamMembership],
+    local_memberships: list[WikidataTeamMembership],
+) -> list[WikidataTeamMembership]:
+    merged = list(wikidata_memberships)
+    for local in local_memberships:
+        match_index = next(
+            (
+                index
+                for index, membership in enumerate(merged)
+                if _same_team(membership.team_label, local.team_label)
+            ),
+            None,
+        )
+        if match_index is None:
+            merged.append(local)
+            continue
+
+        existing = merged[match_index]
+        existing_start, existing_end = normalized_stint_season_years(existing)
+        local_start, local_end = normalized_stint_season_years(local)
+        start_year = min(
+            year for year in (existing_start, local_start) if year is not None
+        )
+        if local.end is None:
+            end_year = None
+        elif existing_end is None:
+            end_year = local_end
+        elif local_end is None:
+            end_year = existing_end
+        else:
+            end_year = max(existing_end, local_end)
+
+        merged[match_index] = WikidataTeamMembership(
+            team_qid=existing.team_qid,
+            team_label=existing.team_label,
+            start=_year_time(start_year),
+            start_precision=YEAR_PRECISION,
+            end=_year_time(end_year + 1) if end_year is not None else None,
+            end_precision=YEAR_PRECISION if end_year is not None else None,
+            statement_id=existing.statement_id,
+            is_professional_club=existing.is_professional_club,
+            exclusion_reason=existing.exclusion_reason,
+            is_loan=existing.is_loan,
+        )
+    return merged
+
+
+def _same_team(left: str, right: str) -> bool:
+    left_tokens = _team_tokens(left)
+    right_tokens = _team_tokens(right)
+    if not left_tokens or not right_tokens:
+        return False
+    return bool(left_tokens & right_tokens)
+
+
+def _team_tokens(value: str) -> set[str]:
+    ignored = {
+        "bc",
+        "b",
+        "c",
+        "kk",
+        "fc",
+        "sk",
+        "sad",
+        "basket",
+        "basketball",
+        "club",
+        "men",
+        "mens",
+        "tel",
+        "aviv",
+    }
+    return {
+        token
+        for token in normalize_name(value).split()
+        if len(token) >= 4 and token not in ignored
+    }
+
+
+def _updated_membership(
+    membership: WikidataTeamMembership,
+    update: dict,
+) -> WikidataTeamMembership:
+    start_year = update.get("start_year")
+    end_year = update.get("end_year")
+    return WikidataTeamMembership(
+        team_qid=membership.team_qid,
+        team_label=update.get("team_label", membership.team_label),
+        start=_year_time(int(start_year)) if start_year is not None else membership.start,
+        start_precision=YEAR_PRECISION if start_year is not None else membership.start_precision,
+        end=_year_time(int(end_year)) if end_year is not None else membership.end,
+        end_precision=YEAR_PRECISION if end_year is not None else membership.end_precision,
+        statement_id=membership.statement_id,
+        is_professional_club=membership.is_professional_club,
+        exclusion_reason=membership.exclusion_reason,
+        is_loan=bool(update.get("is_loan", membership.is_loan)),
+    )
+
+
+def _year_time(year: int) -> str:
+    return f"+{year:04d}-00-00T00:00:00Z"
 
 
 def _iter_candidate_players(session: Session, limit: int | None) -> list[Player]:
@@ -485,7 +710,8 @@ def _build_stints(
     sorted_memberships = sorted(
         memberships,
         key=lambda membership: (
-            season_year_for_start(membership.start, membership.start_precision) or 9999,
+            normalized_stint_season_years(membership)[0] or 9999,
+            normalized_stint_season_years(membership)[1] or 9999,
             membership.team_label,
         ),
     )
@@ -497,15 +723,13 @@ def _build_stints(
             index
             for index, membership in enumerate(sorted_memberships)
             if membership.is_professional_club
-            and season_year_for_start(membership.start, membership.start_precision)
-            is not None
+            and normalized_stint_season_years(membership)[0] is not None
         ),
         default=-1,
     )
     sequence_index = 1
     for index, membership in enumerate(sorted_memberships):
-        start_year = season_year_for_start(membership.start, membership.start_precision)
-        end_year = season_year_for_end(membership.end, membership.end_precision)
+        start_year, end_year = normalized_stint_season_years(membership)
         exclusion_reason = membership.exclusion_reason
         include = True
         if not membership.is_professional_club:
@@ -637,6 +861,20 @@ def _player_name(player: Player) -> str:
 
 def _birth_dates_conflict(local: date | None, wikidata: date | None) -> bool:
     return local is not None and wikidata is not None and local != wikidata
+
+
+def _same_year_precision(membership: WikidataTeamMembership) -> bool:
+    start_parts = _date_parts(membership.start)
+    end_parts = _date_parts(membership.end)
+    return (
+        start_parts is not None
+        and end_parts is not None
+        and membership.start_precision is not None
+        and membership.start_precision <= YEAR_PRECISION
+        and membership.end_precision is not None
+        and membership.end_precision <= YEAR_PRECISION
+        and start_parts[0] == end_parts[0]
+    )
 
 
 def _binding_value(row: dict, field: str) -> str | None:

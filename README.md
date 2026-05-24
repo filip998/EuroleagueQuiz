@@ -29,7 +29,7 @@ Then open `http://localhost:5173` to play.
 - **TicTacToe** — Claim cells on a 3×3 board by naming players who match both row and column team criteria. Solo, local 1v1, and online modes.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo and multiplayer.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
-- **Career Quiz** — Guess the player from a Wikidata-sourced professional club career timeline. Solo practice and 2-player race modes.
+- **Career Quiz** — Guess the player from a professional club career timeline built from Wikidata plus local EuroLeague roster data. Solo practice and 2-player race modes.
 
 ## Backend
 
@@ -57,7 +57,7 @@ python -m ingestion.ingest --start-season 2000 --end-season 2025
 
 ### Run Wikidata Career Ingestion
 
-Career Quiz uses cached Wikidata career data; gameplay does not call Wikidata live.
+Career Quiz uses cached Wikidata career data merged with local EuroLeague roster data; gameplay does not call Wikidata live.
 
 ```bash
 cd backend
@@ -84,7 +84,8 @@ map TicTacToe and Roster Guess rules into that shared Interface.
 
 Career Quiz adds a **Wikidata Career Ingestion Module** under `backend/ingestion/`.
 It matches local EuroLeague players to Wikidata basketball-player entities, filters
-professional club stints, stores cached Career Timelines, and records a Career Data
+professional club stints, merges local EuroLeague roster stints to correct missing/outdated
+Wikidata club history, stores cached Career Timelines, and records a Career Data
 Revision. Solo Career Quiz rounds use signed Solo Round Tokens so the answer is not
 stored in browser state or persisted as a solo game row.
 

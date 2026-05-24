@@ -11,6 +11,7 @@ from app.models import (
     GamePlayerStats,
     Player,
     PlayerCareerStint,
+    PlayerSeasonTeam,
     PlayerWikidataMapping,
     Season,
     Team,
@@ -23,6 +24,7 @@ from ingestion.wikidata_careers import (
     WikidataPlayerCandidate,
     WikidataTeamMembership,
     ingest_wikidata_careers,
+    normalized_stint_season_years,
 )
 
 
@@ -184,6 +186,98 @@ def test_override_file_can_reject_a_player(session, tmp_path):
     assert mapping.review_note == "wrong person"
 
 
+def test_override_file_can_correct_and_extend_player_stints(session, tmp_path):
+    player = _add_player_with_stats(session, first_name="Mathias", last_name="Lessort")
+    candidate = WikidataPlayerCandidate("Q17634891", "Mathias Lessort")
+    override_path = tmp_path / "overrides.json"
+    override_path.write_text(
+        """{
+          "players": [{
+            "player_id": %d,
+            "wikidata_qid": "Q17634891",
+            "stint_updates": [{"team_qid": "Q912247", "end_year": 2023}],
+            "extra_stints": [{"team_qid": "Q739287", "team_label": "Panathinaikos B.C.", "start_year": 2023}]
+          }]
+        }"""
+        % player.id
+    )
+    adapter = FakeWikidataAdapter(
+        candidates={"Q17634891": candidate},
+        memberships={
+            "Q17634891": [
+                _club("Q819694", "Maccabi Tel Aviv B.C.", "+2021-00-00T00:00:00Z", "+2021-00-00T00:00:00Z"),
+                _club("Q912247", "KK Partizan", "+2021-00-00T00:00:00Z", None),
+            ]
+        },
+    )
+
+    report = ingest_wikidata_careers(
+        session,
+        adapter,
+        IngestOptions(min_eligible_players=1, overrides_path=override_path),
+    )
+
+    stints = (
+        session.query(PlayerCareerStint)
+        .filter_by(player_id=player.id, include_in_quiz=True)
+        .order_by(PlayerCareerStint.sequence_index)
+        .all()
+    )
+    assert report.eligible_players == 1
+    assert [(stint.wikidata_team_label, stint.start_season, stint.end_season) for stint in stints] == [
+        ("Maccabi Tel Aviv B.C.", "2021/22", "2021/22"),
+        ("KK Partizan", "2021/22", "2022/23"),
+        ("Panathinaikos B.C.", "2023/24", None),
+    ]
+
+
+def test_same_year_precision_stint_uses_start_season_for_single_year():
+    membership = _club(
+        "Q819694",
+        "Maccabi Tel Aviv B.C.",
+        "+2021-00-00T00:00:00Z",
+        "+2021-00-00T00:00:00Z",
+    )
+
+    assert normalized_stint_season_years(membership) == (2021, 2021)
+
+
+def test_local_euroleague_stints_extend_incomplete_wikidata_career(session):
+    player = _add_player_with_stats(session, first_name="Mathias", last_name="Lessort")
+    candidate = WikidataPlayerCandidate("Q17634891", "Mathias Lessort")
+    _add_local_stint(session, player, "PARTIZAN BELGRADE", "PAR", 2022)
+    _add_local_stint(session, player, "PANATHINAIKOS", "PAN", 2023)
+    _add_local_stint(session, player, "PANATHINAIKOS", "PAN", 2024)
+    adapter = FakeWikidataAdapter(
+        searches={"Mathias Lessort": [candidate]},
+        memberships={
+            "Q17634891": [
+                _club("Q819694", "Maccabi Tel Aviv B.C.", "+2021-00-00T00:00:00Z", "+2021-00-00T00:00:00Z"),
+                _club("Q912247", "KK Partizan", "+2021-00-00T00:00:00Z", None),
+            ]
+        },
+    )
+
+    report = ingest_wikidata_careers(
+        session,
+        adapter,
+        IngestOptions(min_eligible_players=1),
+    )
+
+    stints = (
+        session.query(PlayerCareerStint)
+        .filter_by(player_id=player.id, include_in_quiz=True)
+        .order_by(PlayerCareerStint.sequence_index)
+        .all()
+    )
+    assert report.eligible_players == 1
+    assert [(stint.wikidata_team_label, stint.start_season, stint.end_season) for stint in stints] == [
+        ("Maccabi Tel Aviv B.C.", "2021/22", "2021/22"),
+        ("KK Partizan", "2021/22", "2022/23"),
+        ("PANATHINAIKOS", "2023/24", None),
+    ]
+
+
 def _add_player_with_stats(
     session,
     *,
@@ -219,6 +313,21 @@ def _add_player_with_stats(
     )
     session.commit()
     return player
+
+
+def _add_local_stint(session, player: Player, team_name: str, team_code: str, year: int) -> None:
+    season = session.query(Season).filter_by(year=year).first()
+    if season is None:
+        season = Season(year=year, name=f"{year}-{year + 1}")
+        session.add(season)
+        session.flush()
+    team = session.query(Team).filter_by(euroleague_code=team_code).first()
+    if team is None:
+        team = Team(euroleague_code=team_code, name=team_name)
+        session.add(team)
+        session.flush()
+    session.add(PlayerSeasonTeam(player_id=player.id, team_id=team.id, season_id=season.id))
+    session.commit()
 
 
 def player_code_seed(first_name: str, last_name: str) -> int:
