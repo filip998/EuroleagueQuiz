@@ -204,12 +204,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         col_index: selectedCell.col_index,
         player_id: player.player_id,
       });
-      setGame(res.game);
-      if (res.completed_round && ["round_won", "round_drawn", "match_won", "board_complete"].includes(res.result)) {
-        startRoundTransition(res.result, res.completed_round);
-      } else {
-        setLastResult(res.result);
-      }
+      handleRealtimeState(res);
       setSelectedCell(null);
     } catch (err) {
       setError(err.message);
@@ -230,8 +225,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       }
 
       const res = await offerDraw(game.id);
-      setGame(res.game);
-      setLastResult("draw_offered");
+      handleRealtimeState(res);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -251,12 +245,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       }
 
       const res = await respondDraw(game.id, accept);
-      setGame(res.game);
-      if (accept && res.completed_round) {
-        startRoundTransition("draw_accepted", res.completed_round);
-      } else {
-        setLastResult(accept ? "draw_accepted" : "draw_declined");
-      }
+      handleRealtimeState(res);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -269,9 +258,9 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setError(null);
     try {
       const res = await giveUpGame(game.id);
-      setGame(res.game);
-      if (res.completed_round) {
-        setRoundTransition({ countdown: null, completedRound: res.completed_round, result: "gave_up" });
+      setGame(res.state);
+      if (res.completedRound) {
+        setRoundTransition({ countdown: null, completedRound: res.completedRound, result: "gave_up" });
         setLastResult("gave_up");
         setSelectedCell(null);
       }

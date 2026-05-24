@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import func
 
@@ -8,10 +9,8 @@ from app.database import get_db
 from app.game_actions import (
     GameActionError,
     raise_http_game_action_error,
-    run_http_game_action,
 )
 from app.models import Player, PlayerSeasonTeam, PlayerSeasonStats, Team, Season
-from app.schemas.realtime import RealtimeResult
 from app.schemas.player import PlayerDetail, SeasonStatsEntry
 from app.schemas.quiz_ttt import (
     TicTacToeCreateGameRequest,
@@ -21,21 +20,38 @@ from app.schemas.quiz_ttt import (
 )
 from app.services.tictactoe import (
     autocomplete_players,
-    create_game,
     get_game_or_404,
-    give_up_round,
-    join_game,
-    offer_draw,
-    respond_draw,
-    serialize_completed_round,
     serialize_game_state,
-    submit_move,
+)
+from app.services.game_action_orchestration import (
+    GameActionName,
+    HttpGameActionRejected,
 )
 from app.services.realtime import OnlineGameRealtimeModule
 from app.services.realtime_adapters import TicTacToeRealtimeAdapter
 
 router = APIRouter()
 tictactoe_realtime = OnlineGameRealtimeModule(TicTacToeRealtimeAdapter())
+
+
+async def _tictactoe_http_action(
+    db: Session,
+    action: GameActionName,
+    *,
+    payload=None,
+    game_id: int | None = None,
+    player: int | None = None,
+):
+    try:
+        return await tictactoe_realtime.game_actions.http_action(
+            db=db,
+            action=action,
+            payload=payload,
+            game_id=game_id,
+            player=player,
+        )
+    except HttpGameActionRejected as exc:
+        return JSONResponse(status_code=exc.status_code, content=exc.envelope)
 
 
 @router.get("/random-player")
@@ -201,23 +217,15 @@ def season_leaders(season_year: int, stat: str, db: Session = Depends(get_db)):
 
 
 @router.post("/tictactoe/games")
-def create_tictactoe_game(
+async def create_tictactoe_game(
     payload: TicTacToeCreateGameRequest,
     db: Session = Depends(get_db),
 ):
-    game = run_http_game_action(
+    return await _tictactoe_http_action(
         db,
-        lambda: create_game(
-            db,
-            mode=payload.mode,
-            target_wins=payload.target_wins,
-            timer_mode=payload.timer_mode,
-            player1_name=payload.player1_name,
-            player2_name=payload.player2_name,
-        ),
+        GameActionName.CREATE,
+        payload=payload,
     )
-    db.refresh(game)
-    return serialize_game_state(db, game)
 
 
 @router.get("/tictactoe/games/{game_id}")
@@ -233,112 +241,55 @@ def get_tictactoe_game(game_id: int, db: Session = Depends(get_db)):
 async def submit_tictactoe_move(
     game_id: int,
     payload: TicTacToeMoveRequest,
+    player: int | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    def action():
-        game = get_game_or_404(db, game_id)
-        prev_round_number = game.round_number
-        result = submit_move(
-            db,
-            game=game,
-            row_index=payload.row_index,
-            col_index=payload.col_index,
-            player_id=payload.player_id,
-        )
-        return game, prev_round_number, result
-
-    game, prev_round_number, result = run_http_game_action(db, action)
-    db.refresh(game)
-    state = serialize_game_state(db, game)
-
-    # Include completed round with sample answers on round-ending moves
-    response = {"result": result, "game": state}
-    if result in ("round_won", "round_drawn", "match_won", "board_complete"):
-        completed = serialize_completed_round(db, game_id, prev_round_number)
-        if completed:
-            response["completed_round"] = completed
-
-    if game.mode == "online_friend":
-        if result == RealtimeResult.MATCH_WON:
-            tictactoe_realtime.cancel_timer(game_id)
-        else:
-            tictactoe_realtime.start_timer_from_game(game)
-
-    await tictactoe_realtime.broadcast_state(
-        game_id,
-        state,
-        result=result,
-        completed_round=response.get("completed_round"),
+    return await _tictactoe_http_action(
+        db,
+        GameActionName.MOVE,
+        payload=payload,
+        game_id=game_id,
+        player=player,
     )
-    return response
 
 
 @router.post("/tictactoe/games/{game_id}/draw-offer")
-async def offer_tictactoe_draw(game_id: int, db: Session = Depends(get_db)):
-    def action():
-        game = get_game_or_404(db, game_id)
-        offer_draw(db, game)
-        return game
-
-    game = run_http_game_action(db, action)
-    db.refresh(game)
-    state = serialize_game_state(db, game)
-    await tictactoe_realtime.broadcast_state(game_id, state)
-    return {"result": "offered", "game": state}
+async def offer_tictactoe_draw(
+    game_id: int,
+    player: int | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    return await _tictactoe_http_action(
+        db,
+        GameActionName.OFFER_DRAW,
+        game_id=game_id,
+        player=player,
+    )
 
 
 @router.post("/tictactoe/games/{game_id}/draw-response")
 async def respond_tictactoe_draw(
     game_id: int,
     payload: TicTacToeDrawResponseRequest,
+    player: int | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    def action():
-        game = get_game_or_404(db, game_id)
-        prev_round_number = game.round_number
-        result = respond_draw(db, game, accept=payload.accept)
-        return game, prev_round_number, result
-
-    game, prev_round_number, result = run_http_game_action(db, action)
-    db.refresh(game)
-    state = serialize_game_state(db, game)
-
-    response = {"result": result, "game": state}
-    if result == "accepted":
-        completed = serialize_completed_round(db, game_id, prev_round_number)
-        if completed:
-            response["completed_round"] = completed
-
-    if game.mode == "online_friend":
-        if game.status == "finished":
-            tictactoe_realtime.cancel_timer(game_id)
-        elif game.status == "active":
-            tictactoe_realtime.start_timer_from_game(game)
-
-    await tictactoe_realtime.broadcast_state(
-        game_id,
-        state,
-        result=f"draw_{result}",
-        completed_round=response.get("completed_round"),
+    return await _tictactoe_http_action(
+        db,
+        GameActionName.RESPOND_DRAW,
+        payload=payload,
+        game_id=game_id,
+        player=player,
     )
-    return response
 
 
 @router.post("/tictactoe/games/{game_id}/give-up")
-def give_up_tictactoe_game(game_id: int, db: Session = Depends(get_db)):
-    def action():
-        game = get_game_or_404(db, game_id)
-        given_up_round = give_up_round(db, game)
-        return game, given_up_round
-
-    game, given_up_round = run_http_game_action(db, action)
-    db.refresh(game)
-    state = serialize_game_state(db, game)
-    completed = serialize_completed_round(db, game_id, given_up_round)
-    response = {"result": "gave_up", "game": state}
-    if completed:
-        response["completed_round"] = completed
-    return response
+async def give_up_tictactoe_game(game_id: int, db: Session = Depends(get_db)):
+    return await _tictactoe_http_action(
+        db,
+        GameActionName.GIVE_UP,
+        game_id=game_id,
+    )
 
 
 @router.get("/tictactoe/players/autocomplete")
@@ -371,16 +322,11 @@ async def join_tictactoe_game(
     payload: TicTacToeJoinGameRequest,
     db: Session = Depends(get_db),
 ):
-    game = run_http_game_action(
+    return await _tictactoe_http_action(
         db,
-        lambda: join_game(db, payload.join_code.upper(), payload.player_name),
+        GameActionName.JOIN,
+        payload=payload,
     )
-    db.refresh(game)
-    state = serialize_game_state(db, game)
-    await tictactoe_realtime.broadcast_state(game.id, state)
-    # Start server-side turn timer for the online game
-    tictactoe_realtime.start_timer_from_game(game)
-    return {"game_id": game.id, "game": state}
 
 
 @router.websocket("/tictactoe/ws/{game_id}")

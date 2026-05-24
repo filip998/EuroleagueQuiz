@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any, Protocol
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -15,28 +14,19 @@ from app.game_actions import (
     GameActionError,
     GameActionNoop,
     run_game_action,
-    websocket_error_payload,
 )
 from app.schemas.realtime import (
     RealtimeClientAction,
     RealtimeResult,
     error_message,
     state_message,
-    unknown_action_message,
+)
+from app.services.game_action_orchestration import (
+    GameActionOrchestrator,
+    RealtimeActionOutcome,
 )
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RealtimeActionOutcome:
-    game: Any
-    result: RealtimeResult | str | None = None
-    completed_round_number: int | None = None
-    completed_round: dict[str, Any] | None = None
-    broadcast: bool = True
-    schedule_timer: bool = False
-    cancel_timer: bool = False
 
 
 class OnlineGameAdapter(Protocol):
@@ -172,6 +162,7 @@ class OnlineGameRealtimeModule:
         self.session_factory = session_factory
         self.connections = connections or ConnectionManager()
         self.timer = timer or TurnTimerManager(self._expire_turn)
+        self.game_actions = GameActionOrchestrator(adapter, self, log=logger)
 
     async def connect(self, websocket: WebSocket, game_id: int, player: int) -> None:
         try:
@@ -222,7 +213,7 @@ class OnlineGameRealtimeModule:
         game_id: int,
         player: int,
         data: Any,
-    ) -> RealtimeActionOutcome | None:
+    ) -> dict[str, Any] | None:
         if not isinstance(data, dict):
             await websocket.send_json(
                 error_message(
@@ -241,48 +232,23 @@ class OnlineGameRealtimeModule:
 
         if action == RealtimeClientAction.TIME_EXPIRED:
             return None
-        if action not in self.adapter.client_actions:
-            await websocket.send_json(unknown_action_message(action))
-            return None
 
         db = self.session_factory()
         try:
-            outcome = run_game_action(
-                db,
-                lambda: self.adapter.handle_client_action(
-                    db,
-                    self.adapter.get_game(db, game_id),
-                    action=str(action),
-                    data=data,
-                    player=player,
-                ),
+            envelope = await self.game_actions.websocket_action(
+                db=db,
+                action=str(action),
+                payload=data,
+                game_id=game_id,
+                player=player,
             )
-            db.refresh(outcome.game)
-            state = self.adapter.serialize_state(db, outcome.game)
-            completed_round = outcome.completed_round
-            if completed_round is None and outcome.completed_round_number is not None:
-                completed_round = self.adapter.serialize_completed_round(
-                    db, game_id, outcome.completed_round_number
-                )
-        except GameActionError as exc:
-            await websocket.send_json(websocket_error_payload(exc))
-            return None
         finally:
             db.close()
 
-        if outcome.cancel_timer:
-            self.cancel_timer(game_id)
-        elif outcome.schedule_timer and state.get("status") == "active":
-            self.start_timer_from_state(state)
-
-        if outcome.broadcast:
-            await self.broadcast_state(
-                game_id,
-                state,
-                result=outcome.result,
-                completed_round=completed_round,
-            )
-        return outcome
+        if envelope["type"] == "error":
+            await websocket.send_json(envelope)
+            return None
+        return envelope
 
     async def broadcast_state(
         self,
