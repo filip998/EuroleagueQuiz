@@ -118,7 +118,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   return (
     <Shell onHome={onHome}>
-      <div className="w-full max-w-3xl">
+      <div className="w-full max-w-5xl">
         <div className="flex items-start justify-between gap-4 mb-6">
           <div>
             <h1 className="font-display text-4xl text-elq-dark">CAREER QUIZ</h1>
@@ -133,50 +133,79 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
         </div>
 
         {completedRound && (
-          <div className="mb-5 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900">
-            <strong>{completedRound.winner_player ? `Player ${completedRound.winner_player} wins the round` : "No answer"}</strong>
-            <div>Answer: {completedRound.answer?.name}</div>
+          <div className="mb-5 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 flex items-center gap-4">
+            {completedRound.answer?.image_url && (
+              <img
+                src={completedRound.answer.image_url}
+                alt={completedRound.answer?.name || ""}
+                className="w-14 h-14 rounded-full object-cover object-top border border-emerald-300 shrink-0"
+                onError={(e) => { e.target.style.display = "none"; }}
+              />
+            )}
+            <div>
+              <strong>{completedRound.winner_player ? `Player ${completedRound.winner_player} wins the round` : "No answer"}</strong>
+              <div>Answer: {completedRound.answer?.name}</div>
+            </div>
           </div>
         )}
 
-        <Timeline timeline={timeline} />
-        <CareerGuessBox onGuess={handleGuess} disabled={Boolean(answer)} />
-
-        {message && <p className="mt-4 text-sm text-elq-muted">{message}</p>}
-
-        {answer && (
-          <div className="mt-6 rounded-2xl border border-elq-border bg-white p-5">
-            <h2 className="font-display text-3xl text-elq-dark mb-2">{answer.name}</h2>
-            <p className="text-sm text-elq-muted mb-4">
-              {[answer.position, answer.nationality].filter(Boolean).join(" · ")}
-            </p>
-            <button onClick={nextSoloRound} className="px-6 py-3 rounded-xl bg-elq-orange text-white font-bold">
-              Next career
-            </button>
+        <div className="grid lg:grid-cols-2 gap-6 items-start">
+          <div className="lg:max-h-[60vh] lg:overflow-y-auto">
+            <Timeline timeline={timeline} />
           </div>
-        )}
 
-        <div className="mt-6 flex flex-wrap gap-3">
-          {solo && !answer && (
-            <button onClick={revealSolo} className="px-5 py-2 rounded-xl border border-elq-border text-elq-text">
-              Reveal answer
-            </button>
-          )}
-          {!solo && game?.pending_no_answer_to === playerNumber && (
-            <>
-              <button onClick={() => respondNoAnswer(true)} className="px-5 py-2 rounded-xl bg-elq-orange text-white font-bold">
-                Accept no answer
-              </button>
-              <button onClick={() => respondNoAnswer(false)} className="px-5 py-2 rounded-xl border border-elq-border">
-                Decline
-              </button>
-            </>
-          )}
-          {!solo && !game?.pending_no_answer_to && (
-            <button onClick={offerNoAnswer} className="px-5 py-2 rounded-xl border border-elq-border text-elq-text">
-              Nobody knows
-            </button>
-          )}
+          <div>
+            <CareerGuessBox onGuess={handleGuess} disabled={Boolean(answer)} />
+
+            {message && <p className="mt-4 text-sm text-elq-muted">{message}</p>}
+
+            {answer ? (
+              <div className="mt-6 rounded-2xl border border-elq-border bg-white p-5">
+                <div className="flex items-center gap-4 mb-4">
+                  {answer.image_url && (
+                    <img
+                      src={answer.image_url}
+                      alt={answer.name || ""}
+                      className="w-20 h-20 rounded-full object-cover object-top border border-elq-border shrink-0"
+                      onError={(e) => { e.target.style.display = "none"; }}
+                    />
+                  )}
+                  <div>
+                    <h2 className="font-display text-3xl text-elq-dark">{answer.name}</h2>
+                    <p className="text-sm text-elq-muted">
+                      {[answer.position, answer.nationality].filter(Boolean).join(" · ")}
+                    </p>
+                  </div>
+                </div>
+                <button onClick={nextSoloRound} className="px-6 py-3 rounded-xl bg-elq-orange text-white font-bold">
+                  Next career
+                </button>
+              </div>
+            ) : (
+              <div className="mt-6 flex flex-wrap gap-3">
+                {solo && (
+                  <button onClick={revealSolo} className="px-5 py-2 rounded-xl border border-elq-border text-elq-text">
+                    Reveal answer
+                  </button>
+                )}
+                {!solo && game?.pending_no_answer_to === playerNumber && (
+                  <>
+                    <button onClick={() => respondNoAnswer(true)} className="px-5 py-2 rounded-xl bg-elq-orange text-white font-bold">
+                      Accept no answer
+                    </button>
+                    <button onClick={() => respondNoAnswer(false)} className="px-5 py-2 rounded-xl border border-elq-border">
+                      Decline
+                    </button>
+                  </>
+                )}
+                {!solo && !game?.pending_no_answer_to && (
+                  <button onClick={offerNoAnswer} className="px-5 py-2 rounded-xl border border-elq-border text-elq-text">
+                    Nobody knows
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </Shell>
