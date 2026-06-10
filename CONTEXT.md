@@ -22,7 +22,7 @@ The Online Game Realtime Module Interface is the shared seam used by game-specif
 
 ### Career Quiz
 
-A quiz where the clue is a player's professional club career timeline and the answer is the player. Career Quiz timelines come from pre-ingested Wikipedia career-history data merged with local EuroLeague roster data; gameplay should not call Wikipedia live.
+A quiz where the clue is a player's professional club career timeline and the answer is the player. Career Quiz timelines come purely from pre-ingested Wikipedia career-history data; gameplay should not call Wikipedia live. EuroLeague data only decides which players are eligible — it is never merged into the displayed career.
 
 ### Career Timeline
 
@@ -46,7 +46,7 @@ The Module that resolves Wikipedia career team labels and wikilink targets to st
 
 ### Career Timeline Builder
 
-The Module that converts parsed career rows and local EuroLeague roster stints into cached Career Timeline entries. Its Interface owns Wikipedia year-to-season conversion, repeated-team return preservation, local roster validation/fill rules, one-season formatting inputs, loan flags, and filtered-row reasons.
+The Module that converts parsed Wikipedia career rows into cached Career Timeline entries. Its Interface owns Wikipedia year display (calendar-year style such as `1999–2004`), repeated-team return preservation, loan flags, and filtered-row reasons. EuroLeague roster data is not merged into the timeline.
 
 ### Solo Round Token
 

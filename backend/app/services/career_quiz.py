@@ -45,7 +45,7 @@ def create_solo_round(
         "round_token": token,
         "data_revision": revision.revision,
         "timeline": _career_timeline(db, player.id),
-        "source_note": "Career data from Wikipedia and EuroLeague rosters and may be incomplete.",
+        "source_note": "Career data from Wikipedia and may be incomplete.",
     }
 
 
@@ -338,6 +338,7 @@ def _career_timeline(db: Session, player_id: int) -> list[dict[str, Any]]:
     return [
         {
             "team_name": stint.source_team_label,
+            "years": _format_years(stint),
             "start_season": stint.start_season,
             "end_season": _display_end_season(stint),
             "is_current": stint.is_current,
@@ -346,6 +347,19 @@ def _career_timeline(db: Session, player_id: int) -> list[dict[str, Any]]:
         }
         for stint in stints
     ]
+
+
+def _format_years(stint: PlayerCareerStint) -> str | None:
+    start = stint.raw_start or (
+        str(stint.start_season_year) if stint.start_season_year is not None else None
+    )
+    if not start:
+        return None
+    if stint.is_current or not stint.raw_end:
+        return f"{start}\u2013present"
+    if stint.raw_end == start:
+        return start
+    return f"{start}\u2013{stint.raw_end}"
 
 
 def _display_end_season(stint: PlayerCareerStint) -> str | None:

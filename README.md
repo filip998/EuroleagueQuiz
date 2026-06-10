@@ -29,7 +29,7 @@ Then open `http://localhost:5173` to play.
 - **TicTacToe** — Claim cells on a 3×3 board by naming players who match both row and column team criteria. Solo, local 1v1, and online modes.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo and multiplayer.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
-- **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia plus local EuroLeague roster data. Solo practice and 2-player race modes.
+- **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice and 2-player race modes.
 
 ## Backend
 
@@ -57,7 +57,7 @@ python -m ingestion.ingest --start-season 2000 --end-season 2025
 
 ### Run Wikipedia Career Ingestion
 
-Career Quiz uses cached Wikipedia career-history data merged with local EuroLeague roster data; gameplay does not call Wikipedia live.
+Career Quiz uses cached Wikipedia career-history data; gameplay does not call Wikipedia live. EuroLeague data is used only to choose which players to look up — the cached career timeline comes purely from each player's Wikipedia infobox career history (no roster merging).
 
 ```bash
 cd backend
