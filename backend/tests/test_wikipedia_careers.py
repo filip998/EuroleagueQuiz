@@ -74,6 +74,28 @@ SERGE_IBAKA_WIKITEXT = """
 """
 
 
+ROBERTO_DUENAS_WIKITEXT = """
+{{Infobox basketball biography
+| name = Roberto Dueñas
+| birth_date = {{birth date and age|1975|11|1}}
+| years1 = [[1994–95 ACB season|1994–1995]]
+| team1 = [[Baloncesto Fuenlabrada|Fuenlabrada]]
+| years2 = [[1995–96 Liga EBA season|1995–1996]]
+| team2 = [[CB Cornellà]]
+| years3 = [[1995–96 ACB season|1996]]–[[2004–05 ACB season|2005]]
+| team3 = [[FC Barcelona Bàsquet|FC Barcelona]]
+| years4 = [[2005–06 ACB season|2005–2006]]
+| team4 = [[CB Girona]]
+| years5 = [[2006–07 ACB season|2006–2007]]
+| team5 = [[Joventut Badalona]]
+| years6 = [[2006–07 LEB season|2007]]
+| team6 = [[CB Prat]]
+| years7 = [[2006–07 ACB season|2007]]
+| team7 = Joventut Badalona
+}}
+"""
+
+
 class FakeWikipediaAdapter:
     def __init__(self, *, searches=None, pages=None):
         self.searches = searches or {}
@@ -122,6 +144,45 @@ def test_parse_year_range_maps_wikipedia_years_to_seasons():
         2015,
         False,
     )
+
+
+def test_parse_year_range_ignores_linked_season_targets():
+    # The wikilink target ("1994–95 ACB season") must not leak its years into
+    # parsing; only the displayed label ("1994–1995") should be used.
+    assert parse_year_range("[[1994–95 ACB season|1994–1995]]") == (
+        "1994",
+        "1995",
+        1994,
+        1994,
+        False,
+    )
+    assert parse_year_range(
+        "[[1995–96 ACB season|1996]]–[[2004–05 ACB season|2005]]"
+    ) == ("1996", "2005", 1996, 2004, False)
+    assert parse_year_range("[[2006–07 LEB season|2007]]") == (
+        "2007",
+        "2007",
+        2007,
+        2007,
+        False,
+    )
+
+
+def test_parse_career_rows_uses_linked_year_labels_not_targets():
+    rows = parse_career_rows(ROBERTO_DUENAS_WIKITEXT)
+
+    assert [
+        (row.team_label, row.raw_start, row.raw_end, row.start_year, row.end_year)
+        for row in rows
+    ] == [
+        ("Fuenlabrada", "1994", "1995", 1994, 1994),
+        ("CB Cornellà", "1995", "1996", 1995, 1995),
+        ("FC Barcelona", "1996", "2005", 1996, 2004),
+        ("CB Girona", "2005", "2006", 2005, 2005),
+        ("Joventut Badalona", "2006", "2007", 2006, 2006),
+        ("CB Prat", "2007", "2007", 2007, 2007),
+        ("Joventut Badalona", "2007", "2007", 2007, 2007),
+    ]
 
 
 def test_default_ingest_limit_is_approved_candidate_count():
