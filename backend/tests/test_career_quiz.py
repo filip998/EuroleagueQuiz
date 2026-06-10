@@ -1,12 +1,14 @@
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
+from app.game_actions import ConflictGameActionError
 from app.models import (
     CareerDataRevision,
     Player,
+    PlayerCareerSourceMapping,
     PlayerCareerStint,
-    PlayerWikidataMapping,
 )
 from app.services import career_quiz
 
@@ -86,6 +88,27 @@ def test_multiplayer_first_correct_answer_wins_match_when_target_is_one():
         db.close()
 
 
+def test_low_threshold_revision_does_not_enable_quiz():
+    db = _session()
+    try:
+        _eligible_player(db, "Low", "Threshold")
+        revision = CareerDataRevision(
+            revision="low-threshold",
+            status="active",
+            eligible_player_count=20,
+            threshold_player_count=20,
+            threshold_passed=True,
+            is_active=True,
+        )
+        db.add(revision)
+        db.commit()
+
+        with pytest.raises(ConflictGameActionError, match="Career Quiz is not enabled"):
+            career_quiz.create_solo_round(db, recent_player_ids=[])
+    finally:
+        db.close()
+
+
 def _session():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
@@ -96,8 +119,8 @@ def _active_revision(db):
     revision = CareerDataRevision(
         revision="test-revision",
         status="active",
-        eligible_player_count=10,
-        threshold_player_count=1,
+        eligible_player_count=200,
+        threshold_player_count=200,
         threshold_passed=True,
         is_active=True,
     )
@@ -113,10 +136,12 @@ def _eligible_player(db, first_name: str, last_name: str):
     )
     db.add(player)
     db.flush()
-    mapping = PlayerWikidataMapping(
+    mapping = PlayerCareerSourceMapping(
         player_id=player.id,
-        wikidata_qid=f"Q{player.id}",
-        wikidata_label=f"{first_name} {last_name}",
+        source_name="wikipedia",
+        source_player_key=f"wiki:{player.id}",
+        source_player_label=f"{first_name} {last_name}",
+        source_player_url=f"https://en.wikipedia.org/wiki/{first_name}_{last_name}",
         status="accepted",
         candidate_count=1,
     )
@@ -128,9 +153,10 @@ def _eligible_player(db, first_name: str, last_name: str):
                 mapping_id=mapping.id,
                 player_id=player.id,
                 sequence_index=index + 1,
-                wikidata_player_qid=mapping.wikidata_qid,
-                wikidata_team_qid=f"T{player.id}{index}",
-                wikidata_team_label=f"Team {index}",
+                source_name="wikipedia",
+                source_player_key=mapping.source_player_key,
+                source_team_key=f"T{player.id}{index}",
+                source_team_label=f"Team {index}",
                 start_season=f"200{index}/0{index + 1}",
                 start_season_year=2000 + index,
                 include_in_quiz=True,

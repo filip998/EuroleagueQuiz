@@ -24,7 +24,7 @@ from app.models.career import (
     CareerQuizGuess,
     CareerQuizRound,
     PlayerCareerStint,
-    PlayerWikidataMapping,
+    PlayerCareerSourceMapping,
 )
 
 __all__ = [
@@ -50,5 +50,5 @@ __all__ = [
     "CareerQuizGuess",
     "CareerQuizRound",
     "PlayerCareerStint",
-    "PlayerWikidataMapping",
+    "PlayerCareerSourceMapping",
 ]

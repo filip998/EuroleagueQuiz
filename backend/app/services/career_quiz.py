@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.game_actions import ConflictGameActionError, InvalidGameActionError, NotFoundGameActionError
 from app.models import (
     CareerDataRevision,
@@ -16,7 +17,7 @@ from app.models import (
     CareerQuizRound,
     Player,
     PlayerCareerStint,
-    PlayerWikidataMapping,
+    PlayerCareerSourceMapping,
 )
 from app.services.solo_round_token import (
     SoloRoundTokenError,
@@ -44,7 +45,7 @@ def create_solo_round(
         "round_token": token,
         "data_revision": revision.revision,
         "timeline": _career_timeline(db, player.id),
-        "source_note": "Career data from Wikidata and EuroLeague rosters and may be incomplete.",
+        "source_note": "Career data from Wikipedia and EuroLeague rosters and may be incomplete.",
     }
 
 
@@ -316,10 +317,10 @@ def _eligible_player_ids_subquery(db: Session):
     return (
         db.query(PlayerCareerStint.player_id)
         .join(
-            PlayerWikidataMapping,
-            PlayerWikidataMapping.player_id == PlayerCareerStint.player_id,
+            PlayerCareerSourceMapping,
+            PlayerCareerSourceMapping.player_id == PlayerCareerStint.player_id,
         )
-        .filter(PlayerWikidataMapping.status == "accepted")
+        .filter(PlayerCareerSourceMapping.status == "accepted")
         .filter(PlayerCareerStint.include_in_quiz.is_(True))
         .group_by(PlayerCareerStint.player_id)
         .having(func.count(PlayerCareerStint.id) >= 3)
@@ -336,11 +337,12 @@ def _career_timeline(db: Session, player_id: int) -> list[dict[str, Any]]:
     )
     return [
         {
-            "team_name": stint.wikidata_team_label,
+            "team_name": stint.source_team_label,
             "start_season": stint.start_season,
             "end_season": _display_end_season(stint),
             "is_current": stint.is_current,
             "is_loan": stint.is_loan,
+            "source_url": stint.source_team_url,
         }
         for stint in stints
     ]
@@ -377,6 +379,8 @@ def _active_revision(db: Session) -> CareerDataRevision:
     revision = (
         db.query(CareerDataRevision)
         .filter_by(is_active=True, threshold_passed=True)
+        .filter(CareerDataRevision.threshold_player_count >= settings.career_quiz_min_eligible_players)
+        .filter(CareerDataRevision.eligible_player_count >= settings.career_quiz_min_eligible_players)
         .order_by(CareerDataRevision.created_at.desc())
         .first()
     )

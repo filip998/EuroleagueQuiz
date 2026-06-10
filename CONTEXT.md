@@ -22,19 +22,31 @@ The Online Game Realtime Module Interface is the shared seam used by game-specif
 
 ### Career Quiz
 
-A quiz where the clue is a player's professional club career timeline and the answer is the player. Career Quiz timelines come from pre-ingested Wikidata career data merged with local EuroLeague roster data; gameplay should not call Wikidata live.
+A quiz where the clue is a player's professional club career timeline and the answer is the player. Career Quiz timelines come from pre-ingested Wikipedia career-history data merged with local EuroLeague roster data; gameplay should not call Wikipedia live.
 
 ### Career Timeline
 
-The ordered list of professional club stints shown as the Career Quiz clue. Career Timeline entries use season-style labels, include only eligible professional club stints, and may be incomplete when Wikidata data is incomplete.
+The ordered list of professional club stints shown as the Career Quiz clue. Career Timeline entries use season-style labels, include only eligible professional club stints, and may be incomplete when Wikipedia data is incomplete.
 
 ### Eligible Career Player
 
-A local EuroLeague player who is allowed to appear as a Career Quiz answer. An Eligible Career Player has EuroLeague game/stat data, an accepted Wikidata player mapping, and a valid Career Timeline after filtering.
+A local EuroLeague player who is allowed to appear as a Career Quiz answer. An Eligible Career Player has EuroLeague game/stat data, an accepted career source mapping, and a valid Career Timeline after filtering.
 
-### Wikidata Career Ingestion Module
+### Wikipedia Career Ingestion Module
 
-The Module that fetches, matches, filters, audits, and caches Wikidata career data for Career Quiz. Its Interface owns player-to-Wikidata matching, professional-club filtering, local EuroLeague roster-stint merging, season-label conversion, review reporting, and the eligible-player threshold check so gameplay modules only read cached career data.
+The Module that fetches, parses, audits, and caches Wikipedia career-history data for Career Quiz. Its Interface owns MediaWiki API access, infobox career-row parsing, review reporting, and the eligible-player threshold check so gameplay modules only read cached career data.
+
+### Wikipedia Page Resolver
+
+The Module that resolves a local EuroLeague player to an English Wikipedia page using MediaWiki data only. Its Interface owns page search, candidate-page fetching, basketball-page validation, birth-date disambiguation, disambiguation-page rejection, review statuses, and source page metadata.
+
+### Career Team Resolver
+
+The Module that resolves Wikipedia career team labels and wikilink targets to stable Career Timeline team keys. Its Interface owns source-controlled aliases, local EuroLeague team matching, non-EuroLeague Wikipedia team keys, and unresolved-team reporting.
+
+### Career Timeline Builder
+
+The Module that converts parsed career rows and local EuroLeague roster stints into cached Career Timeline entries. Its Interface owns Wikipedia year-to-season conversion, repeated-team return preservation, local roster validation/fill rules, one-season formatting inputs, loan flags, and filtered-row reasons.
 
 ### Solo Round Token
 
@@ -42,4 +54,4 @@ An opaque signed token representing a stateless solo quiz round. The token lets 
 
 ### Career Data Revision
 
-A persisted marker for the current cached Career Quiz dataset. Solo Round Tokens include the Career Data Revision so stale tokens are rejected after Wikidata career data is refreshed.
+A persisted marker for the current cached Career Quiz dataset. Solo Round Tokens include the Career Data Revision so stale tokens are rejected after Wikipedia career data is refreshed.

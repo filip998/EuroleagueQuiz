@@ -29,7 +29,7 @@ Then open `http://localhost:5173` to play.
 - **TicTacToe** — Claim cells on a 3×3 board by naming players who match both row and column team criteria. Solo, local 1v1, and online modes.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo and multiplayer.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
-- **Career Quiz** — Guess the player from a professional club career timeline built from Wikidata plus local EuroLeague roster data. Solo practice and 2-player race modes.
+- **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia plus local EuroLeague roster data. Solo practice and 2-player race modes.
 
 ## Backend
 
@@ -55,16 +55,16 @@ cd backend
 python -m ingestion.ingest --start-season 2000 --end-season 2025
 ```
 
-### Run Wikidata Career Ingestion
+### Run Wikipedia Career Ingestion
 
-Career Quiz uses cached Wikidata career data merged with local EuroLeague roster data; gameplay does not call Wikidata live.
+Career Quiz uses cached Wikipedia career-history data merged with local EuroLeague roster data; gameplay does not call Wikipedia live.
 
 ```bash
 cd backend
-python -m ingestion.wikidata_careers --report data/wikidata-career-report.json
+python -m ingestion.wikipedia_careers --report data/wikipedia-career-report.json
 ```
 
-Reviewed match overrides live in `backend/ingestion/wikidata_overrides.json`. The ingestion command fails the feature-enablement threshold when fewer than 200 eligible players are available. After running this ingestion or any migration locally, upload `backend/data/euroleague.db` to Azure before deploying.
+Reviewed page/team overrides live in `backend/ingestion/wikipedia_overrides.json`. The ingestion command fails the feature-enablement threshold when fewer than 200 eligible players are available. After running this ingestion or any migration locally, upload `backend/data/euroleague.db` to Azure before deploying.
 
 ### API Docs
 
@@ -82,12 +82,12 @@ broadcast envelopes, server-side turn timers, timer expiry, and schema-compliant
 error/result messages. Game-specific Adapters in `backend/app/services/realtime_adapters.py`
 map TicTacToe and Roster Guess rules into that shared Interface.
 
-Career Quiz adds a **Wikidata Career Ingestion Module** under `backend/ingestion/`.
-It matches local EuroLeague players to Wikidata basketball-player entities, filters
-professional club stints, merges local EuroLeague roster stints to correct missing/outdated
-Wikidata club history, stores cached Career Timelines, and records a Career Data
-Revision. Solo Career Quiz rounds use signed Solo Round Tokens so the answer is not
-stored in browser state or persisted as a solo game row.
+Career Quiz adds a **Wikipedia Career Ingestion Module** under `backend/ingestion/`.
+It resolves local EuroLeague players to English Wikipedia pages, parses basketball
+infobox career-history rows, resolves team labels to stable keys, merges local EuroLeague
+roster stints as validation/fill data, stores cached Career Timelines, and records a
+Career Data Revision. Solo Career Quiz rounds use signed Solo Round Tokens so the answer
+is not stored in browser state or persisted as a solo game row.
 
 The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
 `frontend/src/useOnlineGameRealtime.js`, so reconnect, background state sync,

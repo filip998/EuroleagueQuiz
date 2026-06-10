@@ -144,7 +144,7 @@ function HomePage() {
               </div>
               <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">CAREER QUIZ</h2>
               <p className="text-sm text-elq-muted leading-relaxed">
-                Guess the player from a professional club career timeline powered by Wikidata.
+                Guess the player from a professional club career timeline powered by Wikipedia.
               </p>
               <div className="mt-4 text-xs font-semibold text-elq-orange opacity-0 group-hover:opacity-100 transition-opacity">
                 PLAY →

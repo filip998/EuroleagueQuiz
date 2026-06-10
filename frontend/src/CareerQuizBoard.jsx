@@ -122,7 +122,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
         <div className="flex items-start justify-between gap-4 mb-6">
           <div>
             <h1 className="font-display text-4xl text-elq-dark">CAREER QUIZ</h1>
-            <p className="text-sm text-elq-muted">Career data from Wikidata and EuroLeague rosters and may be incomplete.</p>
+            <p className="text-sm text-elq-muted">Career data from Wikipedia and EuroLeague rosters and may be incomplete.</p>
           </div>
           {!solo && (
             <div className="text-right text-sm">
