@@ -42,6 +42,7 @@ REJECTED = "rejected"
 UNMATCHED = "unmatched"
 
 SOURCE_NAME = "wikipedia"
+DEFAULT_CANDIDATE_LIMIT = 500
 
 
 @dataclass(frozen=True)
@@ -113,7 +114,7 @@ class PlayerOverride:
 
 @dataclass(frozen=True)
 class IngestOptions:
-    limit: int | None = None
+    limit: int | None = DEFAULT_CANDIDATE_LIMIT
     force_refresh: bool = False
     min_eligible_players: int = settings.career_quiz_min_eligible_players
     overrides_path: Path | None = None
@@ -1218,7 +1219,7 @@ def _wikipedia_url(title: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ingest Wikipedia career data")
-    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--limit", type=int, default=DEFAULT_CANDIDATE_LIMIT)
     parser.add_argument("--min-eligible", type=int, default=settings.career_quiz_min_eligible_players)
     parser.add_argument("--overrides", type=Path, default=Path(__file__).with_name("wikipedia_overrides.json"))
     parser.add_argument("--report", type=Path, default=None)

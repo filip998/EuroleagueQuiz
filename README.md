@@ -61,10 +61,10 @@ Career Quiz uses cached Wikipedia career-history data merged with local EuroLeag
 
 ```bash
 cd backend
-python -m ingestion.wikipedia_careers --report data/wikipedia-career-report.json
+python -m ingestion.wikipedia_careers --limit 500 --report data/wikipedia-career-report.json --candidates-report data/wikipedia-career-candidates.json
 ```
 
-Reviewed page/team overrides live in `backend/ingestion/wikipedia_overrides.json`. The ingestion command fails the feature-enablement threshold when fewer than 200 eligible players are available. After running this ingestion or any migration locally, upload `backend/data/euroleague.db` to Azure before deploying.
+Reviewed page/team overrides live in `backend/ingestion/wikipedia_overrides.json`. The default candidate set is 500 players: 450 recent/top EuroLeague game-count players plus 50 early-era roster-heavy players from 2000–2006. The ingestion command fails the feature-enablement threshold when fewer than 200 eligible players are available. After running this ingestion or any migration locally, upload `backend/data/euroleague.db` to Azure before deploying.
 
 ### API Docs
 

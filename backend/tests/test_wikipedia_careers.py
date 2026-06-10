@@ -21,6 +21,7 @@ from app.models import (
 from ingestion.wikipedia_careers import (
     ACCEPTED,
     CareerTeamResolver,
+    DEFAULT_CANDIDATE_LIMIT,
     IngestOptions,
     WikipediaPage,
     WikipediaPageCandidate,
@@ -122,6 +123,11 @@ def test_parse_year_range_maps_wikipedia_years_to_seasons():
         2015,
         False,
     )
+
+
+def test_default_ingest_limit_is_approved_candidate_count():
+    assert IngestOptions().limit == 500
+    assert DEFAULT_CANDIDATE_LIMIT == 500
 
 
 def test_ingest_uses_wikipedia_career_rows_for_missing_non_euroleague_stints(session, tmp_path):
