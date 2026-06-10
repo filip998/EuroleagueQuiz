@@ -16,14 +16,17 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
-class PlayerWikidataMapping(Base):
-    __tablename__ = "player_wikidata_mappings"
+class PlayerCareerSourceMapping(Base):
+    __tablename__ = "player_career_source_mappings"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     player_id = Column(Integer, ForeignKey("players.id"), nullable=False, unique=True)
-    wikidata_qid = Column(String, nullable=True, index=True)
-    wikidata_label = Column(String, nullable=True)
-    wikidata_birth_date = Column(Date, nullable=True)
+    source_name = Column(String, nullable=False, default="wikipedia", index=True)
+    source_player_key = Column(String, nullable=True, index=True)
+    source_player_label = Column(String, nullable=True)
+    source_player_url = Column(String, nullable=True)
+    source_revision_id = Column(String, nullable=True)
+    source_birth_date = Column(Date, nullable=True)
     status = Column(String, nullable=False, index=True)
     match_method = Column(String, nullable=True)
     reviewed = Column(Boolean, nullable=False, default=False)
@@ -54,20 +57,21 @@ class PlayerCareerStint(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     mapping_id = Column(
-        Integer, ForeignKey("player_wikidata_mappings.id"), nullable=False
+        Integer, ForeignKey("player_career_source_mappings.id"), nullable=False
     )
     player_id = Column(Integer, ForeignKey("players.id"), nullable=False, index=True)
     sequence_index = Column(Integer, nullable=False)
 
-    wikidata_player_qid = Column(String, nullable=False, index=True)
-    wikidata_team_qid = Column(String, nullable=False, index=True)
-    wikidata_team_label = Column(String, nullable=False)
-    wikidata_statement_id = Column(String, nullable=True)
+    source_name = Column(String, nullable=False, default="wikipedia", index=True)
+    source_player_key = Column(String, nullable=True, index=True)
+    source_team_key = Column(String, nullable=False, index=True)
+    source_team_label = Column(String, nullable=False)
+    source_team_url = Column(String, nullable=True)
+    source_row_key = Column(String, nullable=True)
+    local_team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
 
     raw_start = Column(String, nullable=True)
-    raw_start_precision = Column(Integer, nullable=True)
     raw_end = Column(String, nullable=True)
-    raw_end_precision = Column(Integer, nullable=True)
     start_season = Column(String, nullable=True)
     end_season = Column(String, nullable=True)
     start_season_year = Column(Integer, nullable=True)
@@ -83,8 +87,9 @@ class PlayerCareerStint(Base):
         UniqueConstraint("mapping_id", "sequence_index", name="uq_career_stint_order"),
     )
 
-    mapping = relationship("PlayerWikidataMapping", back_populates="stints")
+    mapping = relationship("PlayerCareerSourceMapping", back_populates="stints")
     player = relationship("Player")
+    local_team = relationship("Team")
 
 
 class CareerDataRevision(Base):

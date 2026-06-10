@@ -44,7 +44,7 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
           </button>
           <h1 className="font-display text-4xl text-elq-dark mb-2">CAREER QUIZ</h1>
           <p className="text-sm text-elq-muted mb-6">
-            Guess the player from his Wikidata career timeline.
+            Guess the player from his Wikipedia career timeline.
           </p>
 
           <div className="grid grid-cols-3 gap-2 mb-5">
