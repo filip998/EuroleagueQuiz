@@ -435,7 +435,7 @@ def parse_career_rows(wikitext: str) -> list[ParsedCareerRow]:
 
 
 def parse_year_range(value: str) -> tuple[str, str | None, int, int | None, bool] | None:
-    source = _remove_refs(value)
+    source = _resolve_wikilinks(_remove_refs(value))
     text = _clean_text(value)
     text = (
         text.replace("–", "-")
@@ -1064,6 +1064,17 @@ def _remove_refs(value: str) -> str:
     value = re.sub(r"<ref\b[^/>]*/>", "", value, flags=re.IGNORECASE)
     value = re.sub(r"<ref\b[^>]*>.*?</ref>", "", value, flags=re.IGNORECASE | re.DOTALL)
     return value
+
+
+def _resolve_wikilinks(value: str) -> str:
+    """Replace ``[[target|label]]`` and ``[[label]]`` with the displayed label.
+
+    Year cells often wrap each season in a wikilink whose target also contains
+    years (e.g. ``[[1994–95 ACB season|1994–1995]]``). Those target years must
+    not leak into year extraction, so collapse links to their visible text while
+    leaving templates such as ``{{nbay}}`` untouched.
+    """
+    return re.sub(r"\[\[(?:[^\[\]|]*\|)*([^\[\]|]*)\]\]", r"\1", value)
 
 
 def _is_loan_text(value: str) -> bool:
