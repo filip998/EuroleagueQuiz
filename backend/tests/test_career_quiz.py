@@ -13,6 +13,24 @@ from app.models import (
 from app.services import career_quiz
 
 
+def test_format_years_uses_wikipedia_calendar_style():
+    from types import SimpleNamespace
+
+    def years(raw_start, raw_end, is_current, start_year=None):
+        stint = SimpleNamespace(
+            raw_start=raw_start,
+            raw_end=raw_end,
+            is_current=is_current,
+            start_season_year=start_year,
+        )
+        return career_quiz._format_years(stint)
+
+    assert years("1999", "2004", False) == "1999\u20132004"
+    assert years("2010", "2010", False) == "2010"
+    assert years("2024", None, True) == "2024\u2013present"
+    assert years(None, None, False, start_year=2015) == "2015\u2013present"
+
+
 def test_solo_round_guess_and_reveal():
     db = _session()
     try:

@@ -1,6 +1,5 @@
 from datetime import date
 import hashlib
-import json
 
 import pytest
 from sqlalchemy import create_engine
@@ -130,29 +129,12 @@ def test_default_ingest_limit_is_approved_candidate_count():
     assert DEFAULT_CANDIDATE_LIMIT == 500
 
 
-def test_ingest_uses_wikipedia_career_rows_for_missing_non_euroleague_stints(session, tmp_path):
+def test_ingest_uses_only_wikipedia_career_rows(session):
     player = _add_player_with_stats(
         session,
         first_name="Yam",
         last_name="Madar",
         birth_date=date(2000, 12, 21),
-    )
-    _add_local_stint(session, player, "PARTIZAN BELGRADE", "PAR", 2022)
-    _add_local_stint(session, player, "FENERBAHCE ULKER", "ULK", 2023)
-    _add_local_stint(session, player, "FC BAYERN MUNICH", "MUN", 2024)
-    _add_local_stint(session, player, "HAPOEL IBI TEL AVIV", "HTA", 2025)
-    overrides = _overrides_file(
-        tmp_path,
-        team_aliases={
-            "Hapoel Tel Aviv": "HTA",
-            "Hapoel Tel Aviv B.C.": "HTA",
-            "Fenerbahçe": "ULK",
-            "Fenerbahçe Men's Basketball": "ULK",
-            "Bayern Munich": "MUN",
-            "FC Bayern Munich (basketball)": "MUN",
-            "Partizan": "PAR",
-            "Partizan Belgrade": "PAR",
-        },
     )
     adapter = FakeWikipediaAdapter(
         searches={"Yam Madar": [WikipediaPageCandidate(1, "Yam Madar")]},
@@ -162,7 +144,7 @@ def test_ingest_uses_wikipedia_career_rows_for_missing_non_euroleague_stints(ses
     report = ingest_wikipedia_careers(
         session,
         adapter,
-        IngestOptions(min_eligible_players=1, overrides_path=overrides),
+        IngestOptions(min_eligible_players=1),
     )
 
     mapping = session.query(PlayerCareerSourceMapping).filter_by(player_id=player.id).one()
@@ -177,33 +159,46 @@ def test_ingest_uses_wikipedia_career_rows_for_missing_non_euroleague_stints(ses
     assert mapping.status == ACCEPTED
     assert mapping.source_player_label == "Yam Madar"
     assert revision.is_active is True
-    assert [(stint.source_team_label, stint.start_season, stint.end_season) for stint in stints] == [
-        ("Hapoel Tel Aviv", "2018/19", "2020/21"),
-        ("Partizan", "2021/22", "2022/23"),
-        ("Fenerbahçe", "2023/24", "2023/24"),
-        ("Bayern Munich", "2024/25", "2024/25"),
-        ("Hapoel Tel Aviv", "2024/25", None),
+    assert all(stint.source_name == "wikipedia" for stint in stints)
+    assert [
+        (stint.source_team_label, stint.raw_start, stint.raw_end, stint.is_current)
+        for stint in stints
+    ] == [
+        ("Hapoel Tel Aviv", "2018", "2021", False),
+        ("Partizan", "2021", "2023", False),
+        ("Fenerbahçe", "2023", "2024", False),
+        ("Bayern Munich", "2024", "2024", False),
+        ("Hapoel Tel Aviv", "2024", None, True),
     ]
 
 
-def test_ingest_keeps_repeated_team_returns_as_separate_stints(session, tmp_path):
+def test_local_euroleague_roster_is_ignored(session):
+    player = _add_player_with_stats(
+        session,
+        first_name="Yam",
+        last_name="Madar",
+        birth_date=date(2000, 12, 21),
+    )
+    _add_local_stint(session, player, "MACCABI TEL AVIV", "TEL", 2017)
+    adapter = FakeWikipediaAdapter(
+        searches={"Yam Madar": [WikipediaPageCandidate(1, "Yam Madar")]},
+        pages={"Yam Madar": _page(1, "Yam Madar", YAM_MADAR_WIKITEXT)},
+    )
+
+    ingest_wikipedia_careers(session, adapter, IngestOptions(min_eligible_players=1))
+
+    stints = session.query(PlayerCareerStint).filter_by(player_id=player.id).all()
+    assert stints
+    assert all(stint.source_name == "wikipedia" for stint in stints)
+    assert all(stint.source_team_label != "MACCABI TEL AVIV" for stint in stints)
+
+
+def test_ingest_keeps_repeated_team_returns_as_separate_stints(session):
     player = _add_player_with_stats(
         session,
         first_name="Serge",
         last_name="Ibaka",
         birth_date=date(1989, 9, 18),
-    )
-    _add_local_stint(session, player, "REAL MADRID", "MAD", 2011)
-    _add_local_stint(session, player, "FC BAYERN MUNICH", "MUN", 2023)
-    _add_local_stint(session, player, "REAL MADRID", "MAD", 2024)
-    overrides = _overrides_file(
-        tmp_path,
-        team_aliases={
-            "Real Madrid": "MAD",
-            "Real Madrid Baloncesto": "MAD",
-            "Bayern Munich": "MUN",
-            "FC Bayern Munich (basketball)": "MUN",
-        },
     )
     adapter = FakeWikipediaAdapter(
         searches={"Serge Ibaka": [WikipediaPageCandidate(2, "Serge Ibaka")]},
@@ -213,7 +208,7 @@ def test_ingest_keeps_repeated_team_returns_as_separate_stints(session, tmp_path
     report = ingest_wikipedia_careers(
         session,
         adapter,
-        IngestOptions(min_eligible_players=1, overrides_path=overrides),
+        IngestOptions(min_eligible_players=1),
     )
 
     stints = (
@@ -223,18 +218,12 @@ def test_ingest_keeps_repeated_team_returns_as_separate_stints(session, tmp_path
         .all()
     )
     assert report.eligible_players == 1
-    assert ("Real Madrid", "2011/12", "2011/12") in [
-        (stint.source_team_label, stint.start_season, stint.end_season) for stint in stints
-    ]
-    assert ("Real Madrid", "2024/25", "2024/25") in [
-        (stint.source_team_label, stint.start_season, stint.end_season) for stint in stints
-    ]
-    assert not any(
-        stint.source_team_label == "Real Madrid"
-        and stint.start_season == "2011/12"
-        and stint.end_season == "2024/25"
+    real_madrid = [
+        (stint.raw_start, stint.raw_end)
         for stint in stints
-    )
+        if stint.source_team_label == "Real Madrid"
+    ]
+    assert real_madrid == [("2011", "2011"), ("2024", "2025")]
 
 
 def test_birth_date_conflict_still_accepts_single_candidate(session):
@@ -383,123 +372,6 @@ def test_team_resolver_does_not_match_unrelated_team_by_single_shared_token(sess
     assert resolution.local_team_id is None
 
 
-def test_current_local_roster_extends_stale_wikipedia_stint(session, tmp_path):
-    player = _add_player_with_stats(
-        session,
-        first_name="Stale",
-        last_name="Current",
-        birth_date=date(1990, 1, 1),
-    )
-    _add_local_stint(session, player, "REAL MADRID", "MAD", 2025)
-    overrides = _overrides_file(
-        tmp_path,
-        team_aliases={
-            "Real Madrid": "MAD",
-            "Real Madrid Baloncesto": "MAD",
-        },
-    )
-    wikitext = """
-{{Infobox basketball biography
-| name = Stale Current
-| birth_date = {{birth date and age|1990|1|1}}
-| years1 = 2024–2025
-| team1 = [[Real Madrid Baloncesto|Real Madrid]]
-| years2 = 2022–2024
-| team2 = [[FC Barcelona Bàsquet|Barcelona]]
-| years3 = 2020–2022
-| team3 = [[Valencia Basket|Valencia]]
-}}
-"""
-    adapter = FakeWikipediaAdapter(
-        searches={"Stale Current": [WikipediaPageCandidate(3, "Stale Current")]},
-        pages={"Stale Current": WikipediaPage(
-            page_id=3,
-            title="Stale Current",
-            url="https://en.wikipedia.org/wiki/Stale_Current",
-            revision_id="rev-3",
-            wikitext=wikitext,
-            birth_date=date(1990, 1, 1),
-            is_basketball_player=True,
-        )},
-    )
-
-    ingest_wikipedia_careers(
-        session,
-        adapter,
-        IngestOptions(min_eligible_players=1, overrides_path=overrides),
-    )
-
-    real_madrid = (
-        session.query(PlayerCareerStint)
-        .filter_by(player_id=player.id, source_team_label="Real Madrid", include_in_quiz=True)
-        .one()
-    )
-    assert real_madrid.start_season == "2024/25"
-    assert real_madrid.end_season is None
-    assert real_madrid.is_current is True
-
-
-def test_local_roster_does_not_duplicate_same_team_wikipedia_period(session, tmp_path):
-    player = _add_player_with_stats(
-        session,
-        first_name="Duplicate",
-        last_name="Period",
-        birth_date=date(1990, 1, 1),
-    )
-    _add_local_stint(session, player, "BENETTON BASKET", "TRE", 2000)
-    _add_local_stint(session, player, "BENETTON BASKET", "TRE", 2001)
-    _add_local_stint(session, player, "BENETTON BASKET", "TRE", 2002)
-    overrides = _overrides_file(
-        tmp_path,
-        team_aliases={
-            "Benetton Treviso": "TRE",
-            "Pallacanestro Treviso": "TRE",
-        },
-    )
-    wikitext = """
-{{Infobox basketball biography
-| name = Duplicate Period
-| birth_date = {{birth date and age|1990|1|1}}
-| years1 = 1998–2000
-| team1 = [[Saski Baskonia|Baskonia]]
-| years2 = 2000–2003
-| team2 = [[Pallacanestro Treviso|Benetton Treviso]]
-| years3 = 2003–2005
-| team3 = [[Real Madrid Baloncesto|Real Madrid]]
-}}
-"""
-    adapter = FakeWikipediaAdapter(
-        searches={"Duplicate Period": [WikipediaPageCandidate(6, "Duplicate Period")]},
-        pages={"Duplicate Period": WikipediaPage(
-            page_id=6,
-            title="Duplicate Period",
-            url="https://en.wikipedia.org/wiki/Duplicate_Period",
-            revision_id="rev-6",
-            wikitext=wikitext,
-            birth_date=date(1990, 1, 1),
-            is_basketball_player=True,
-        )},
-    )
-
-    ingest_wikipedia_careers(
-        session,
-        adapter,
-        IngestOptions(min_eligible_players=1, overrides_path=overrides),
-    )
-
-    stints = (
-        session.query(PlayerCareerStint)
-        .filter_by(player_id=player.id, include_in_quiz=True)
-        .order_by(PlayerCareerStint.sequence_index)
-        .all()
-    )
-    assert [(stint.source_team_label, stint.start_season, stint.end_season) for stint in stints] == [
-        ("Baskonia", "1998/99", "1999/00"),
-        ("Benetton Treviso", "2000/01", "2002/03"),
-        ("Real Madrid", "2003/04", "2004/05"),
-    ]
-
-
 def test_only_final_present_row_stays_current(session):
     player = _add_player_with_stats(
         session,
@@ -562,12 +434,6 @@ def _page(page_id: int, title: str, wikitext: str) -> WikipediaPage:
         birth_date=date(2000, 12, 21) if title == "Yam Madar" else date(1989, 9, 18),
         is_basketball_player=True,
     )
-
-
-def _overrides_file(tmp_path, *, team_aliases: dict[str, str]):
-    path = tmp_path / "wikipedia_overrides.json"
-    path.write_text(json.dumps({"team_aliases": team_aliases, "players": []}))
-    return path
 
 
 def _add_player_with_stats(

@@ -122,7 +122,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
         <div className="flex items-start justify-between gap-4 mb-6">
           <div>
             <h1 className="font-display text-4xl text-elq-dark">CAREER QUIZ</h1>
-            <p className="text-sm text-elq-muted">Career data from Wikipedia and EuroLeague rosters and may be incomplete.</p>
+            <p className="text-sm text-elq-muted">Career data from Wikipedia and may be incomplete.</p>
           </div>
           {!solo && (
             <div className="text-right text-sm">
@@ -204,14 +204,15 @@ function Timeline({ timeline }) {
 }
 
 export function formatSeasonRange(stint) {
-  if (!stint.end_season) return `${stint.start_season} - now`;
+  if (stint.years) return stint.years;
+  if (!stint.end_season) return `${stint.start_season} – present`;
   if (stint.end_season === stint.start_season) return stint.start_season;
   const startYear = Number.parseInt(String(stint.start_season).slice(0, 4), 10);
   const endYear = Number.parseInt(String(stint.end_season).slice(0, 4), 10);
   if (Number.isFinite(startYear) && Number.isFinite(endYear) && endYear < startYear) {
     return stint.start_season;
   }
-  return `${stint.start_season} - ${stint.end_season}`;
+  return `${stint.start_season} – ${stint.end_season}`;
 }
 
 function CareerGuessBox({ onGuess, disabled }) {
