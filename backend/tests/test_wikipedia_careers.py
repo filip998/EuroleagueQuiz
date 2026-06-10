@@ -439,6 +439,67 @@ def test_current_local_roster_extends_stale_wikipedia_stint(session, tmp_path):
     assert real_madrid.is_current is True
 
 
+def test_local_roster_does_not_duplicate_same_team_wikipedia_period(session, tmp_path):
+    player = _add_player_with_stats(
+        session,
+        first_name="Duplicate",
+        last_name="Period",
+        birth_date=date(1990, 1, 1),
+    )
+    _add_local_stint(session, player, "BENETTON BASKET", "TRE", 2000)
+    _add_local_stint(session, player, "BENETTON BASKET", "TRE", 2001)
+    _add_local_stint(session, player, "BENETTON BASKET", "TRE", 2002)
+    overrides = _overrides_file(
+        tmp_path,
+        team_aliases={
+            "Benetton Treviso": "TRE",
+            "Pallacanestro Treviso": "TRE",
+        },
+    )
+    wikitext = """
+{{Infobox basketball biography
+| name = Duplicate Period
+| birth_date = {{birth date and age|1990|1|1}}
+| years1 = 1998–2000
+| team1 = [[Saski Baskonia|Baskonia]]
+| years2 = 2000–2003
+| team2 = [[Pallacanestro Treviso|Benetton Treviso]]
+| years3 = 2003–2005
+| team3 = [[Real Madrid Baloncesto|Real Madrid]]
+}}
+"""
+    adapter = FakeWikipediaAdapter(
+        searches={"Duplicate Period": [WikipediaPageCandidate(6, "Duplicate Period")]},
+        pages={"Duplicate Period": WikipediaPage(
+            page_id=6,
+            title="Duplicate Period",
+            url="https://en.wikipedia.org/wiki/Duplicate_Period",
+            revision_id="rev-6",
+            wikitext=wikitext,
+            birth_date=date(1990, 1, 1),
+            is_basketball_player=True,
+        )},
+    )
+
+    ingest_wikipedia_careers(
+        session,
+        adapter,
+        IngestOptions(min_eligible_players=1, overrides_path=overrides),
+    )
+
+    stints = (
+        session.query(PlayerCareerStint)
+        .filter_by(player_id=player.id, include_in_quiz=True)
+        .order_by(PlayerCareerStint.sequence_index)
+        .all()
+    )
+    assert [(stint.source_team_label, stint.start_season, stint.end_season) for stint in stints] == [
+        ("Baskonia", "1998/99", "1999/00"),
+        ("Benetton Treviso", "2000/01", "2002/03"),
+        ("Real Madrid", "2003/04", "2004/05"),
+    ]
+
+
 def test_only_final_present_row_stays_current(session):
     player = _add_player_with_stats(
         session,

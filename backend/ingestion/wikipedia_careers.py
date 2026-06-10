@@ -746,6 +746,8 @@ def _merge_local_euroleague_memberships(
     for local in local_memberships:
         match_index = _mergeable_same_team_index(merged, local)
         if match_index is None:
+            if _duplicates_existing_range(merged, local):
+                continue
             merged.append(local)
             continue
         merged[match_index] = _merge_memberships(merged[match_index], local)
@@ -767,6 +769,19 @@ def _mergeable_same_team_index(
         ):
             return index
     return None
+
+
+def _duplicates_existing_range(
+    memberships: list[CareerMembership],
+    local: CareerMembership,
+) -> bool:
+    return any(
+        membership.source_name == SOURCE_NAME
+        and membership.source_team_key == local.source_team_key
+        and membership.start_year == local.start_year
+        and membership.end_year == local.end_year
+        for membership in memberships
+    )
 
 
 def _ranges_overlap_or_are_adjacent(
