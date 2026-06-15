@@ -110,6 +110,109 @@ def test_multiplayer_first_correct_answer_wins_match_when_target_is_one():
         db.close()
 
 
+def test_multiplayer_shared_wrong_guesses_are_serialized_on_current_round():
+    db = _session()
+    try:
+        players = [
+            _eligible_player(db, "Shared", "Answer"),
+            _eligible_player(db, "Shared", "WrongOne"),
+            _eligible_player(db, "Shared", "WrongTwo"),
+        ]
+        _active_revision(db)
+        db.commit()
+
+        game = career_quiz.create_game(
+            db,
+            target_wins=3,
+            wrong_guess_visibility="shared",
+            player1_name="A",
+        )
+        career_quiz.join_game(db, game.join_code, player_name="B")
+        current = career_quiz._current_round(game)
+        wrong_players = [
+            player for player in players if player.id != current.answer_player_id
+        ][:2]
+
+        assert career_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=wrong_players[0].id,
+            acting_player=1,
+            round_number=current.round_number,
+        ) == "incorrect"
+        assert career_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=wrong_players[1].id,
+            acting_player=2,
+            round_number=current.round_number,
+        ) == "incorrect"
+
+        current_round = career_quiz.serialize_game_state(db, game)["current_round"]
+
+        assert current_round["round_number"] == current.round_number
+        assert current_round["wrong_guesses"] == [
+            {
+                "player_number": 1,
+                "player": {
+                    "id": wrong_players[0].id,
+                    "name": f"{wrong_players[0].first_name} {wrong_players[0].last_name}",
+                    "image_url": None,
+                },
+            },
+            {
+                "player_number": 2,
+                "player": {
+                    "id": wrong_players[1].id,
+                    "name": f"{wrong_players[1].first_name} {wrong_players[1].last_name}",
+                    "image_url": None,
+                },
+            },
+        ]
+    finally:
+        db.close()
+
+
+def test_multiplayer_private_wrong_guesses_are_not_serialized():
+    db = _session()
+    try:
+        players = [
+            _eligible_player(db, "Private", "Answer"),
+            _eligible_player(db, "Private", "Wrong"),
+        ]
+        _active_revision(db)
+        db.commit()
+
+        game = career_quiz.create_game(
+            db,
+            target_wins=3,
+            wrong_guess_visibility="private",
+            player1_name="A",
+        )
+        career_quiz.join_game(db, game.join_code, player_name="B")
+        current = career_quiz._current_round(game)
+        wrong_player = next(
+            player for player in players if player.id != current.answer_player_id
+        )
+
+        assert career_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=wrong_player.id,
+            acting_player=2,
+            round_number=current.round_number,
+        ) == "incorrect"
+
+        current_round = career_quiz.serialize_game_state(db, game)["current_round"]
+
+        assert "wrong_guesses" not in current_round
+        assert f"{wrong_player.first_name} {wrong_player.last_name}" not in repr(
+            current_round
+        )
+    finally:
+        db.close()
+
+
 def test_multiplayer_state_exposes_latest_completed_round_after_no_answer_accept():
     db = _session()
     try:

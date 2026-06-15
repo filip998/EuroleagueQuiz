@@ -33,6 +33,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     || null;
   const revealCountdownRemaining = getRevealCountdownRemaining(revealNextRoundStartsAt, nowMs);
   const roundLocked = revealCountdownRemaining > 0;
+  const sharedWrongGuesses = solo ? [] : game?.current_round?.wrong_guesses || [];
 
   useEffect(() => {
     if (!revealNextRoundStartsAt) return undefined;
@@ -208,6 +209,12 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
             {message && <p className="mt-4 text-sm text-elq-muted">{message}</p>}
 
+            <SharedWrongGuesses
+              guesses={sharedWrongGuesses}
+              player1Name={game?.player1_name}
+              player2Name={game?.player2_name}
+            />
+
             {answer ? (
               <div className="mt-6 rounded-2xl border border-elq-border bg-white p-5">
                 <div className="flex items-center gap-4 mb-4">
@@ -270,6 +277,39 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
         </div>
       </div>
     </Shell>
+  );
+}
+
+function SharedWrongGuesses({ guesses, player1Name, player2Name }) {
+  if (!guesses.length) return null;
+
+  return (
+    <div className="mt-4 rounded-2xl border border-elq-border bg-white p-3" aria-label="Shared wrong guesses">
+      <div className="mb-2 text-xs font-bold uppercase tracking-wide text-elq-muted">
+        Shared wrong guesses
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {guesses.map((guess, index) => {
+          const playerLabel = guess.player_number === 1
+            ? player1Name || "Player 1"
+            : player2Name || "Player 2";
+          const classes = guess.player_number === 1
+            ? "border-elq-player1/20 bg-elq-player1-bg text-elq-player1"
+            : "border-elq-player2/20 bg-elq-player2-bg text-elq-player2";
+
+          return (
+            <div
+              key={`${guess.player_number}-${guess.player?.id ?? index}`}
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${classes}`}
+            >
+              <span>{playerLabel}</span>
+              <span className="text-elq-muted">guessed</span>
+              <span>{guess.player?.name}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
