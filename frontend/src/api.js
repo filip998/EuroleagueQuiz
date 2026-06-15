@@ -12,7 +12,11 @@ async function request(method, path, body = null) {
   const res = await fetch(`${API_BASE}${path}`, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.payload?.message || err.detail || `HTTP ${res.status}`);
+    const error = new Error(err.payload?.message || err.detail || `HTTP ${res.status}`);
+    error.status = res.status;
+    error.detail = err.detail;
+    error.payload = err.payload;
+    throw error;
   }
   return res.json();
 }
@@ -189,18 +193,22 @@ export function joinCareerGame(joinCode, playerName) {
   });
 }
 
-export function submitCareerGuess(gameId, playerNumber, playerId) {
+export function submitCareerGuess(gameId, playerNumber, playerId, roundNumber) {
   return request("POST", `/quiz/career/games/${gameId}/guess?player=${playerNumber}`, {
     player_id: playerId,
+    round_number: roundNumber,
   });
 }
 
-export function offerCareerNoAnswer(gameId, playerNumber) {
-  return request("POST", `/quiz/career/games/${gameId}/no-answer-offer?player=${playerNumber}`);
+export function offerCareerNoAnswer(gameId, playerNumber, roundNumber) {
+  return request("POST", `/quiz/career/games/${gameId}/no-answer-offer?player=${playerNumber}`, {
+    round_number: roundNumber,
+  });
 }
 
-export function respondCareerNoAnswer(gameId, playerNumber, accept) {
+export function respondCareerNoAnswer(gameId, playerNumber, accept, roundNumber) {
   return request("POST", `/quiz/career/games/${gameId}/no-answer-response?player=${playerNumber}`, {
     accept,
+    round_number: roundNumber,
   });
 }

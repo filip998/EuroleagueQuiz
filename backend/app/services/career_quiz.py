@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 import string
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func
@@ -28,6 +28,7 @@ from app.services.solo_round_token import (
 
 VALID_TARGET_WINS = {1, 3, 5, 7}
 VALID_WRONG_GUESS_VISIBILITY = {"private", "shared"}
+CAREER_REVEAL_COUNTDOWN_SECONDS = 3
 
 
 def create_solo_round(
@@ -145,14 +146,17 @@ def submit_guess(
     game: CareerQuizGame,
     player_id: int,
     acting_player: int,
+    round_number: int,
 ) -> str:
     if acting_player not in (1, 2):
         raise InvalidGameActionError("Player identity is required")
     if game.status != "active":
         raise ConflictGameActionError("Game is not active")
+    _raise_if_round_stale(game, round_number)
     round_obj = _current_round(game)
     if round_obj.status != "active":
         raise ConflictGameActionError("Round is not active")
+    _raise_if_current_round_locked(game)
 
     correct = player_id == round_obj.answer_player_id
     db.add(
@@ -191,11 +195,14 @@ def offer_no_answer(
     *,
     game: CareerQuizGame,
     acting_player: int,
+    round_number: int,
 ) -> None:
     if acting_player not in (1, 2):
         raise InvalidGameActionError("Player identity is required")
     if game.status != "active":
         raise ConflictGameActionError("Game is not active")
+    _raise_if_round_stale(game, round_number)
+    _raise_if_current_round_locked(game)
     game.pending_no_answer_from = acting_player
     game.pending_no_answer_to = 2 if acting_player == 1 else 1
 
@@ -206,9 +213,17 @@ def respond_no_answer(
     game: CareerQuizGame,
     acting_player: int,
     accept: bool,
+    round_number: int,
 ) -> str:
+    if acting_player not in (1, 2):
+        raise InvalidGameActionError("Player identity is required")
+    if game.status != "active":
+        raise ConflictGameActionError("Game is not active")
+    _raise_if_round_stale(game, round_number)
     if acting_player != game.pending_no_answer_to:
         raise InvalidGameActionError("No answer offer is not pending for this player")
+    if accept:
+        _raise_if_current_round_locked(game)
     if not accept:
         game.pending_no_answer_from = None
         game.pending_no_answer_to = None
@@ -274,7 +289,11 @@ def _latest_completed_round_payload(
     )
     if round_obj is None:
         return None
-    return _round_payload(db, round_obj, include_answer=True)
+    payload = _round_payload(db, round_obj, include_answer=True)
+    next_round_starts_at = _active_next_round_lock_starts_at(game)
+    if next_round_starts_at is not None and round_obj.round_number == game.round_number - 1:
+        payload["next_round_starts_at"] = _utc_isoformat(next_round_starts_at)
+    return payload
 
 
 def _round_payload(
@@ -289,6 +308,7 @@ def _round_payload(
         "winner_player": round_obj.winner_player,
         "timeline": _career_timeline(db, round_obj.answer_player_id),
         "resolved_at": _utc_isoformat(round_obj.completed_at),
+        "next_round_starts_at": None,
     }
     if include_answer:
         payload["answer"] = _player_payload(db, round_obj.answer_player_id)
@@ -298,11 +318,64 @@ def _round_payload(
 def _utc_isoformat(value: datetime | None) -> str | None:
     if value is None:
         return None
+    return _as_utc(value).isoformat()
+
+
+def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
-        value = value.replace(tzinfo=timezone.utc)
-    else:
-        value = value.astimezone(timezone.utc)
-    return value.isoformat()
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _raise_if_current_round_locked(game: CareerQuizGame) -> None:
+    if _active_next_round_lock_starts_at(game) is not None:
+        raise ConflictGameActionError("round_locked")
+
+
+def _raise_if_round_stale(game: CareerQuizGame, round_number: int) -> None:
+    if round_number != game.round_number:
+        raise ConflictGameActionError("round_stale")
+
+
+def _active_next_round_lock_starts_at(
+    game: CareerQuizGame, *, now: datetime | None = None
+) -> datetime | None:
+    if game.status != "active":
+        return None
+    current_round = _current_round(game)
+    if current_round.status != "active":
+        return None
+    previous_round = _previous_completed_round_for_current(game)
+    if previous_round is None:
+        return None
+    starts_at = _round_next_starts_at(previous_round)
+    if starts_at is None:
+        return None
+    now_utc = _as_utc(now or datetime.now(timezone.utc))
+    return starts_at if now_utc < starts_at else None
+
+
+def _previous_completed_round_for_current(
+    game: CareerQuizGame,
+) -> CareerQuizRound | None:
+    previous_round_number = game.round_number - 1
+    if previous_round_number < 1:
+        return None
+    for round_obj in game.rounds:
+        if (
+            round_obj.round_number == previous_round_number
+            and round_obj.status in ("completed", "no_answer")
+        ):
+            return round_obj
+    return None
+
+
+def _round_next_starts_at(round_obj: CareerQuizRound) -> datetime | None:
+    if round_obj.completed_at is None:
+        return None
+    return _as_utc(round_obj.completed_at) + timedelta(
+        seconds=CAREER_REVEAL_COUNTDOWN_SECONDS
+    )
 
 
 def _current_round(game: CareerQuizGame) -> CareerQuizRound:

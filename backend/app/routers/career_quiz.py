@@ -7,6 +7,7 @@ from app.schemas.career_quiz import (
     CareerQuizCreateRequest,
     CareerQuizGuessRequest,
     CareerQuizJoinRequest,
+    CareerQuizNoAnswerOfferRequest,
     CareerQuizNoAnswerResponseRequest,
     CareerSoloGuessRequest,
     CareerSoloRevealRequest,
@@ -112,6 +113,7 @@ def submit_guess(
             game=game,
             player_id=payload.player_id,
             acting_player=player,
+            round_number=payload.round_number,
         )
         return {
             "result": result,
@@ -129,12 +131,13 @@ def submit_guess(
 @router.post("/career/games/{game_id}/no-answer-offer")
 def offer_no_answer(
     game_id: int,
+    payload: CareerQuizNoAnswerOfferRequest,
     player: int = Query(..., ge=1, le=2),
     db: Session = Depends(get_db),
 ):
     return run_http_game_action(
         db,
-        lambda: _offer_no_answer(db, game_id, player),
+        lambda: _offer_no_answer(db, game_id, player, payload.round_number),
     )
 
 
@@ -153,6 +156,7 @@ def respond_no_answer(
             game=game,
             acting_player=player,
             accept=payload.accept,
+            round_number=payload.round_number,
         )
         return {
             "result": f"no_answer_{result}",
@@ -167,9 +171,14 @@ def respond_no_answer(
     return run_http_game_action(db, action)
 
 
-def _offer_no_answer(db: Session, game_id: int, player: int):
+def _offer_no_answer(db: Session, game_id: int, player: int, round_number: int):
     game = career_service.get_game_or_404(db, game_id)
-    career_service.offer_no_answer(db, game=game, acting_player=player)
+    career_service.offer_no_answer(
+        db,
+        game=game,
+        acting_player=player,
+        round_number=round_number,
+    )
     return {
         "result": "no_answer_offered",
         "state": career_service.serialize_game_state(db, game),

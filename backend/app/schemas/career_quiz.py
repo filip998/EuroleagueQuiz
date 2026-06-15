@@ -29,7 +29,13 @@ class CareerQuizJoinRequest(BaseModel):
 
 class CareerQuizGuessRequest(BaseModel):
     player_id: int = Field(gt=0)
+    round_number: int = Field(gt=0)
+
+
+class CareerQuizNoAnswerOfferRequest(BaseModel):
+    round_number: int = Field(gt=0)
 
 
 class CareerQuizNoAnswerResponseRequest(BaseModel):
     accept: bool
+    round_number: int = Field(gt=0)

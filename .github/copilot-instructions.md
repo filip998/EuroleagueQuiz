@@ -141,6 +141,12 @@ This is a **EuroLeague Basketball quiz app** with two main subsystems, both unde
 
 Both backend subsystems share `backend/app/models/` (SQLAlchemy) and `backend/app/config.py` (settings via `pydantic-settings`, env prefix `ELQ_`).
 
+Career Quiz multiplayer exposes `latest_completed_round.next_round_starts_at` during the
+three-second reveal countdown. The backend is authoritative: next-round guesses are
+rejected with `round_locked` until that UTC timestamp has elapsed. Multiplayer Career
+Quiz guess and no-answer mutations must include the client-visible `round_number`;
+stale actions are rejected with `round_stale` so the frontend can resync safely.
+
 ### Data model
 
 The central join table is `PlayerSeasonTeam` — it links a player to a team for a specific season and is the anchor for both `PlayerSeasonStats` (aggregated) and the roster endpoints. `GamePlayerStats` stores per-game box scores linked to `Game`.

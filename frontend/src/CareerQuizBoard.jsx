@@ -10,6 +10,8 @@ import {
   submitCareerSoloGuess,
 } from "./api";
 
+export const CAREER_REVEAL_COUNTDOWN_SECONDS = 3;
+
 export default function CareerQuizBoard({ initialState, soloInitialRound, onlineInfo, onNewGame, onHome }) {
   const [soloRound, setSoloRound] = useState(soloInitialRound || null);
   const [recentIds, setRecentIds] = useState([]);
@@ -20,10 +22,24 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   );
   const [answer, setAnswer] = useState(null);
   const [message, setMessage] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const solo = Boolean(soloRound);
   const playerNumber = onlineInfo?.playerNumber || 1;
   const timeline = solo ? soloRound.timeline : game?.current_round?.timeline || [];
+  const currentRoundNumber = game?.current_round?.round_number ?? game?.round_number ?? null;
+  const revealNextRoundStartsAt = completedRound?.next_round_starts_at
+    || game?.latest_completed_round?.next_round_starts_at
+    || null;
+  const revealCountdownRemaining = getRevealCountdownRemaining(revealNextRoundStartsAt, nowMs);
+  const roundLocked = revealCountdownRemaining > 0;
+
+  useEffect(() => {
+    if (!revealNextRoundStartsAt) return undefined;
+    setNowMs(Date.now());
+    const timer = setInterval(() => setNowMs(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [revealNextRoundStartsAt]);
 
   useEffect(() => {
     if (!completedRound) return undefined;
@@ -70,9 +86,17 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
       }
       return;
     }
-    const result = await submitCareerGuess(game.id, playerNumber, player.id);
-    setGame(result.state);
-    setMessage(result.result === "incorrect" ? "Wrong guess." : "");
+    try {
+      const result = await submitCareerGuess(game.id, playerNumber, player.id, currentRoundNumber);
+      setGame(result.state);
+      setMessage(result.result === "incorrect" ? "Wrong guess." : "");
+    } catch (error) {
+      if (isCareerActionSyncConflict(error)) {
+        await resyncCareerGame();
+        return;
+      }
+      throw error;
+    }
   }
 
   async function revealSolo() {
@@ -82,14 +106,40 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   }
 
   async function offerNoAnswer() {
-    const result = await offerCareerNoAnswer(game.id, playerNumber);
-    setGame(result.state);
-    setMessage("No-answer offer sent.");
+    try {
+      const result = await offerCareerNoAnswer(game.id, playerNumber, currentRoundNumber);
+      setGame(result.state);
+      setMessage("No-answer offer sent.");
+    } catch (error) {
+      if (isCareerActionSyncConflict(error)) {
+        await resyncCareerGame();
+        return;
+      }
+      throw error;
+    }
   }
 
   async function respondNoAnswer(accept) {
-    const result = await respondCareerNoAnswer(game.id, playerNumber, accept);
-    setGame(result.state);
+    try {
+      const result = await respondCareerNoAnswer(game.id, playerNumber, accept, currentRoundNumber);
+      setGame(result.state);
+    } catch (error) {
+      if (isCareerActionSyncConflict(error)) {
+        await resyncCareerGame();
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async function resyncCareerGame() {
+    setMessage("");
+    if (!game?.id) return;
+    try {
+      setGame(await getCareerGame(game.id));
+    } catch {
+      // Regular polling will retry transient refresh failures.
+    }
   }
 
   if (game?.status === "waiting_for_opponent") {
@@ -110,7 +160,10 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     return (
       <Shell onHome={onHome}>
         <div className="text-center">
-          <CompletedRoundReveal round={completedRound} />
+          <CompletedRoundReveal
+            round={completedRound}
+            countdownRemaining={revealCountdownRemaining}
+          />
           <div className="text-5xl mb-3">🏆</div>
           <h1 className="font-display text-4xl text-elq-dark mb-3">
             {(game.winner_player === 1 ? game.player1_name : game.player2_name) || "Player"} wins!
@@ -140,7 +193,10 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
           )}
         </div>
 
-        <CompletedRoundReveal round={completedRound} />
+        <CompletedRoundReveal
+          round={completedRound}
+          countdownRemaining={revealCountdownRemaining}
+        />
 
         <div className="grid lg:grid-cols-2 gap-6 items-start">
           <div className="lg:max-h-[60vh] lg:overflow-y-auto">
@@ -148,7 +204,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
           </div>
 
           <div>
-            <CareerGuessBox onGuess={handleGuess} disabled={Boolean(answer)} />
+            <CareerGuessBox onGuess={handleGuess} disabled={Boolean(answer) || roundLocked} />
 
             {message && <p className="mt-4 text-sm text-elq-muted">{message}</p>}
 
@@ -183,16 +239,28 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
                 )}
                 {!solo && game?.pending_no_answer_to === playerNumber && (
                   <>
-                    <button onClick={() => respondNoAnswer(true)} className="px-5 py-2 rounded-xl bg-elq-orange text-white font-bold">
+                    <button
+                      onClick={() => respondNoAnswer(true)}
+                      disabled={roundLocked}
+                      className="px-5 py-2 rounded-xl bg-elq-orange text-white font-bold disabled:opacity-50"
+                    >
                       Accept no answer
                     </button>
-                    <button onClick={() => respondNoAnswer(false)} className="px-5 py-2 rounded-xl border border-elq-border">
+                    <button
+                      onClick={() => respondNoAnswer(false)}
+                      disabled={roundLocked}
+                      className="px-5 py-2 rounded-xl border border-elq-border disabled:opacity-50"
+                    >
                       Decline
                     </button>
                   </>
                 )}
                 {!solo && !game?.pending_no_answer_to && (
-                  <button onClick={offerNoAnswer} className="px-5 py-2 rounded-xl border border-elq-border text-elq-text">
+                  <button
+                    onClick={offerNoAnswer}
+                    disabled={roundLocked}
+                    className="px-5 py-2 rounded-xl border border-elq-border text-elq-text disabled:opacity-50"
+                  >
                     Nobody knows
                   </button>
                 )}
@@ -205,7 +273,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   );
 }
 
-function CompletedRoundReveal({ round }) {
+function CompletedRoundReveal({ round, countdownRemaining = 0 }) {
   if (!round) return null;
   return (
     <div className="mb-5 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 flex items-center gap-4">
@@ -220,6 +288,13 @@ function CompletedRoundReveal({ round }) {
       <div>
         <strong>{round.winner_player ? `Player ${round.winner_player} wins the round` : "No answer"}</strong>
         <div>Answer: {round.answer?.name}</div>
+        {round.next_round_starts_at && (
+          <div className="text-sm font-semibold">
+            {countdownRemaining > 0
+              ? `Next round unlocks in ${countdownRemaining}`
+              : "Next round unlocked"}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -262,6 +337,25 @@ export function shouldRevealCompletedRound(latestRound, lastRevealedRoundNumber)
     latestRound?.round_number != null
     && latestRound.round_number !== lastRevealedRoundNumber
   );
+}
+
+export function getRevealCountdownRemaining(nextRoundStartsAt, nowMs = Date.now()) {
+  if (!nextRoundStartsAt) return 0;
+  const startsAtMs = Date.parse(nextRoundStartsAt);
+  if (!Number.isFinite(startsAtMs)) return 0;
+  return Math.min(
+    CAREER_REVEAL_COUNTDOWN_SECONDS,
+    Math.max(0, Math.ceil((startsAtMs - nowMs) / 1000))
+  );
+}
+
+function isCareerActionSyncConflict(error) {
+  return [
+    error?.message,
+    error?.detail,
+    error?.payload?.message,
+    error?.payload?.code,
+  ].some((code) => code === "round_locked" || code === "round_stale");
 }
 
 function CareerGuessBox({ onGuess, disabled }) {
