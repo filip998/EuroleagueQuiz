@@ -17,7 +17,7 @@ import CareerQuizBoard, {
   getRevealCountdownRemaining,
   shouldRevealCompletedRound,
 } from "../CareerQuizBoard";
-import { autocompleteCareerPlayer, getCareerGame, submitCareerGuess } from "../api";
+import { autocompleteCareerPlayer, getCareerGame, offerCareerNoAnswer, submitCareerGuess } from "../api";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -284,6 +284,47 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     await waitFor(() => expect(submitCareerGuess).toHaveBeenCalledWith(7, 1, 99, 1));
     await waitFor(() => expect(getCareerGame).toHaveBeenCalledWith(7));
     expect(screen.queryByText("round_stale")).not.toBeInTheDocument();
+  });
+
+  it("clears a sent no-answer offer message when polling shows the round advanced", async () => {
+    vi.useFakeTimers();
+    offerCareerNoAnswer.mockResolvedValue({
+      state: activeCareerGame({
+        pending_no_answer_from: 1,
+        pending_no_answer_to: 2,
+      }),
+    });
+    getCareerGame.mockResolvedValue(activeCareerGame({
+      round_number: 2,
+      current_round: {
+        ...activeCareerGame().current_round,
+        round_number: 2,
+      },
+      latest_completed_round: completedRound({ round_number: 1, name: "Opponent Answer" }),
+    }));
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Nobody knows"));
+    });
+
+    expect(offerCareerNoAnswer).toHaveBeenCalledWith(7, 1, 1);
+    expect(screen.getByText("No-answer offer sent.")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(getCareerGame).toHaveBeenCalledWith(7);
+    expect(screen.queryByText("No-answer offer sent.")).not.toBeInTheDocument();
   });
 });
 
