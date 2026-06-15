@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -266,4 +266,7 @@ def _assert_player_answer_payload(answer):
 
 def _assert_iso_datetime(value):
     assert value
-    datetime.fromisoformat(value)
+    resolved_at = datetime.fromisoformat(value)
+    assert resolved_at.tzinfo is not None
+    assert resolved_at.utcoffset() == timedelta(0)
+    assert resolved_at.tzinfo == timezone.utc

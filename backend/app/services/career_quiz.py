@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func
@@ -288,13 +288,21 @@ def _round_payload(
         "status": round_obj.status,
         "winner_player": round_obj.winner_player,
         "timeline": _career_timeline(db, round_obj.answer_player_id),
-        "resolved_at": round_obj.completed_at.isoformat()
-        if round_obj.completed_at
-        else None,
+        "resolved_at": _utc_isoformat(round_obj.completed_at),
     }
     if include_answer:
         payload["answer"] = _player_payload(db, round_obj.answer_player_id)
     return payload
+
+
+def _utc_isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
 
 
 def _current_round(game: CareerQuizGame) -> CareerQuizRound:
