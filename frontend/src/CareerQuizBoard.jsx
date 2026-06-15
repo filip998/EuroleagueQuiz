@@ -11,6 +11,9 @@ import {
 } from "./api";
 
 export const CAREER_REVEAL_COUNTDOWN_SECONDS = 3;
+// Online Career Quiz syncs via HTTP polling. Keep this snappy so cross-player
+// actions (no-answer offers/responses, guesses, reveals) propagate quickly.
+export const CAREER_POLL_INTERVAL_MS = 1000;
 const CAREER_FEEDBACK_MESSAGES = {
   correct: "Correct!",
   soloWrong: "Not this player. Keep guessing.",
@@ -122,7 +125,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
       } catch {
         // Keep the local state; transient polling failures should not kick users out.
       }
-    }, 2000);
+    }, CAREER_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [solo, game?.id, game?.status]);
 
