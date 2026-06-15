@@ -139,6 +139,9 @@ def test_multiplayer_state_exposes_latest_completed_round_after_no_answer_accept
         assert completed["answer"]["id"] == current.answer_player_id
         _assert_player_answer_payload(completed["answer"])
         _assert_iso_datetime(completed["resolved_at"])
+        _assert_next_round_starts_at(
+            completed["resolved_at"], completed["next_round_starts_at"]
+        )
     finally:
         db.close()
 
@@ -170,6 +173,94 @@ def test_multiplayer_state_exposes_latest_completed_round_after_correct_guess():
         assert completed["answer"]["id"] == current.answer_player_id
         _assert_player_answer_payload(completed["answer"])
         _assert_iso_datetime(completed["resolved_at"])
+        _assert_next_round_starts_at(
+            completed["resolved_at"], completed["next_round_starts_at"]
+        )
+    finally:
+        db.close()
+
+
+def test_multiplayer_rejects_guess_during_reveal_lock_then_accepts_after_countdown():
+    db = _session()
+    try:
+        _eligible_player(db, "First", "Answer")
+        _eligible_player(db, "Second", "Answer")
+        _eligible_player(db, "Third", "Answer")
+        _active_revision(db)
+        db.commit()
+
+        game = career_quiz.create_game(db, target_wins=3, player1_name="A")
+        career_quiz.join_game(db, game.join_code, player_name="B")
+        completed_round = career_quiz._current_round(game)
+
+        result = career_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=completed_round.answer_player_id,
+            acting_player=1,
+        )
+
+        assert result == "round_won"
+        locked_round = career_quiz._current_round(game)
+        with pytest.raises(ConflictGameActionError, match="round_locked"):
+            career_quiz.submit_guess(
+                db,
+                game=game,
+                player_id=locked_round.answer_player_id,
+                acting_player=2,
+            )
+
+        completed_round.completed_at = datetime.utcnow() - timedelta(
+            seconds=career_quiz.CAREER_REVEAL_COUNTDOWN_SECONDS + 1
+        )
+        db.flush()
+        assert (
+            career_quiz.serialize_game_state(db, game)["latest_completed_round"][
+                "next_round_starts_at"
+            ]
+            is None
+        )
+
+        result = career_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=locked_round.answer_player_id,
+            acting_player=2,
+        )
+
+        assert result == "round_won"
+    finally:
+        db.close()
+
+
+def test_multiplayer_no_answer_accept_locks_next_round_guesses():
+    db = _session()
+    try:
+        _eligible_player(db, "No", "Answer")
+        _eligible_player(db, "Locked", "Round")
+        _active_revision(db)
+        db.commit()
+
+        game = career_quiz.create_game(db, target_wins=3, player1_name="A")
+        career_quiz.join_game(db, game.join_code, player_name="B")
+
+        career_quiz.offer_no_answer(db, game=game, acting_player=1)
+        result = career_quiz.respond_no_answer(
+            db,
+            game=game,
+            acting_player=2,
+            accept=True,
+        )
+
+        assert result == "accepted"
+        locked_round = career_quiz._current_round(game)
+        with pytest.raises(ConflictGameActionError, match="round_locked"):
+            career_quiz.submit_guess(
+                db,
+                game=game,
+                player_id=locked_round.answer_player_id,
+                acting_player=1,
+            )
     finally:
         db.close()
 
@@ -270,3 +361,13 @@ def _assert_iso_datetime(value):
     assert resolved_at.tzinfo is not None
     assert resolved_at.utcoffset() == timedelta(0)
     assert resolved_at.tzinfo == timezone.utc
+
+
+def _assert_next_round_starts_at(resolved_at_value, next_round_starts_at_value):
+    assert next_round_starts_at_value.endswith("+00:00")
+    _assert_iso_datetime(next_round_starts_at_value)
+    resolved_at = datetime.fromisoformat(resolved_at_value)
+    next_round_starts_at = datetime.fromisoformat(next_round_starts_at_value)
+    assert next_round_starts_at - resolved_at == timedelta(
+        seconds=career_quiz.CAREER_REVEAL_COUNTDOWN_SECONDS
+    )

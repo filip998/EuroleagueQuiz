@@ -88,6 +88,9 @@ infobox career-history rows, resolves team labels to stable keys, merges local E
 roster stints as validation/fill data, stores cached Career Timelines, and records a
 Career Data Revision. Solo Career Quiz rounds use signed Solo Round Tokens so the answer
 is not stored in browser state or persisted as a solo game row.
+Multiplayer Career Quiz resolved-round state includes
+`latest_completed_round.next_round_starts_at` during the three-second reveal lock; the
+backend rejects next-round guesses with `round_locked` until that UTC timestamp elapses.
 
 The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
 `frontend/src/useOnlineGameRealtime.js`, so reconnect, background state sync,

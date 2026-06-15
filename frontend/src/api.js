@@ -12,7 +12,11 @@ async function request(method, path, body = null) {
   const res = await fetch(`${API_BASE}${path}`, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.payload?.message || err.detail || `HTTP ${res.status}`);
+    const error = new Error(err.payload?.message || err.detail || `HTTP ${res.status}`);
+    error.status = res.status;
+    error.detail = err.detail;
+    error.payload = err.payload;
+    throw error;
   }
   return res.json();
 }
