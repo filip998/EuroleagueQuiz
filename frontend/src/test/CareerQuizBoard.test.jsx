@@ -17,7 +17,13 @@ import CareerQuizBoard, {
   getRevealCountdownRemaining,
   shouldRevealCompletedRound,
 } from "../CareerQuizBoard";
-import { autocompleteCareerPlayer, getCareerGame, offerCareerNoAnswer, submitCareerGuess } from "../api";
+import {
+  autocompleteCareerPlayer,
+  getCareerGame,
+  offerCareerNoAnswer,
+  submitCareerGuess,
+  submitCareerSoloGuess,
+} from "../api";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -161,6 +167,83 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     );
 
     expect(screen.queryByLabelText("Shared wrong guesses")).not.toBeInTheDocument();
+  });
+
+  it("styles multiplayer correct and wrong guess feedback with distinct tones", async () => {
+    autocompleteCareerPlayer
+      .mockResolvedValueOnce({ players: [{ id: 41, name: "Wrong Player" }] })
+      .mockResolvedValueOnce({ players: [{ id: 42, name: "Winning Player" }] });
+    submitCareerGuess
+      .mockResolvedValueOnce({
+        state: activeCareerGame(),
+        result: "incorrect",
+      })
+      .mockResolvedValueOnce({
+        state: activeCareerGame({
+          round_number: 2,
+          current_round: {
+            ...activeCareerGame().current_round,
+            round_number: 2,
+          },
+          latest_completed_round: completedRound({ round_number: 1, name: "Winning Player" }),
+        }),
+        result: "round_won",
+      });
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectCareerPlayer("Wrong Player");
+
+    const wrongFeedback = await screen.findByTestId("career-feedback-message");
+    expect(wrongFeedback).toHaveTextContent("Wrong guess.");
+    expect(wrongFeedback).toHaveClass("bg-red-50", "text-red-600");
+    expect(wrongFeedback).not.toHaveClass("bg-emerald-50");
+
+    await selectCareerPlayer("Winning Player");
+
+    const successFeedback = await screen.findByTestId("career-feedback-message");
+    expect(successFeedback).toHaveTextContent("Correct!");
+    expect(successFeedback).toHaveClass("bg-emerald-50", "text-emerald-700");
+    expect(successFeedback).not.toHaveClass("bg-red-50");
+  });
+
+  it("uses the same feedback tones in solo mode", async () => {
+    autocompleteCareerPlayer
+      .mockResolvedValueOnce({ players: [{ id: 51, name: "Solo Miss" }] })
+      .mockResolvedValueOnce({ players: [{ id: 52, name: "Solo Hit" }] });
+    submitCareerSoloGuess
+      .mockResolvedValueOnce({ correct: false })
+      .mockResolvedValueOnce({
+        correct: true,
+        answer: careerAnswer({ id: 52, name: "Solo Hit" }),
+      });
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectCareerPlayer("Solo Miss");
+
+    const wrongFeedback = await screen.findByTestId("career-feedback-message");
+    expect(wrongFeedback).toHaveTextContent("Not this player. Keep guessing.");
+    expect(wrongFeedback).toHaveClass("bg-red-50", "text-red-600");
+
+    await selectCareerPlayer("Solo Hit");
+
+    const successFeedback = await screen.findByTestId("career-feedback-message");
+    expect(successFeedback).toHaveTextContent("Correct!");
+    expect(successFeedback).toHaveClass("bg-emerald-50", "text-emerald-700");
   });
 
   it("shows a polled latest completed round once for a non-acting player", async () => {
@@ -414,6 +497,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
 
     expect(offerCareerNoAnswer).toHaveBeenCalledWith(7, 1, 1);
     expect(screen.getByText("No-answer offer sent.")).toBeInTheDocument();
+    expect(screen.getByTestId("career-feedback-message")).toHaveClass("bg-amber-50", "text-amber-700");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
@@ -456,6 +540,41 @@ function activeCareerGame(overrides = {}) {
     latest_completed_round: null,
     ...overrides,
   };
+}
+
+function soloCareerRound() {
+  return {
+    round_token: "solo-round",
+    timeline: [
+      {
+        team_name: "Solo Team",
+        start_season: "2020/21",
+        end_season: "2020/21",
+      },
+    ],
+  };
+}
+
+function careerAnswer({ id, name }) {
+  return {
+    id,
+    name,
+    first_name: name.split(" ")[0],
+    last_name: name.split(" ")[1] || "",
+    nationality: null,
+    position: null,
+    image_url: null,
+  };
+}
+
+async function selectCareerPlayer(name) {
+  fireEvent.change(screen.getByPlaceholderText("Type a player name..."), {
+    target: { value: name },
+  });
+  const option = await screen.findByRole("button", { name });
+  await act(async () => {
+    fireEvent.click(option);
+  });
 }
 
 function completedRound({ round_number, name, next_round_starts_at = null, image_url = null }) {
