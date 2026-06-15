@@ -1,5 +1,27 @@
-import { describe, expect, it } from "vitest";
-import { formatSeasonRange } from "../CareerQuizBoard";
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../api", () => ({
+  autocompleteCareerPlayer: vi.fn(),
+  createCareerSoloRound: vi.fn(),
+  getCareerGame: vi.fn(),
+  offerCareerNoAnswer: vi.fn(),
+  revealCareerSoloAnswer: vi.fn(),
+  respondCareerNoAnswer: vi.fn(),
+  submitCareerGuess: vi.fn(),
+  submitCareerSoloGuess: vi.fn(),
+}));
+
+import CareerQuizBoard, { formatSeasonRange, shouldRevealCompletedRound } from "../CareerQuizBoard";
+import { getCareerGame } from "../api";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("formatSeasonRange", () => {
   it("prefers Wikipedia-style years when provided", () => {
@@ -29,3 +51,111 @@ describe("formatSeasonRange", () => {
     })).toBe("2023/24 \u2013 present");
   });
 });
+
+describe("shouldRevealCompletedRound", () => {
+  it("does not reveal when no completed round is available", () => {
+    expect(shouldRevealCompletedRound(null, null)).toBe(false);
+  });
+
+  it("reveals a new completed round once", () => {
+    expect(shouldRevealCompletedRound({ round_number: 2 }, 1)).toBe(true);
+    expect(shouldRevealCompletedRound({ round_number: 2 }, 2)).toBe(false);
+  });
+});
+
+describe("CareerQuizBoard multiplayer reveals", () => {
+  it("shows a polled latest completed round once for a non-acting player", async () => {
+    vi.useFakeTimers();
+    getCareerGame.mockResolvedValue(
+      activeCareerGame({
+        latest_completed_round: completedRound({ round_number: 1, name: "Polled Answer" }),
+      })
+    );
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(screen.getByText("Answer: Polled Answer")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(screen.queryByText("Answer: Polled Answer")).not.toBeInTheDocument();
+  });
+
+  it("does not replay an initial latest completed round on refresh", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({
+          latest_completed_round: completedRound({ round_number: 1, name: "Already Seen" }),
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Answer: Already Seen")).not.toBeInTheDocument();
+  });
+});
+
+function activeCareerGame(overrides = {}) {
+  return {
+    id: 7,
+    mode: "online_friend",
+    status: "active",
+    join_code: "ABC123",
+    target_wins: 3,
+    wrong_guess_visibility: "private",
+    player1_name: "A",
+    player2_name: "B",
+    player1_score: 0,
+    player2_score: 0,
+    round_number: 1,
+    winner_player: null,
+    pending_no_answer_from: null,
+    pending_no_answer_to: null,
+    current_round: {
+      round_number: 1,
+      status: "active",
+      winner_player: null,
+      timeline: [
+        {
+          team_name: "Team 1",
+          start_season: "2020/21",
+          end_season: "2020/21",
+        },
+      ],
+      resolved_at: null,
+    },
+    latest_completed_round: null,
+    ...overrides,
+  };
+}
+
+function completedRound({ round_number, name }) {
+  return {
+    round_number,
+    status: "no_answer",
+    winner_player: null,
+    resolved_at: "2026-06-15T16:00:00+00:00",
+    answer: {
+      id: round_number,
+      name,
+      first_name: name.split(" ")[0],
+      last_name: name.split(" ")[1],
+      nationality: null,
+      position: null,
+      image_url: null,
+    },
+  };
+}

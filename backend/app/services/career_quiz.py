@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func
@@ -228,6 +228,7 @@ def serialize_game_state(db: Session, game: CareerQuizGame) -> dict[str, Any]:
     current_round = None
     if game.status == "active":
         current_round = _round_payload(db, _current_round(game), include_answer=False)
+    latest_completed_round = _latest_completed_round_payload(db, game)
     return {
         "id": game.id,
         "mode": game.mode,
@@ -244,6 +245,7 @@ def serialize_game_state(db: Session, game: CareerQuizGame) -> dict[str, Any]:
         "pending_no_answer_from": game.pending_no_answer_from,
         "pending_no_answer_to": game.pending_no_answer_to,
         "current_round": current_round,
+        "latest_completed_round": latest_completed_round,
     }
 
 
@@ -253,6 +255,21 @@ def serialize_completed_round(
     round_obj = (
         db.query(CareerQuizRound)
         .filter_by(game_id=game_id, round_number=round_number)
+        .first()
+    )
+    if round_obj is None:
+        return None
+    return _round_payload(db, round_obj, include_answer=True)
+
+
+def _latest_completed_round_payload(
+    db: Session, game: CareerQuizGame
+) -> dict[str, Any] | None:
+    round_obj = (
+        db.query(CareerQuizRound)
+        .filter(CareerQuizRound.game_id == game.id)
+        .filter(CareerQuizRound.status.in_(("completed", "no_answer")))
+        .order_by(CareerQuizRound.round_number.desc())
         .first()
     )
     if round_obj is None:
@@ -271,10 +288,21 @@ def _round_payload(
         "status": round_obj.status,
         "winner_player": round_obj.winner_player,
         "timeline": _career_timeline(db, round_obj.answer_player_id),
+        "resolved_at": _utc_isoformat(round_obj.completed_at),
     }
     if include_answer:
         payload["answer"] = _player_payload(db, round_obj.answer_player_id)
     return payload
+
+
+def _utc_isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
 
 
 def _current_round(game: CareerQuizGame) -> CareerQuizRound:
