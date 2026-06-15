@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../api", () => ({
@@ -79,6 +79,45 @@ describe("getRevealCountdownRemaining", () => {
 });
 
 describe("CareerQuizBoard multiplayer reveals", () => {
+  it("renders a prominent multiplayer scoreboard with player scores and race context", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({
+          player1_score: 2,
+          player2_score: 1,
+        })}
+        onlineInfo={{ playerNumber: 2 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const scoreboard = screen.getByLabelText("Career Quiz multiplayer scoreboard");
+    expect(scoreboard).toBeInTheDocument();
+    expect(within(scoreboard).getByText("A")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("B")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("2")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("1")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("Round 1")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("First to 3")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("You are B")).toBeInTheDocument();
+  });
+
+  it("keeps the multiplayer scoreboard out of solo mode", () => {
+    render(
+      <CareerQuizBoard
+        soloInitialRound={{
+          round_token: "solo-round",
+          timeline: [],
+        }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByLabelText("Career Quiz multiplayer scoreboard")).not.toBeInTheDocument();
+  });
+
   it("renders shared wrong guesses for the active round", () => {
     render(
       <CareerQuizBoard
@@ -104,11 +143,11 @@ describe("CareerQuizBoard multiplayer reveals", () => {
       />
     );
 
-    expect(screen.getByLabelText("Shared wrong guesses")).toBeInTheDocument();
-    expect(screen.getByText("A")).toBeInTheDocument();
-    expect(screen.getByText("B")).toBeInTheDocument();
-    expect(screen.getByText("Wrong One")).toBeInTheDocument();
-    expect(screen.getByText("Wrong Two")).toBeInTheDocument();
+    const wrongGuesses = within(screen.getByLabelText("Shared wrong guesses"));
+    expect(wrongGuesses.getByText("A")).toBeInTheDocument();
+    expect(wrongGuesses.getByText("B")).toBeInTheDocument();
+    expect(wrongGuesses.getByText("Wrong One")).toBeInTheDocument();
+    expect(wrongGuesses.getByText("Wrong Two")).toBeInTheDocument();
   });
 
   it("renders no shared wrong guesses when the field is absent", () => {
