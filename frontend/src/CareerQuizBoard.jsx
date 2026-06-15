@@ -250,14 +250,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
             {answer ? (
               <div className="mt-6 rounded-2xl border border-elq-border bg-white p-5">
                 <div className="flex items-center gap-4 mb-4">
-                  {answer.image_url && (
-                    <img
-                      src={answer.image_url}
-                      alt={answer.name || ""}
-                      className="w-20 h-20 rounded-full object-cover object-top border border-elq-border shrink-0"
-                      onError={(e) => { e.target.style.display = "none"; }}
-                    />
-                  )}
+                  <AnswerPlayerImage player={answer} />
                   <div>
                     <h2 className="font-display text-3xl text-elq-dark">{answer.name}</h2>
                     <p className="text-sm text-elq-muted">
@@ -349,14 +342,7 @@ function CompletedRoundReveal({ round, countdownRemaining = 0 }) {
   if (!round) return null;
   return (
     <div className="mb-5 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 flex items-center gap-4">
-      {round.answer?.image_url && (
-        <img
-          src={round.answer.image_url}
-          alt={round.answer?.name || ""}
-          className="w-14 h-14 rounded-full object-cover object-top border border-emerald-300 shrink-0"
-          onError={(e) => { e.target.style.display = "none"; }}
-        />
-      )}
+      <AnswerPlayerImage player={round.answer} />
       <div>
         <strong>{round.winner_player ? `Player ${round.winner_player} wins the round` : "No answer"}</strong>
         <div>Answer: {round.answer?.name}</div>
@@ -369,6 +355,18 @@ function CompletedRoundReveal({ round, countdownRemaining = 0 }) {
         )}
       </div>
     </div>
+  );
+}
+
+function AnswerPlayerImage({ player }) {
+  if (!player?.image_url) return null;
+  return (
+    <img
+      src={player.image_url}
+      alt={player.name || ""}
+      className="w-20 h-20 rounded-full object-cover object-top border border-elq-border shrink-0"
+      onError={(e) => { e.target.style.display = "none"; }}
+    />
   );
 }
 

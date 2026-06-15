@@ -152,6 +152,63 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(screen.queryByText("Answer: Polled Answer")).not.toBeInTheDocument();
   });
 
+  it("shows the answer player image during a multiplayer completed-round reveal", async () => {
+    vi.useFakeTimers();
+    const imageUrl = "https://example.com/players/polled-answer.png";
+    getCareerGame.mockResolvedValue(
+      activeCareerGame({
+        latest_completed_round: completedRound({
+          round_number: 1,
+          name: "Image Answer",
+          image_url: imageUrl,
+        }),
+      })
+    );
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    const image = screen.getByRole("img", { name: "Image Answer" });
+    expect(image).toHaveAttribute("src", imageUrl);
+    expect(image).toHaveClass("w-20", "h-20", "rounded-full", "object-cover", "object-top");
+    expect(screen.getByText("Answer: Image Answer")).toBeInTheDocument();
+  });
+
+  it("omits the multiplayer completed-round image when the answer has no image URL", async () => {
+    vi.useFakeTimers();
+    getCareerGame.mockResolvedValue(
+      activeCareerGame({
+        latest_completed_round: completedRound({ round_number: 1, name: "No Photo Answer" }),
+      })
+    );
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(screen.getByText("Answer: No Photo Answer")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "No Photo Answer" })).not.toBeInTheDocument();
+  });
+
   it("does not replay an initial latest completed round on refresh", () => {
     render(
       <CareerQuizBoard
@@ -362,7 +419,7 @@ function activeCareerGame(overrides = {}) {
   };
 }
 
-function completedRound({ round_number, name, next_round_starts_at = null }) {
+function completedRound({ round_number, name, next_round_starts_at = null, image_url = null }) {
   return {
     round_number,
     status: "no_answer",
@@ -376,7 +433,7 @@ function completedRound({ round_number, name, next_round_starts_at = null }) {
       last_name: name.split(" ")[1],
       nationality: null,
       position: null,
-      image_url: null,
+      image_url,
     },
   };
 }
