@@ -242,7 +242,10 @@ def respond_no_answer(
 def serialize_game_state(db: Session, game: CareerQuizGame) -> dict[str, Any]:
     current_round = None
     if game.status == "active":
-        current_round = _round_payload(db, _current_round(game), include_answer=False)
+        current_round_obj = _current_round(game)
+        current_round = _round_payload(db, current_round_obj, include_answer=False)
+        if game.wrong_guess_visibility == "shared":
+            current_round["wrong_guesses"] = _wrong_guess_payloads(db, current_round_obj)
     latest_completed_round = _latest_completed_round_payload(db, game)
     return {
         "id": game.id,
@@ -313,6 +316,25 @@ def _round_payload(
     if include_answer:
         payload["answer"] = _player_payload(db, round_obj.answer_player_id)
     return payload
+
+
+def _wrong_guess_payloads(
+    db: Session, round_obj: CareerQuizRound
+) -> list[dict[str, Any]]:
+    guesses = (
+        db.query(CareerQuizGuess)
+        .filter(CareerQuizGuess.round_id == round_obj.id)
+        .filter(CareerQuizGuess.is_correct.is_(False))
+        .order_by(CareerQuizGuess.created_at, CareerQuizGuess.id)
+        .all()
+    )
+    return [
+        {
+            "player_number": guess.player_number,
+            "player": _wrong_guess_player_payload(guess.guessed_player),
+        }
+        for guess in guesses
+    ]
 
 
 def _utc_isoformat(value: datetime | None) -> str | None:
@@ -479,15 +501,27 @@ def _player_payload(db: Session, player_id: int) -> dict[str, Any]:
         raise NotFoundGameActionError("Player not found")
     return {
         "id": player.id,
-        "name": " ".join(
-            part for part in [player.first_name, player.last_name] if part
-        ).strip(),
+        "name": _player_display_name(player),
         "first_name": player.first_name,
         "last_name": player.last_name,
         "nationality": player.nationality,
         "position": player.position,
         "image_url": player.image_url,
     }
+
+
+def _wrong_guess_player_payload(player: Player) -> dict[str, Any]:
+    return {
+        "id": player.id,
+        "name": _player_display_name(player),
+        "image_url": player.image_url,
+    }
+
+
+def _player_display_name(player: Player) -> str:
+    return " ".join(
+        part for part in [player.first_name, player.last_name] if part
+    ).strip()
 
 
 def _active_revision(db: Session) -> CareerDataRevision:

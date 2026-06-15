@@ -79,6 +79,51 @@ describe("getRevealCountdownRemaining", () => {
 });
 
 describe("CareerQuizBoard multiplayer reveals", () => {
+  it("renders shared wrong guesses for the active round", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({
+          wrong_guess_visibility: "shared",
+          current_round: {
+            ...activeCareerGame().current_round,
+            wrong_guesses: [
+              {
+                player_number: 1,
+                player: { id: 10, name: "Wrong One", image_url: null },
+              },
+              {
+                player_number: 2,
+                player: { id: 11, name: "Wrong Two", image_url: null },
+              },
+            ],
+          },
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText("Shared wrong guesses")).toBeInTheDocument();
+    expect(screen.getByText("A")).toBeInTheDocument();
+    expect(screen.getByText("B")).toBeInTheDocument();
+    expect(screen.getByText("Wrong One")).toBeInTheDocument();
+    expect(screen.getByText("Wrong Two")).toBeInTheDocument();
+  });
+
+  it("renders no shared wrong guesses when the field is absent", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByLabelText("Shared wrong guesses")).not.toBeInTheDocument();
+  });
+
   it("shows a polled latest completed round once for a non-acting player", async () => {
     vi.useFakeTimers();
     getCareerGame.mockResolvedValue(
