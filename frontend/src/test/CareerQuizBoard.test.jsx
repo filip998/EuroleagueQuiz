@@ -508,6 +508,83 @@ describe("CareerQuizBoard multiplayer reveals", () => {
   });
 });
 
+describe("CareerQuizBoard search keyboard submit", () => {
+  it("submits the only career search result when Enter is pressed", async () => {
+    autocompleteCareerPlayer.mockResolvedValue({
+      players: [{ id: 77, name: "Only Match" }],
+    });
+    submitCareerGuess.mockResolvedValue({
+      state: activeCareerGame(),
+      result: "incorrect",
+    });
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type a player name...");
+    fireEvent.change(input, { target: { value: "only" } });
+
+    await screen.findByRole("button", { name: "Only Match" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(submitCareerGuess).toHaveBeenCalledWith(7, 1, 77, 1));
+  });
+
+  it("does not submit career search when Enter is pressed with no results", async () => {
+    autocompleteCareerPlayer.mockResolvedValue({ players: [] });
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type a player name...");
+    fireEvent.change(input, { target: { value: "none" } });
+
+    await waitFor(() => expect(autocompleteCareerPlayer).toHaveBeenCalledWith("none"));
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(submitCareerGuess).not.toHaveBeenCalled();
+  });
+
+  it("does not submit career search when Enter is pressed with multiple results", async () => {
+    autocompleteCareerPlayer.mockResolvedValue({
+      players: [
+        { id: 78, name: "First Match" },
+        { id: 79, name: "Second Match" },
+      ],
+    });
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type a player name...");
+    fireEvent.change(input, { target: { value: "match" } });
+
+    await screen.findByRole("button", { name: "First Match" });
+    expect(screen.getByRole("button", { name: "Second Match" })).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(submitCareerGuess).not.toHaveBeenCalled();
+  });
+});
+
 function activeCareerGame(overrides = {}) {
   return {
     id: 7,

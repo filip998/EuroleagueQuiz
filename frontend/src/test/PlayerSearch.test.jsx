@@ -144,6 +144,30 @@ describe("PlayerSearch", () => {
     expect(mockOnSelect).toHaveBeenCalledWith(player);
   });
 
+  it("calls onSelect when Enter is pressed with one player result", async () => {
+    const player = { player_id: 1, full_name: "Luka Doncic" };
+    autocompletePlayer.mockResolvedValue({ players: [player] });
+
+    render(
+      <PlayerSearch
+        rowTeamCode="BAR"
+        colTeamCode="RMB"
+        onSelect={mockOnSelect}
+        onCancel={mockOnCancel}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type player name...");
+    await userEvent.type(input, "luka");
+
+    await waitFor(() => {
+      expect(screen.getByText("Luka Doncic")).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(mockOnSelect).toHaveBeenCalledWith(player);
+  });
+
   it("shows 'No players found' when query returns empty", async () => {
     autocompletePlayer.mockResolvedValue({ players: [] });
 
