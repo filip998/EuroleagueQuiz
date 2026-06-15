@@ -11,7 +11,38 @@ import {
 } from "./api";
 
 export const CAREER_REVEAL_COUNTDOWN_SECONDS = 3;
-const NO_ANSWER_OFFER_SENT_MESSAGE = "No-answer offer sent.";
+const CAREER_FEEDBACK_MESSAGES = {
+  correct: "Correct!",
+  soloWrong: "Not this player. Keep guessing.",
+  multiplayerWrong: "Wrong guess.",
+  noAnswerOfferSent: "No-answer offer sent.",
+};
+const CAREER_MULTIPLAYER_SUCCESS_RESULTS = new Set(["round_won", "match_won"]);
+const NO_ANSWER_OFFER_SENT_MESSAGE = CAREER_FEEDBACK_MESSAGES.noAnswerOfferSent;
+const CAREER_FEEDBACK_TONES = {
+  [CAREER_FEEDBACK_MESSAGES.correct]: "success",
+  [CAREER_FEEDBACK_MESSAGES.soloWrong]: "error",
+  [CAREER_FEEDBACK_MESSAGES.multiplayerWrong]: "error",
+  [CAREER_FEEDBACK_MESSAGES.noAnswerOfferSent]: "neutral",
+};
+const CAREER_FEEDBACK_STYLES = {
+  success: {
+    container: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    dot: "bg-elq-success",
+  },
+  error: {
+    container: "border-red-200 bg-red-50 text-red-600",
+    dot: "bg-elq-player2",
+  },
+  neutral: {
+    container: "border-amber-200 bg-amber-50 text-amber-700",
+    dot: "bg-elq-warning",
+  },
+  info: {
+    container: "border-slate-200 bg-slate-100 text-slate-600",
+    dot: "bg-slate-400",
+  },
+};
 
 export default function CareerQuizBoard({ initialState, soloInitialRound, onlineInfo, onNewGame, onHome }) {
   const [soloRound, setSoloRound] = useState(soloInitialRound || null);
@@ -111,16 +142,16 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
       if (result.correct) {
         setAnswer(result.answer);
         setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
-        setMessage("Correct!");
+        setMessage(CAREER_FEEDBACK_MESSAGES.correct);
       } else {
-        setMessage("Not this player. Keep guessing.");
+        setMessage(CAREER_FEEDBACK_MESSAGES.soloWrong);
       }
       return;
     }
     try {
       const result = await submitCareerGuess(game.id, playerNumber, player.id, currentRoundNumber);
       setGame(result.state);
-      setMessage(result.result === "incorrect" ? "Wrong guess." : "");
+      setMessage(getCareerMultiplayerGuessMessage(result.result));
     } catch (error) {
       if (isCareerActionSyncConflict(error)) {
         await resyncCareerGame();
@@ -241,7 +272,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
           <div>
             <CareerGuessBox onGuess={handleGuess} disabled={Boolean(answer) || roundLocked} />
 
-            {message && <p className="mt-4 text-sm text-elq-muted">{message}</p>}
+            <CareerFeedbackMessage message={message} />
 
             <SharedWrongGuesses
               guesses={sharedWrongGuesses}
@@ -304,6 +335,30 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
         </div>
       </div>
     </Shell>
+  );
+}
+
+function getCareerMultiplayerGuessMessage(result) {
+  if (result === "incorrect") return CAREER_FEEDBACK_MESSAGES.multiplayerWrong;
+  if (CAREER_MULTIPLAYER_SUCCESS_RESULTS.has(result)) return CAREER_FEEDBACK_MESSAGES.correct;
+  return "";
+}
+
+function CareerFeedbackMessage({ message }) {
+  if (!message) return null;
+
+  const tone = CAREER_FEEDBACK_TONES[message] || "info";
+  const styles = CAREER_FEEDBACK_STYLES[tone];
+
+  return (
+    <div
+      role="status"
+      data-testid="career-feedback-message"
+      className={`mt-4 flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold shadow-sm animate-slide-down ${styles.container}`}
+    >
+      <span className={`h-2 w-2 rounded-full ${styles.dot}`} />
+      <span>{message}</span>
+    </div>
   );
 }
 
