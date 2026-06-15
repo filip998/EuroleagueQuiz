@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSeasonRange } from "../CareerQuizBoard";
+import { formatSeasonRange, shouldRevealCompletedRound } from "../CareerQuizBoard";
 
 describe("formatSeasonRange", () => {
   it("prefers Wikipedia-style years when provided", () => {
@@ -27,5 +27,16 @@ describe("formatSeasonRange", () => {
       start_season: "2023/24",
       end_season: null,
     })).toBe("2023/24 \u2013 present");
+  });
+});
+
+describe("shouldRevealCompletedRound", () => {
+  it("does not reveal when no completed round is available", () => {
+    expect(shouldRevealCompletedRound(null, null)).toBe(false);
+  });
+
+  it("reveals a new completed round once", () => {
+    expect(shouldRevealCompletedRound({ round_number: 2 }, 1)).toBe(true);
+    expect(shouldRevealCompletedRound({ round_number: 2 }, 2)).toBe(false);
   });
 });

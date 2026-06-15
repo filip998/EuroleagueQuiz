@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -106,6 +108,72 @@ def test_multiplayer_first_correct_answer_wins_match_when_target_is_one():
         db.close()
 
 
+def test_multiplayer_state_exposes_latest_completed_round_after_no_answer_accept():
+    db = _session()
+    try:
+        _eligible_player(db, "Answer", "Player")
+        _eligible_player(db, "Next", "Player")
+        _active_revision(db)
+        db.commit()
+
+        game = career_quiz.create_game(db, target_wins=3, player1_name="A")
+        career_quiz.join_game(db, game.join_code, player_name="B")
+        current = game.rounds[0]
+
+        state = career_quiz.serialize_game_state(db, game)
+        assert state["latest_completed_round"] is None
+
+        career_quiz.offer_no_answer(db, game=game, acting_player=1)
+        result = career_quiz.respond_no_answer(
+            db,
+            game=game,
+            acting_player=2,
+            accept=True,
+        )
+
+        assert result == "accepted"
+        completed = career_quiz.serialize_game_state(db, game)["latest_completed_round"]
+        assert completed["round_number"] == 1
+        assert completed["status"] == "no_answer"
+        assert completed["winner_player"] is None
+        assert completed["answer"]["id"] == current.answer_player_id
+        _assert_player_answer_payload(completed["answer"])
+        _assert_iso_datetime(completed["resolved_at"])
+    finally:
+        db.close()
+
+
+def test_multiplayer_state_exposes_latest_completed_round_after_correct_guess():
+    db = _session()
+    try:
+        _eligible_player(db, "Correct", "Answer")
+        _eligible_player(db, "Future", "Round")
+        _active_revision(db)
+        db.commit()
+
+        game = career_quiz.create_game(db, target_wins=3, player1_name="A")
+        career_quiz.join_game(db, game.join_code, player_name="B")
+        current = game.rounds[0]
+
+        result = career_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=current.answer_player_id,
+            acting_player=1,
+        )
+
+        assert result == "round_won"
+        completed = career_quiz.serialize_game_state(db, game)["latest_completed_round"]
+        assert completed["round_number"] == 1
+        assert completed["status"] == "completed"
+        assert completed["winner_player"] == 1
+        assert completed["answer"]["id"] == current.answer_player_id
+        _assert_player_answer_payload(completed["answer"])
+        _assert_iso_datetime(completed["resolved_at"])
+    finally:
+        db.close()
+
+
 def test_low_threshold_revision_does_not_enable_quiz():
     db = _session()
     try:
@@ -182,3 +250,20 @@ def _eligible_player(db, first_name: str, last_name: str):
         )
     db.flush()
     return player
+
+
+def _assert_player_answer_payload(answer):
+    assert {
+        "id",
+        "name",
+        "first_name",
+        "last_name",
+        "nationality",
+        "position",
+        "image_url",
+    }.issubset(answer)
+
+
+def _assert_iso_datetime(value):
+    assert value
+    datetime.fromisoformat(value)

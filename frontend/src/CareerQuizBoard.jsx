@@ -15,6 +15,9 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const [recentIds, setRecentIds] = useState([]);
   const [game, setGame] = useState(initialState || null);
   const [completedRound, setCompletedRound] = useState(null);
+  const [lastRevealedRoundNumber, setLastRevealedRoundNumber] = useState(
+    initialState?.latest_completed_round?.round_number ?? null
+  );
   const [answer, setAnswer] = useState(null);
   const [message, setMessage] = useState("");
 
@@ -27,6 +30,13 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     const timer = setTimeout(() => setCompletedRound(null), 3000);
     return () => clearTimeout(timer);
   }, [completedRound]);
+
+  useEffect(() => {
+    const latestRound = game?.latest_completed_round;
+    if (!shouldRevealCompletedRound(latestRound, lastRevealedRoundNumber)) return;
+    setCompletedRound(latestRound);
+    setLastRevealedRoundNumber(latestRound.round_number);
+  }, [game?.latest_completed_round, lastRevealedRoundNumber]);
 
   useEffect(() => {
     if (solo || !game?.id || game.status === "finished") return undefined;
@@ -60,10 +70,8 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
       }
       return;
     }
-
     const result = await submitCareerGuess(game.id, playerNumber, player.id);
     setGame(result.state);
-    if (result.completed_round) setCompletedRound(result.completed_round);
     setMessage(result.result === "incorrect" ? "Wrong guess." : "");
   }
 
@@ -82,7 +90,6 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   async function respondNoAnswer(accept) {
     const result = await respondCareerNoAnswer(game.id, playerNumber, accept);
     setGame(result.state);
-    if (result.completed_round) setCompletedRound(result.completed_round);
   }
 
   if (game?.status === "waiting_for_opponent") {
@@ -103,6 +110,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     return (
       <Shell onHome={onHome}>
         <div className="text-center">
+          <CompletedRoundReveal round={completedRound} />
           <div className="text-5xl mb-3">🏆</div>
           <h1 className="font-display text-4xl text-elq-dark mb-3">
             {(game.winner_player === 1 ? game.player1_name : game.player2_name) || "Player"} wins!
@@ -132,22 +140,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
           )}
         </div>
 
-        {completedRound && (
-          <div className="mb-5 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 flex items-center gap-4">
-            {completedRound.answer?.image_url && (
-              <img
-                src={completedRound.answer.image_url}
-                alt={completedRound.answer?.name || ""}
-                className="w-14 h-14 rounded-full object-cover object-top border border-emerald-300 shrink-0"
-                onError={(e) => { e.target.style.display = "none"; }}
-              />
-            )}
-            <div>
-              <strong>{completedRound.winner_player ? `Player ${completedRound.winner_player} wins the round` : "No answer"}</strong>
-              <div>Answer: {completedRound.answer?.name}</div>
-            </div>
-          </div>
-        )}
+        <CompletedRoundReveal round={completedRound} />
 
         <div className="grid lg:grid-cols-2 gap-6 items-start">
           <div className="lg:max-h-[60vh] lg:overflow-y-auto">
@@ -212,6 +205,26 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   );
 }
 
+function CompletedRoundReveal({ round }) {
+  if (!round) return null;
+  return (
+    <div className="mb-5 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 flex items-center gap-4">
+      {round.answer?.image_url && (
+        <img
+          src={round.answer.image_url}
+          alt={round.answer?.name || ""}
+          className="w-14 h-14 rounded-full object-cover object-top border border-emerald-300 shrink-0"
+          onError={(e) => { e.target.style.display = "none"; }}
+        />
+      )}
+      <div>
+        <strong>{round.winner_player ? `Player ${round.winner_player} wins the round` : "No answer"}</strong>
+        <div>Answer: {round.answer?.name}</div>
+      </div>
+    </div>
+  );
+}
+
 function Timeline({ timeline }) {
   return (
     <div className="bg-white rounded-3xl border border-elq-border shadow-sm p-5 mb-5">
@@ -242,6 +255,13 @@ export function formatSeasonRange(stint) {
     return stint.start_season;
   }
   return `${stint.start_season} – ${stint.end_season}`;
+}
+
+export function shouldRevealCompletedRound(latestRound, lastRevealedRoundNumber) {
+  return (
+    latestRound?.round_number != null
+    && latestRound.round_number !== lastRevealedRoundNumber
+  );
 }
 
 function CareerGuessBox({ onGuess, disabled }) {
