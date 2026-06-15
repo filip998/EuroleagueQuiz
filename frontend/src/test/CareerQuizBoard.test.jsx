@@ -124,13 +124,13 @@ describe("CareerQuizBoard multiplayer reveals", () => {
 
   it("shows a server-anchored countdown and disables guessing while locked", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-06-15T16:00:00Z"));
+    vi.setSystemTime(new Date("2026-06-15T15:59:58Z"));
     getCareerGame.mockResolvedValue(
       activeCareerGame({
         latest_completed_round: completedRound({
           round_number: 1,
           name: "Timed Answer",
-          next_round_starts_at: "2026-06-15T16:00:05+00:00",
+          next_round_starts_at: "2026-06-15T16:00:03+00:00",
         }),
       })
     );
@@ -165,8 +165,8 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(screen.getByPlaceholderText("Type a player name...")).not.toBeDisabled();
     expect(
       getRevealCountdownRemaining(
-        "2026-06-15T16:00:05+00:00",
-        Date.parse("2026-06-15T16:00:05Z")
+        "2026-06-15T16:00:03+00:00",
+        Date.parse("2026-06-15T16:00:03Z")
       )
     ).toBe(0);
   });
@@ -198,8 +198,47 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     await waitFor(() => expect(screen.getByText("Locked Player")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Locked Player"));
 
-    await waitFor(() => expect(submitCareerGuess).toHaveBeenCalledWith(7, 1, 99));
+    await waitFor(() => expect(submitCareerGuess).toHaveBeenCalledWith(7, 1, 99, 1));
     expect(screen.queryByText("round_locked")).not.toBeInTheDocument();
+  });
+
+  it("resyncs silently when a stale round guess is rejected", async () => {
+    autocompleteCareerPlayer.mockResolvedValue({
+      players: [{ id: 99, name: "Stale Player" }],
+    });
+    submitCareerGuess.mockRejectedValue(
+      Object.assign(new Error("round_stale"), {
+        status: 409,
+        detail: "round_stale",
+      })
+    );
+    getCareerGame.mockResolvedValue(activeCareerGame({
+      round_number: 2,
+      current_round: {
+        ...activeCareerGame().current_round,
+        round_number: 2,
+      },
+    }));
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Type a player name..."), {
+      target: { value: "stale" },
+    });
+
+    await waitFor(() => expect(screen.getByText("Stale Player")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Stale Player"));
+
+    await waitFor(() => expect(submitCareerGuess).toHaveBeenCalledWith(7, 1, 99, 1));
+    await waitFor(() => expect(getCareerGame).toHaveBeenCalledWith(7));
+    expect(screen.queryByText("round_stale")).not.toBeInTheDocument();
   });
 });
 

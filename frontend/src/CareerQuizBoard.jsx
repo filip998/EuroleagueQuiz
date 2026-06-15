@@ -27,6 +27,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const solo = Boolean(soloRound);
   const playerNumber = onlineInfo?.playerNumber || 1;
   const timeline = solo ? soloRound.timeline : game?.current_round?.timeline || [];
+  const currentRoundNumber = game?.current_round?.round_number ?? game?.round_number ?? null;
   const revealNextRoundStartsAt = completedRound?.next_round_starts_at
     || game?.latest_completed_round?.next_round_starts_at
     || null;
@@ -86,12 +87,12 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
       return;
     }
     try {
-      const result = await submitCareerGuess(game.id, playerNumber, player.id);
+      const result = await submitCareerGuess(game.id, playerNumber, player.id, currentRoundNumber);
       setGame(result.state);
       setMessage(result.result === "incorrect" ? "Wrong guess." : "");
     } catch (error) {
-      if (isCareerRoundLockedError(error)) {
-        setMessage("");
+      if (isCareerActionSyncConflict(error)) {
+        await resyncCareerGame();
         return;
       }
       throw error;
@@ -106,12 +107,12 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   async function offerNoAnswer() {
     try {
-      const result = await offerCareerNoAnswer(game.id, playerNumber);
+      const result = await offerCareerNoAnswer(game.id, playerNumber, currentRoundNumber);
       setGame(result.state);
       setMessage("No-answer offer sent.");
     } catch (error) {
-      if (isCareerRoundLockedError(error)) {
-        setMessage("");
+      if (isCareerActionSyncConflict(error)) {
+        await resyncCareerGame();
         return;
       }
       throw error;
@@ -120,14 +121,24 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   async function respondNoAnswer(accept) {
     try {
-      const result = await respondCareerNoAnswer(game.id, playerNumber, accept);
+      const result = await respondCareerNoAnswer(game.id, playerNumber, accept, currentRoundNumber);
       setGame(result.state);
     } catch (error) {
-      if (isCareerRoundLockedError(error)) {
-        setMessage("");
+      if (isCareerActionSyncConflict(error)) {
+        await resyncCareerGame();
         return;
       }
       throw error;
+    }
+  }
+
+  async function resyncCareerGame() {
+    setMessage("");
+    if (!game?.id) return;
+    try {
+      setGame(await getCareerGame(game.id));
+    } catch {
+      // Regular polling will retry transient refresh failures.
     }
   }
 
@@ -338,12 +349,13 @@ export function getRevealCountdownRemaining(nextRoundStartsAt, nowMs = Date.now(
   );
 }
 
-function isCareerRoundLockedError(error) {
-  return (
-    error?.message === "round_locked"
-    || error?.detail === "round_locked"
-    || error?.payload?.code === "round_locked"
-  );
+function isCareerActionSyncConflict(error) {
+  return [
+    error?.message,
+    error?.detail,
+    error?.payload?.message,
+    error?.payload?.code,
+  ].some((code) => code === "round_locked" || code === "round_stale");
 }
 
 function CareerGuessBox({ onGuess, disabled }) {

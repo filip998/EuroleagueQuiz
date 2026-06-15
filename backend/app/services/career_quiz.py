@@ -146,11 +146,13 @@ def submit_guess(
     game: CareerQuizGame,
     player_id: int,
     acting_player: int,
+    round_number: int,
 ) -> str:
     if acting_player not in (1, 2):
         raise InvalidGameActionError("Player identity is required")
     if game.status != "active":
         raise ConflictGameActionError("Game is not active")
+    _raise_if_round_stale(game, round_number)
     round_obj = _current_round(game)
     if round_obj.status != "active":
         raise ConflictGameActionError("Round is not active")
@@ -193,11 +195,13 @@ def offer_no_answer(
     *,
     game: CareerQuizGame,
     acting_player: int,
+    round_number: int,
 ) -> None:
     if acting_player not in (1, 2):
         raise InvalidGameActionError("Player identity is required")
     if game.status != "active":
         raise ConflictGameActionError("Game is not active")
+    _raise_if_round_stale(game, round_number)
     _raise_if_current_round_locked(game)
     game.pending_no_answer_from = acting_player
     game.pending_no_answer_to = 2 if acting_player == 1 else 1
@@ -209,7 +213,13 @@ def respond_no_answer(
     game: CareerQuizGame,
     acting_player: int,
     accept: bool,
+    round_number: int,
 ) -> str:
+    if acting_player not in (1, 2):
+        raise InvalidGameActionError("Player identity is required")
+    if game.status != "active":
+        raise ConflictGameActionError("Game is not active")
+    _raise_if_round_stale(game, round_number)
     if acting_player != game.pending_no_answer_to:
         raise InvalidGameActionError("No answer offer is not pending for this player")
     if accept:
@@ -320,6 +330,11 @@ def _as_utc(value: datetime) -> datetime:
 def _raise_if_current_round_locked(game: CareerQuizGame) -> None:
     if _active_next_round_lock_starts_at(game) is not None:
         raise ConflictGameActionError("round_locked")
+
+
+def _raise_if_round_stale(game: CareerQuizGame, round_number: int) -> None:
+    if round_number != game.round_number:
+        raise ConflictGameActionError("round_stale")
 
 
 def _active_next_round_lock_starts_at(

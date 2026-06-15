@@ -11,6 +11,9 @@ import {
   createHigherLowerGame,
   submitHigherLowerAnswer,
   getHigherLowerLeaderboard,
+  offerCareerNoAnswer,
+  respondCareerNoAnswer,
+  submitCareerGuess,
 } from "../api";
 
 // Mock fetch globally
@@ -182,6 +185,50 @@ describe("Higher or Lower API", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/higher-lower/leaderboard/hard",
       expect.objectContaining({ method: "GET" })
+    );
+  });
+});
+
+describe("Career Quiz API", () => {
+  it("submitCareerGuess sends player_id and round_number", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse({ result: "incorrect", state: { id: 7 } }));
+
+    await submitCareerGuess(7, 1, 99, 3);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games/7/guess?player=1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ player_id: 99, round_number: 3 }),
+      })
+    );
+  });
+
+  it("offerCareerNoAnswer sends round_number", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse({ result: "no_answer_offered", state: { id: 7 } }));
+
+    await offerCareerNoAnswer(7, 2, 4);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games/7/no-answer-offer?player=2",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ round_number: 4 }),
+      })
+    );
+  });
+
+  it("respondCareerNoAnswer sends accept and round_number", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse({ result: "no_answer_accepted", state: { id: 7 } }));
+
+    await respondCareerNoAnswer(7, 1, true, 4);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games/7/no-answer-response?player=1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ accept: true, round_number: 4 }),
+      })
     );
   });
 });

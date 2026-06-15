@@ -143,7 +143,9 @@ Both backend subsystems share `backend/app/models/` (SQLAlchemy) and `backend/ap
 
 Career Quiz multiplayer exposes `latest_completed_round.next_round_starts_at` during the
 three-second reveal countdown. The backend is authoritative: next-round guesses are
-rejected with `round_locked` until that UTC timestamp has elapsed.
+rejected with `round_locked` until that UTC timestamp has elapsed. Multiplayer Career
+Quiz guess and no-answer mutations must include the client-visible `round_number`;
+stale actions are rejected with `round_stale` so the frontend can resync safely.
 
 ### Data model
 

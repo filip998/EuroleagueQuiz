@@ -91,6 +91,9 @@ is not stored in browser state or persisted as a solo game row.
 Multiplayer Career Quiz resolved-round state includes
 `latest_completed_round.next_round_starts_at` during the three-second reveal lock; the
 backend rejects next-round guesses with `round_locked` until that UTC timestamp elapses.
+Multiplayer Career Quiz guess and no-answer mutations must include the client-visible
+`round_number`; stale actions are rejected with `round_stale` so the frontend can resync
+without applying old input to the current round.
 
 The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
 `frontend/src/useOnlineGameRealtime.js`, so reconnect, background state sync,
