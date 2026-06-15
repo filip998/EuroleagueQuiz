@@ -611,12 +611,26 @@ function CareerGuessBox({ onGuess, disabled }) {
     return () => clearTimeout(timer);
   }, [query, disabled]);
 
+  function selectPlayer(player) {
+    onGuess(player);
+    setQuery("");
+    setPlayers([]);
+  }
+
+  function handleKeyDown(event) {
+    if (disabled) return;
+    if (event.key === "Enter" && players.length === 1) {
+      selectPlayer(players[0]);
+    }
+  }
+
   return (
     <div className="bg-white rounded-2xl border border-elq-border p-4">
       <input
         value={query}
         disabled={disabled}
         onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={handleKeyDown}
         placeholder="Type a player name..."
         className="w-full px-4 py-3 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none"
       />
@@ -625,11 +639,7 @@ function CareerGuessBox({ onGuess, disabled }) {
           {players.map((player) => (
             <button
               key={player.id}
-              onClick={() => {
-                onGuess(player);
-                setQuery("");
-                setPlayers([]);
-              }}
+              onClick={() => selectPlayer(player)}
               className="block w-full text-left px-4 py-2 hover:bg-elq-orange/5"
             >
               {player.name}
