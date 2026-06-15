@@ -11,6 +11,7 @@ import {
 } from "./api";
 
 export const CAREER_REVEAL_COUNTDOWN_SECONDS = 3;
+const NO_ANSWER_OFFER_SENT_MESSAGE = "No-answer offer sent.";
 
 export default function CareerQuizBoard({ initialState, soloInitialRound, onlineInfo, onNewGame, onHome }) {
   const [soloRound, setSoloRound] = useState(soloInitialRound || null);
@@ -22,12 +23,13 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   );
   const [answer, setAnswer] = useState(null);
   const [message, setMessage] = useState("");
+  const [noAnswerOfferMessageRoundNumber, setNoAnswerOfferMessageRoundNumber] = useState(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const solo = Boolean(soloRound);
   const playerNumber = onlineInfo?.playerNumber || 1;
   const timeline = solo ? soloRound.timeline : game?.current_round?.timeline || [];
-  const currentRoundNumber = game?.current_round?.round_number ?? game?.round_number ?? null;
+  const currentRoundNumber = getCareerGameRoundNumber(game);
   const revealNextRoundStartsAt = completedRound?.next_round_starts_at
     || game?.latest_completed_round?.next_round_starts_at
     || null;
@@ -56,6 +58,32 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   }, [game?.latest_completed_round, lastRevealedRoundNumber]);
 
   useEffect(() => {
+    if (message !== NO_ANSWER_OFFER_SENT_MESSAGE || solo) return;
+
+    const offerStillPendingFromPlayer = (
+      game?.pending_no_answer_from === playerNumber
+      && game?.pending_no_answer_to != null
+    );
+    const activeRoundNumber = getCareerGameRoundNumber(game);
+    const latestCompletedRoundNumber = game?.latest_completed_round?.round_number ?? null;
+    const offerRoundChanged = (
+      noAnswerOfferMessageRoundNumber != null
+      && activeRoundNumber != null
+      && activeRoundNumber !== noAnswerOfferMessageRoundNumber
+    );
+    const offerRoundCompleted = (
+      noAnswerOfferMessageRoundNumber != null
+      && latestCompletedRoundNumber != null
+      && latestCompletedRoundNumber >= noAnswerOfferMessageRoundNumber
+    );
+
+    if (!offerStillPendingFromPlayer || offerRoundChanged || offerRoundCompleted) {
+      setMessage("");
+      setNoAnswerOfferMessageRoundNumber(null);
+    }
+  }, [game, message, noAnswerOfferMessageRoundNumber, playerNumber, solo]);
+
+  useEffect(() => {
     if (solo || !game?.id || game.status === "finished") return undefined;
     const timer = setInterval(async () => {
       try {
@@ -72,10 +100,12 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     setSoloRound(next);
     setAnswer(null);
     setMessage("");
+    setNoAnswerOfferMessageRoundNumber(null);
   }
 
   async function handleGuess(player) {
     setMessage("");
+    setNoAnswerOfferMessageRoundNumber(null);
     if (solo) {
       const result = await submitCareerSoloGuess(soloRound.round_token, player.id);
       if (result.correct) {
@@ -110,7 +140,8 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     try {
       const result = await offerCareerNoAnswer(game.id, playerNumber, currentRoundNumber);
       setGame(result.state);
-      setMessage("No-answer offer sent.");
+      setNoAnswerOfferMessageRoundNumber(getCareerGameRoundNumber(result.state) ?? currentRoundNumber);
+      setMessage(NO_ANSWER_OFFER_SENT_MESSAGE);
     } catch (error) {
       if (isCareerActionSyncConflict(error)) {
         await resyncCareerGame();
@@ -135,6 +166,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   async function resyncCareerGame() {
     setMessage("");
+    setNoAnswerOfferMessageRoundNumber(null);
     if (!game?.id) return;
     try {
       setGame(await getCareerGame(game.id));
@@ -387,6 +419,10 @@ export function getRevealCountdownRemaining(nextRoundStartsAt, nowMs = Date.now(
     CAREER_REVEAL_COUNTDOWN_SECONDS,
     Math.max(0, Math.ceil((startsAtMs - nowMs) / 1000))
   );
+}
+
+function getCareerGameRoundNumber(game) {
+  return game?.current_round?.round_number ?? game?.round_number ?? null;
 }
 
 function isCareerActionSyncConflict(error) {
