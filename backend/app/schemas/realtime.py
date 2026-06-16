@@ -19,6 +19,8 @@ class RealtimeClientAction(StrEnum):
     GUESS = "guess"
     OFFER_END = "offer_end"
     RESPOND_END = "respond_end"
+    OFFER_NO_ANSWER = "offer_no_answer"
+    RESPOND_NO_ANSWER = "respond_no_answer"
     TIME_EXPIRED = "time_expired"
 
 
@@ -36,6 +38,9 @@ class RealtimeResult(StrEnum):
     END_OFFERED = "end_offered"
     END_ACCEPTED = "end_accepted"
     END_DECLINED = "end_declined"
+    NO_ANSWER_OFFERED = "no_answer_offered"
+    NO_ANSWER_ACCEPTED = "no_answer_accepted"
+    NO_ANSWER_DECLINED = "no_answer_declined"
     TIME_EXPIRED = "time_expired"
     GAVE_UP = "gave_up"
     GIVEN_UP = "given_up"

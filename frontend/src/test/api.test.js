@@ -11,9 +11,12 @@ import {
   createHigherLowerGame,
   submitHigherLowerAnswer,
   getHigherLowerLeaderboard,
+  createCareerGame,
+  joinCareerGame,
   offerCareerNoAnswer,
   respondCareerNoAnswer,
   submitCareerGuess,
+  connectCareerRealtime,
 } from "../api";
 
 // Mock fetch globally
@@ -190,10 +193,41 @@ describe("Higher or Lower API", () => {
 });
 
 describe("Career Quiz API", () => {
-  it("submitCareerGuess sends player_id and round_number", async () => {
-    mockFetch.mockReturnValue(mockJsonResponse({ result: "incorrect", state: { id: 7 } }));
+  it("createCareerGame parses the realtime state envelope", async () => {
+    const payload = { target_wins: 3, wrong_guess_visibility: "private" };
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 })));
 
-    await submitCareerGuess(7, 1, 99, 3);
+    const result = await createCareerGame(payload);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(payload),
+      })
+    );
+    expect(result.state.id).toBe(7);
+  });
+
+  it("joinCareerGame parses the realtime state envelope", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 8 })));
+
+    const result = await joinCareerGame("ABC123", "Player 2");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games/join",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ join_code: "ABC123", player_name: "Player 2" }),
+      })
+    );
+    expect(result.state.id).toBe(8);
+  });
+
+  it("submitCareerGuess sends player_id and round_number", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "incorrect")));
+
+    const result = await submitCareerGuess(7, 1, 99, 3);
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/career/games/7/guess?player=1",
@@ -202,12 +236,13 @@ describe("Career Quiz API", () => {
         body: JSON.stringify({ player_id: 99, round_number: 3 }),
       })
     );
+    expect(result.result).toBe("incorrect");
   });
 
   it("offerCareerNoAnswer sends round_number", async () => {
-    mockFetch.mockReturnValue(mockJsonResponse({ result: "no_answer_offered", state: { id: 7 } }));
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "no_answer_offered")));
 
-    await offerCareerNoAnswer(7, 2, 4);
+    const result = await offerCareerNoAnswer(7, 2, 4);
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/career/games/7/no-answer-offer?player=2",
@@ -216,12 +251,13 @@ describe("Career Quiz API", () => {
         body: JSON.stringify({ round_number: 4 }),
       })
     );
+    expect(result.result).toBe("no_answer_offered");
   });
 
   it("respondCareerNoAnswer sends accept and round_number", async () => {
-    mockFetch.mockReturnValue(mockJsonResponse({ result: "no_answer_accepted", state: { id: 7 } }));
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "no_answer_accepted")));
 
-    await respondCareerNoAnswer(7, 1, true, 4);
+    const result = await respondCareerNoAnswer(7, 1, true, 4);
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/career/games/7/no-answer-response?player=1",
@@ -230,6 +266,35 @@ describe("Career Quiz API", () => {
         body: JSON.stringify({ accept: true, round_number: 4 }),
       })
     );
+    expect(result.result).toBe("no_answer_accepted");
+  });
+
+  it("connectCareerRealtime opens the Career websocket path", () => {
+    const messages = [];
+    class FakeWebSocket {
+      static OPEN = 1;
+      constructor(url) {
+        FakeWebSocket.lastUrl = url;
+        this.url = url;
+        this.readyState = FakeWebSocket.OPEN;
+      }
+      send(message) {
+        messages.push(JSON.parse(message));
+      }
+      close() {}
+    }
+
+    const connection = connectCareerRealtime({
+      gameId: 7,
+      playerNumber: 2,
+      onMessage: vi.fn(),
+      WebSocketImpl: FakeWebSocket,
+    });
+    connection.send({ action: "offer_no_answer", round_number: 1 });
+
+    expect(connection.isOpen()).toBe(true);
+    expect(FakeWebSocket.lastUrl).toBe("ws://localhost:8000/quiz/career/ws/7?player=2");
+    expect(messages).toEqual([{ action: "offer_no_answer", round_number: 1 }]);
   });
 });
 

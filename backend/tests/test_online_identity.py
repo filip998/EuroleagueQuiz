@@ -1,6 +1,7 @@
 import pytest
 
 from app.game_actions import ConflictGameActionError, InvalidGameActionError
+from app.models.career import CareerQuizGame
 from app.models.roster_guess import RosterGuessGame
 from app.models.tictactoe import QuizTicTacToeGame
 from app.schemas.realtime import RealtimeClientAction
@@ -17,6 +18,7 @@ from app.services.tictactoe import (
     submit_move,
 )
 from app.services.realtime_adapters import (
+    CareerQuizRealtimeAdapter,
     RosterGuessRealtimeAdapter,
     TicTacToeRealtimeAdapter,
 )
@@ -49,6 +51,16 @@ def _roster_game(**overrides):
     }
     attrs.update(overrides)
     return RosterGuessGame(**attrs)
+
+
+def _career_game(**overrides):
+    attrs = {
+        "mode": "online_friend",
+        "status": "active",
+        "wrong_guess_visibility": "private",
+    }
+    attrs.update(overrides)
+    return CareerQuizGame(**attrs)
 
 
 def test_tictactoe_online_move_requires_realtime_identity():
@@ -169,6 +181,35 @@ def test_roster_realtime_guess_validates_required_fields():
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "data"),
+    [
+        ("player_id", {"action": "guess", "round_number": 1}),
+        ("round_number", {"action": "guess", "player_id": 1}),
+    ],
+)
+def test_career_realtime_guess_validates_required_fields(field, data):
+    with pytest.raises(InvalidGameActionError, match=field):
+        CareerQuizRealtimeAdapter().handle_client_action(
+            FlushOnlySession(),
+            _career_game(),
+            action=RealtimeClientAction.GUESS.value,
+            data=data,
+            player=1,
+        )
+
+
+def test_career_realtime_no_answer_offer_validates_round_number():
+    with pytest.raises(InvalidGameActionError, match="round_number"):
+        CareerQuizRealtimeAdapter().handle_client_action(
+            FlushOnlySession(),
+            _career_game(),
+            action=RealtimeClientAction.OFFER_NO_ANSWER.value,
+            data={"action": "offer_no_answer"},
+            player=1,
+        )
+
+
 @pytest.mark.parametrize("data", [{}, {"accept": "false"}, {"accept": {}}])
 def test_tictactoe_realtime_draw_response_validates_accept(data):
     with pytest.raises(InvalidGameActionError, match="accept"):
@@ -192,6 +233,18 @@ def test_roster_realtime_end_response_validates_accept(data):
             FlushOnlySession(),
             _roster_game(current_player=2, pending_end_from=1, pending_end_to=2),
             action=RealtimeClientAction.RESPOND_END.value,
+            data=data,
+            player=2,
+        )
+
+
+@pytest.mark.parametrize("data", [{}, {"accept": "false"}, {"accept": {}}])
+def test_career_realtime_no_answer_response_validates_accept(data):
+    with pytest.raises(InvalidGameActionError, match="accept"):
+        CareerQuizRealtimeAdapter().handle_client_action(
+            FlushOnlySession(),
+            _career_game(pending_no_answer_from=1, pending_no_answer_to=2),
+            action=RealtimeClientAction.RESPOND_NO_ANSWER.value,
             data=data,
             player=2,
         )

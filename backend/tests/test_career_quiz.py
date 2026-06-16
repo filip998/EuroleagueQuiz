@@ -13,6 +13,7 @@ from app.models import (
     PlayerCareerStint,
 )
 from app.services import career_quiz
+from app.services.realtime_adapters import CareerQuizRealtimeAdapter
 
 
 def test_format_years_uses_wikipedia_calendar_style():
@@ -209,6 +210,79 @@ def test_multiplayer_private_wrong_guesses_are_not_serialized():
         assert f"{wrong_player.first_name} {wrong_player.last_name}" not in repr(
             current_round
         )
+    finally:
+        db.close()
+
+
+def test_realtime_adapter_targets_private_wrong_guess_to_actor_only():
+    db = _session()
+    try:
+        players = [
+            _eligible_player(db, "Private", "RealtimeAnswer"),
+            _eligible_player(db, "Private", "RealtimeWrong"),
+        ]
+        _active_revision(db)
+        db.commit()
+
+        game = career_quiz.create_game(
+            db,
+            target_wins=3,
+            wrong_guess_visibility="private",
+            player1_name="A",
+        )
+        career_quiz.join_game(db, game.join_code, player_name="B")
+        current = career_quiz._current_round(game)
+        wrong_player = next(
+            player for player in players if player.id != current.answer_player_id
+        )
+
+        outcome = CareerQuizRealtimeAdapter().handle_client_action(
+            db,
+            game,
+            action="guess",
+            data={"player_id": wrong_player.id, "round_number": current.round_number},
+            player=1,
+        )
+
+        assert outcome.result == "incorrect"
+        assert outcome.broadcast_to_player == 1
+        assert outcome.completed_round_number is None
+    finally:
+        db.close()
+
+
+def test_realtime_adapter_broadcasts_shared_wrong_guess_to_both_players():
+    db = _session()
+    try:
+        players = [
+            _eligible_player(db, "Shared", "RealtimeAnswer"),
+            _eligible_player(db, "Shared", "RealtimeWrong"),
+        ]
+        _active_revision(db)
+        db.commit()
+
+        game = career_quiz.create_game(
+            db,
+            target_wins=3,
+            wrong_guess_visibility="shared",
+            player1_name="A",
+        )
+        career_quiz.join_game(db, game.join_code, player_name="B")
+        current = career_quiz._current_round(game)
+        wrong_player = next(
+            player for player in players if player.id != current.answer_player_id
+        )
+
+        outcome = CareerQuizRealtimeAdapter().handle_client_action(
+            db,
+            game,
+            action="guess",
+            data={"player_id": wrong_player.id, "round_number": current.round_number},
+            player=1,
+        )
+
+        assert outcome.result == "incorrect"
+        assert outcome.broadcast_to_player is None
     finally:
         db.close()
 

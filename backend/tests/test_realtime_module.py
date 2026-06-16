@@ -211,6 +211,26 @@ async def test_broadcast_removes_failed_connections_and_keeps_successful_player(
 
 
 @pytest.mark.asyncio
+async def test_broadcast_state_can_target_one_player():
+    module, _store = make_module()
+    player_one = FakeWebSocket()
+    player_two = FakeWebSocket()
+    await module.connections.connect(1, 1, player_one)
+    await module.connections.connect(1, 2, player_two)
+
+    sent = await module.broadcast_state(
+        1,
+        {"id": 1, "status": "active", "current_player": 1, "round_number": 1},
+        result="incorrect",
+        only_player=1,
+    )
+
+    assert sent == 1
+    assert player_one.sent[0]["payload"]["result"] == "incorrect"
+    assert player_two.sent == []
+
+
+@pytest.mark.asyncio
 async def test_disconnect_cleans_connections_without_cancelling_timer():
     sleep = SleepController()
     game = FakeGame(turn_seconds=3)

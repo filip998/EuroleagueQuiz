@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 class GameKind(StrEnum):
     TICTACTOE = "tictactoe"
     ROSTER_GUESS = "roster_guess"
+    CAREER_QUIZ = "career_quiz"
 
 
 class GameActionName(StrEnum):
@@ -39,6 +40,8 @@ class GameActionName(StrEnum):
     RESPOND_DRAW = "respond_draw"
     OFFER_END = "offer_end"
     RESPOND_END = "respond_end"
+    OFFER_NO_ANSWER = "offer_no_answer"
+    RESPOND_NO_ANSWER = "respond_no_answer"
     GIVE_UP = "give_up"
 
 
@@ -49,6 +52,7 @@ class RealtimeActionOutcome:
     completed_round_number: int | None = None
     completed_round: dict[str, Any] | None = None
     broadcast: bool = True
+    broadcast_to_player: int | None = None
     schedule_timer: bool = False
     cancel_timer: bool = False
 
@@ -95,6 +99,7 @@ class RealtimeEffects(Protocol):
         *,
         result: RealtimeResult | str | None = None,
         completed_round: dict[str, Any] | None = None,
+        only_player: int | None = None,
     ) -> int: ...
 
     def start_timer_from_state(self, game_state: dict[str, Any]) -> None: ...
@@ -240,6 +245,7 @@ class GameActionOrchestrator:
                     state,
                     result=outcome.result,
                     completed_round=completed_round,
+                    only_player=outcome.broadcast_to_player,
                 )
             except Exception:
                 self.log.exception(

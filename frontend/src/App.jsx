@@ -298,8 +298,9 @@ function CareerSetupPage() {
   }
 
   function handleGameCreated(game, online) {
-    saveOnlineInfo(game.id, online);
-    navigate(`/career/${game.id}`);
+    const gameData = game?.state || game?.game || game;
+    saveOnlineInfo(gameData.id, online);
+    navigate(`/career/${gameData.id}`);
   }
 
   return (

@@ -179,7 +179,7 @@ export function autocompleteCareerPlayer(q, limit = 15) {
 }
 
 export function createCareerGame(payload) {
-  return request("POST", "/quiz/career/games", payload);
+  return actionRequest("POST", "/quiz/career/games", payload);
 }
 
 export function getCareerGame(gameId) {
@@ -187,28 +187,35 @@ export function getCareerGame(gameId) {
 }
 
 export function joinCareerGame(joinCode, playerName) {
-  return request("POST", "/quiz/career/games/join", {
+  return actionRequest("POST", "/quiz/career/games/join", {
     join_code: joinCode,
     player_name: playerName,
   });
 }
 
 export function submitCareerGuess(gameId, playerNumber, playerId, roundNumber) {
-  return request("POST", `/quiz/career/games/${gameId}/guess?player=${playerNumber}`, {
+  return actionRequest("POST", `/quiz/career/games/${gameId}/guess?player=${playerNumber}`, {
     player_id: playerId,
     round_number: roundNumber,
   });
 }
 
 export function offerCareerNoAnswer(gameId, playerNumber, roundNumber) {
-  return request("POST", `/quiz/career/games/${gameId}/no-answer-offer?player=${playerNumber}`, {
+  return actionRequest("POST", `/quiz/career/games/${gameId}/no-answer-offer?player=${playerNumber}`, {
     round_number: roundNumber,
   });
 }
 
 export function respondCareerNoAnswer(gameId, playerNumber, accept, roundNumber) {
-  return request("POST", `/quiz/career/games/${gameId}/no-answer-response?player=${playerNumber}`, {
+  return actionRequest("POST", `/quiz/career/games/${gameId}/no-answer-response?player=${playerNumber}`, {
     accept,
     round_number: roundNumber,
   });
+}
+
+export function connectCareerRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+  return connectRealtimeWebSocket(
+    `/quiz/career/ws/${gameId}?player=${playerNumber}`,
+    { onMessage, onClose, WebSocketImpl }
+  );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   autocompleteCareerPlayer,
+  connectCareerRealtime,
   createCareerSoloRound,
   getCareerGame,
   offerCareerNoAnswer,
@@ -9,6 +10,8 @@ import {
   submitCareerGuess,
   submitCareerSoloGuess,
 } from "./api";
+import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
+import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 
 export const CAREER_REVEAL_COUNTDOWN_SECONDS = 3;
 const CAREER_FEEDBACK_MESSAGES = {
@@ -16,6 +19,7 @@ const CAREER_FEEDBACK_MESSAGES = {
   soloWrong: "Not this player. Keep guessing.",
   multiplayerWrong: "Wrong guess.",
   noAnswerOfferSent: "No-answer offer sent.",
+  realtimeUnavailable: "Realtime connection unavailable. Reconnecting...",
 };
 const CAREER_MULTIPLAYER_SUCCESS_RESULTS = new Set(["round_won", "match_won"]);
 const NO_ANSWER_OFFER_SENT_MESSAGE = CAREER_FEEDBACK_MESSAGES.noAnswerOfferSent;
@@ -58,6 +62,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const solo = Boolean(soloRound);
+  const isOnline = !solo && Boolean(onlineInfo);
   const playerNumber = onlineInfo?.playerNumber || 1;
   const timeline = solo ? soloRound.timeline : game?.current_round?.timeline || [];
   const currentRoundNumber = getCareerGameRoundNumber(game);
@@ -114,17 +119,63 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     }
   }, [game, message, noAnswerOfferMessageRoundNumber, playerNumber, solo]);
 
-  useEffect(() => {
-    if (solo || !game?.id || game.status === "finished") return undefined;
-    const timer = setInterval(async () => {
-      try {
-        setGame(await getCareerGame(game.id));
-      } catch {
-        // Keep the local state; transient polling failures should not kick users out.
+  function handleRealtimeState(result) {
+    if (!result?.state) return;
+    setGame(result.state);
+
+    if (!result.result) {
+      setMessage((currentMessage) => (
+        currentMessage === NO_ANSWER_OFFER_SENT_MESSAGE ? currentMessage : ""
+      ));
+      return;
+    }
+    if (result.result === "no_answer_offered") {
+      if (result.state.pending_no_answer_from === playerNumber) {
+        setNoAnswerOfferMessageRoundNumber(
+          getCareerGameRoundNumber(result.state) ?? currentRoundNumber
+        );
+        setMessage(NO_ANSWER_OFFER_SENT_MESSAGE);
       }
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [solo, game?.id, game?.status]);
+      return;
+    }
+
+    if (result.result?.startsWith("no_answer_")) {
+      setNoAnswerOfferMessageRoundNumber(null);
+      setMessage("");
+      return;
+    }
+
+    const nextMessage = getCareerMultiplayerGuessMessage(result.result);
+    if (nextMessage) {
+      if (shouldShowCareerMultiplayerFeedback(result, playerNumber)) {
+        setNoAnswerOfferMessageRoundNumber(null);
+        setMessage(nextMessage);
+      } else {
+        setMessage((currentMessage) => (
+          currentMessage === NO_ANSWER_OFFER_SENT_MESSAGE ? currentMessage : ""
+        ));
+      }
+    }
+  }
+
+  async function handleRealtimeError(errorMessage) {
+    if (isCareerActionSyncConflict({ message: errorMessage })) {
+      await resyncCareerGame();
+      return;
+    }
+    setMessage(errorMessage || CAREER_FEEDBACK_MESSAGES.realtimeUnavailable);
+  }
+
+  const realtime = useOnlineGameRealtime({
+    enabled: isOnline,
+    gameId: game?.id,
+    gameStatus: game?.status,
+    playerNumber,
+    connect: connectCareerRealtime,
+    fetchState: getCareerGame,
+    onState: handleRealtimeState,
+    onError: handleRealtimeError,
+  });
 
   async function nextSoloRound() {
     const next = await createCareerSoloRound(recentIds);
@@ -149,9 +200,18 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
       return;
     }
     try {
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.GUESS, {
+          player_id: player.id,
+          round_number: currentRoundNumber,
+        })) {
+          setMessage(CAREER_FEEDBACK_MESSAGES.realtimeUnavailable);
+        }
+        return;
+      }
+
       const result = await submitCareerGuess(game.id, playerNumber, player.id, currentRoundNumber);
-      setGame(result.state);
-      setMessage(getCareerMultiplayerGuessMessage(result.result));
+      handleRealtimeState(result);
     } catch (error) {
       if (isCareerActionSyncConflict(error)) {
         await resyncCareerGame();
@@ -169,10 +229,17 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   async function offerNoAnswer() {
     try {
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.OFFER_NO_ANSWER, {
+          round_number: currentRoundNumber,
+        })) {
+          setMessage(CAREER_FEEDBACK_MESSAGES.realtimeUnavailable);
+        }
+        return;
+      }
+
       const result = await offerCareerNoAnswer(game.id, playerNumber, currentRoundNumber);
-      setGame(result.state);
-      setNoAnswerOfferMessageRoundNumber(getCareerGameRoundNumber(result.state) ?? currentRoundNumber);
-      setMessage(NO_ANSWER_OFFER_SENT_MESSAGE);
+      handleRealtimeState(result);
     } catch (error) {
       if (isCareerActionSyncConflict(error)) {
         await resyncCareerGame();
@@ -184,8 +251,18 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   async function respondNoAnswer(accept) {
     try {
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.RESPOND_NO_ANSWER, {
+          accept,
+          round_number: currentRoundNumber,
+        })) {
+          setMessage(CAREER_FEEDBACK_MESSAGES.realtimeUnavailable);
+        }
+        return;
+      }
+
       const result = await respondCareerNoAnswer(game.id, playerNumber, accept, currentRoundNumber);
-      setGame(result.state);
+      handleRealtimeState(result);
     } catch (error) {
       if (isCareerActionSyncConflict(error)) {
         await resyncCareerGame();
@@ -342,6 +419,23 @@ function getCareerMultiplayerGuessMessage(result) {
   if (result === "incorrect") return CAREER_FEEDBACK_MESSAGES.multiplayerWrong;
   if (CAREER_MULTIPLAYER_SUCCESS_RESULTS.has(result)) return CAREER_FEEDBACK_MESSAGES.correct;
   return "";
+}
+
+function shouldShowCareerMultiplayerFeedback(message, playerNumber) {
+  if (message.result === "incorrect") {
+    const wrongGuesses = message.state?.current_round?.wrong_guesses;
+    if (!Array.isArray(wrongGuesses) || wrongGuesses.length === 0) return true;
+    return wrongGuesses[wrongGuesses.length - 1]?.player_number === playerNumber;
+  }
+
+  if (CAREER_MULTIPLAYER_SUCCESS_RESULTS.has(message.result)) {
+    const winnerPlayer =
+      message.completedRound?.winner_player
+      ?? message.state?.latest_completed_round?.winner_player;
+    return winnerPlayer === playerNumber;
+  }
+
+  return true;
 }
 
 function CareerFeedbackMessage({ message }) {

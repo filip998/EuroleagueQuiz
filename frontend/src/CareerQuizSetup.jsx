@@ -17,14 +17,18 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
       if (mode === "solo") {
         onSoloRound(await createCareerSoloRound([]));
       } else if (mode === "join") {
-        const state = await joinCareerGame(joinCode, playerName || "Player 2");
+        const state = careerGameStateFromResponse(
+          await joinCareerGame(joinCode, playerName || "Player 2")
+        );
         onGameJoined(state, { playerNumber: 2, isOnline: true });
       } else {
-        const state = await createCareerGame({
-          target_wins: targetWins,
-          wrong_guess_visibility: wrongGuessVisibility,
-          player1_name: playerName || "Player 1",
-        });
+        const state = careerGameStateFromResponse(
+          await createCareerGame({
+            target_wins: targetWins,
+            wrong_guess_visibility: wrongGuessVisibility,
+            player1_name: playerName || "Player 1",
+          })
+        );
         onGameCreated(state, { playerNumber: 1, isOnline: true });
       }
     } catch (err) {
@@ -132,4 +136,8 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
       </div>
     </div>
   );
+}
+
+function careerGameStateFromResponse(response) {
+  return response?.state || response?.game || response;
 }

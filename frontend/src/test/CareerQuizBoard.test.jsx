@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../api", () => ({
   autocompleteCareerPlayer: vi.fn(),
+  connectCareerRealtime: vi.fn(),
   createCareerSoloRound: vi.fn(),
   getCareerGame: vi.fn(),
   offerCareerNoAnswer: vi.fn(),
@@ -19,14 +20,35 @@ import CareerQuizBoard, {
 } from "../CareerQuizBoard";
 import {
   autocompleteCareerPlayer,
+  connectCareerRealtime,
   getCareerGame,
-  offerCareerNoAnswer,
   submitCareerGuess,
   submitCareerSoloGuess,
 } from "../api";
 
+let careerRealtimeConnections = [];
+
 beforeEach(() => {
   vi.clearAllMocks();
+  careerRealtimeConnections = [];
+  connectCareerRealtime.mockImplementation(({ onMessage, onClose }) => {
+    const connection = {
+      open: true,
+      sent: [],
+      send: vi.fn((message) => connection.sent.push(message)),
+      close: vi.fn(() => {
+        connection.open = false;
+      }),
+      isOpen: vi.fn(() => connection.open),
+      emit: (message) => onMessage(message),
+      serverClose: () => {
+        connection.open = false;
+        onClose?.();
+      },
+    };
+    careerRealtimeConnections.push(connection);
+    return connection;
+  });
 });
 
 afterEach(() => {
@@ -173,22 +195,6 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     autocompleteCareerPlayer
       .mockResolvedValueOnce({ players: [{ id: 41, name: "Wrong Player" }] })
       .mockResolvedValueOnce({ players: [{ id: 42, name: "Winning Player" }] });
-    submitCareerGuess
-      .mockResolvedValueOnce({
-        state: activeCareerGame(),
-        result: "incorrect",
-      })
-      .mockResolvedValueOnce({
-        state: activeCareerGame({
-          round_number: 2,
-          current_round: {
-            ...activeCareerGame().current_round,
-            round_number: 2,
-          },
-          latest_completed_round: completedRound({ round_number: 1, name: "Winning Player" }),
-        }),
-        result: "round_won",
-      });
 
     render(
       <CareerQuizBoard
@@ -200,6 +206,15 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     );
 
     await selectCareerPlayer("Wrong Player");
+    expect(lastCareerRealtimeConnection().sent).toContainEqual({
+      action: "guess",
+      player_id: 41,
+      round_number: 1,
+    });
+    emitCareerRealtimeState({
+      state: activeCareerGame(),
+      result: "incorrect",
+    });
 
     const wrongFeedback = await screen.findByTestId("career-feedback-message");
     expect(wrongFeedback).toHaveTextContent("Wrong guess.");
@@ -207,11 +222,240 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(wrongFeedback).not.toHaveClass("bg-emerald-50");
 
     await selectCareerPlayer("Winning Player");
+    expect(lastCareerRealtimeConnection().sent).toContainEqual({
+      action: "guess",
+      player_id: 42,
+      round_number: 1,
+    });
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        round_number: 2,
+        current_round: {
+          ...activeCareerGame().current_round,
+          round_number: 2,
+        },
+        latest_completed_round: completedRound({
+          round_number: 1,
+          name: "Winning Player",
+          status: "completed",
+          winner_player: 1,
+        }),
+      }),
+      result: "round_won",
+      completedRound: completedRound({
+        round_number: 1,
+        name: "Winning Player",
+        status: "completed",
+        winner_player: 1,
+      }),
+    });
 
     const successFeedback = await screen.findByTestId("career-feedback-message");
     expect(successFeedback).toHaveTextContent("Correct!");
     expect(successFeedback).toHaveClass("bg-emerald-50", "text-emerald-700");
     expect(successFeedback).not.toHaveClass("bg-red-50");
+  });
+
+  it("does not show personal correct feedback for an opponent win broadcast", () => {
+    const wonRound = completedRound({
+      round_number: 1,
+      name: "Opponent Winner",
+      status: "completed",
+      winner_player: 1,
+    });
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 2 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        round_number: 2,
+        current_round: {
+          ...activeCareerGame().current_round,
+          round_number: 2,
+        },
+        latest_completed_round: wonRound,
+      }),
+      result: "round_won",
+      completedRound: wonRound,
+    });
+
+    expect(screen.queryByText("Correct!")).not.toBeInTheDocument();
+  });
+
+  it("clears stale personal feedback when an opponent wins the round", () => {
+    const wonRound = completedRound({
+      round_number: 1,
+      name: "Opponent Winner",
+      status: "completed",
+      winner_player: 1,
+    });
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 2 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    emitCareerRealtimeState({
+      state: activeCareerGame(),
+      result: "incorrect",
+    });
+    expect(screen.getByText("Wrong guess.")).toBeInTheDocument();
+
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        round_number: 2,
+        current_round: {
+          ...activeCareerGame().current_round,
+          round_number: 2,
+        },
+        latest_completed_round: wonRound,
+      }),
+      result: "round_won",
+      completedRound: wonRound,
+    });
+
+    expect(screen.queryByText("Wrong guess.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Correct!")).not.toBeInTheDocument();
+  });
+
+  it("does not show personal wrong feedback for an opponent shared wrong-guess broadcast", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({ wrong_guess_visibility: "shared" })}
+        onlineInfo={{ playerNumber: 2 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        wrong_guess_visibility: "shared",
+        current_round: {
+          ...activeCareerGame().current_round,
+          wrong_guesses: [
+            {
+              player_number: 1,
+              player: { id: 10, name: "Opponent Miss", image_url: null },
+            },
+          ],
+        },
+      }),
+      result: "incorrect",
+    });
+
+    expect(screen.queryByText("Wrong guess.")).not.toBeInTheDocument();
+    expect(screen.getByText("Opponent Miss")).toBeInTheDocument();
+  });
+
+  it("keeps a sent no-answer offer message during an opponent shared wrong-guess broadcast", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({ wrong_guess_visibility: "shared" })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        wrong_guess_visibility: "shared",
+        pending_no_answer_from: 1,
+        pending_no_answer_to: 2,
+      }),
+      result: "no_answer_offered",
+    });
+    expect(screen.getByText("No-answer offer sent.")).toBeInTheDocument();
+
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        wrong_guess_visibility: "shared",
+        pending_no_answer_from: 1,
+        pending_no_answer_to: 2,
+        current_round: {
+          ...activeCareerGame().current_round,
+          wrong_guesses: [
+            {
+              player_number: 2,
+              player: { id: 10, name: "Opponent Miss", image_url: null },
+            },
+          ],
+        },
+      }),
+      result: "incorrect",
+    });
+
+    expect(screen.getByText("No-answer offer sent.")).toBeInTheDocument();
+    expect(screen.queryByText("Wrong guess.")).not.toBeInTheDocument();
+    expect(screen.getByText("Opponent Miss")).toBeInTheDocument();
+  });
+
+  it("clears stale personal feedback after a result-less realtime resync", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    emitCareerRealtimeState({
+      state: activeCareerGame(),
+      result: "incorrect",
+    });
+    expect(screen.getByText("Wrong guess.")).toBeInTheDocument();
+
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        round_number: 2,
+        current_round: {
+          ...activeCareerGame().current_round,
+          round_number: 2,
+        },
+      }),
+    });
+
+    expect(screen.queryByText("Wrong guess.")).not.toBeInTheDocument();
+  });
+
+  it("keeps a sent no-answer offer message after a result-less pending-offer resync", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        pending_no_answer_from: 1,
+        pending_no_answer_to: 2,
+      }),
+      result: "no_answer_offered",
+    });
+    expect(screen.getByText("No-answer offer sent.")).toBeInTheDocument();
+
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        pending_no_answer_from: 1,
+        pending_no_answer_to: 2,
+      }),
+    });
+
+    expect(screen.getByText("No-answer offer sent.")).toBeInTheDocument();
   });
 
   it("uses the same feedback tones in solo mode", async () => {
@@ -264,7 +508,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     );
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(10000);
     });
     expect(screen.getByText("Answer: Polled Answer")).toBeInTheDocument();
 
@@ -297,7 +541,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     );
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(10000);
     });
 
     const image = screen.getByRole("img", { name: "Image Answer" });
@@ -324,7 +568,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     );
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(10000);
     });
 
     expect(screen.getByText("Answer: No Photo Answer")).toBeInTheDocument();
@@ -348,7 +592,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
 
   it("shows a server-anchored countdown and disables guessing while locked", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-06-15T15:59:58Z"));
+    vi.setSystemTime(new Date("2026-06-15T15:59:50Z"));
     getCareerGame.mockResolvedValue(
       activeCareerGame({
         latest_completed_round: completedRound({
@@ -369,7 +613,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     );
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(10000);
     });
 
     expect(screen.getByText("Answer: Timed Answer")).toBeInTheDocument();
@@ -409,7 +653,6 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     render(
       <CareerQuizBoard
         initialState={activeCareerGame()}
-        onlineInfo={{ playerNumber: 1 }}
         onHome={vi.fn()}
         onNewGame={vi.fn()}
       />
@@ -447,7 +690,6 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     render(
       <CareerQuizBoard
         initialState={activeCareerGame()}
-        onlineInfo={{ playerNumber: 1 }}
         onHome={vi.fn()}
         onNewGame={vi.fn()}
       />
@@ -467,12 +709,6 @@ describe("CareerQuizBoard multiplayer reveals", () => {
 
   it("clears a sent no-answer offer message when polling shows the round advanced", async () => {
     vi.useFakeTimers();
-    offerCareerNoAnswer.mockResolvedValue({
-      state: activeCareerGame({
-        pending_no_answer_from: 1,
-        pending_no_answer_to: 2,
-      }),
-    });
     getCareerGame.mockResolvedValue(activeCareerGame({
       round_number: 2,
       current_round: {
@@ -495,12 +731,22 @@ describe("CareerQuizBoard multiplayer reveals", () => {
       fireEvent.click(screen.getByText("Nobody knows"));
     });
 
-    expect(offerCareerNoAnswer).toHaveBeenCalledWith(7, 1, 1);
+    expect(lastCareerRealtimeConnection().sent).toContainEqual({
+      action: "offer_no_answer",
+      round_number: 1,
+    });
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        pending_no_answer_from: 1,
+        pending_no_answer_to: 2,
+      }),
+      result: "no_answer_offered",
+    });
     expect(screen.getByText("No-answer offer sent.")).toBeInTheDocument();
     expect(screen.getByTestId("career-feedback-message")).toHaveClass("bg-amber-50", "text-amber-700");
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(10000);
     });
 
     expect(getCareerGame).toHaveBeenCalledWith(7);
@@ -521,7 +767,6 @@ describe("CareerQuizBoard search keyboard submit", () => {
     render(
       <CareerQuizBoard
         initialState={activeCareerGame()}
-        onlineInfo={{ playerNumber: 1 }}
         onHome={vi.fn()}
         onNewGame={vi.fn()}
       />
@@ -654,11 +899,34 @@ async function selectCareerPlayer(name) {
   });
 }
 
-function completedRound({ round_number, name, next_round_starts_at = null, image_url = null }) {
+function lastCareerRealtimeConnection() {
+  return careerRealtimeConnections[careerRealtimeConnections.length - 1];
+}
+
+function emitCareerRealtimeState({ state, result = null, completedRound = null }) {
+  act(() => {
+    lastCareerRealtimeConnection().emit({
+      kind: "state",
+      state,
+      result,
+      completedRound,
+      terminal: state?.status === "finished",
+    });
+  });
+}
+
+function completedRound({
+  round_number,
+  name,
+  next_round_starts_at = null,
+  image_url = null,
+  status = "no_answer",
+  winner_player = null,
+}) {
   return {
     round_number,
-    status: "no_answer",
-    winner_player: null,
+    status,
+    winner_player,
     resolved_at: "2026-06-15T16:00:00+00:00",
     next_round_starts_at,
     answer: {
