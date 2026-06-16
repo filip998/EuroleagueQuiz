@@ -81,6 +81,7 @@ class FakeAdapter:
             result="round_won",
             completed_round_number=previous_round,
             schedule_timer=True,
+            broadcast_to_player=command.payload.get("broadcast_to_player"),
         )
 
 
@@ -215,3 +216,19 @@ async def test_post_commit_side_effect_failures_are_logged_and_state_wins(caplog
     assert envelope["type"] == "state"
     assert db.commits == 1
     assert "Post-commit game action side effect failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_broadcast_can_be_targeted_to_one_player():
+    db = FakeSession(FakeGame())
+    effects = FakeEffects()
+
+    await _orchestrator(effects).websocket_action(
+        db=db,
+        action=GameActionName.MOVE.value,
+        payload={"broadcast_to_player": 1},
+        game_id=1,
+        player=1,
+    )
+
+    assert effects.broadcasts[0][2]["only_player"] == 1

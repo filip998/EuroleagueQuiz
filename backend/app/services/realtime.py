@@ -84,9 +84,19 @@ class ConnectionManager:
         if not players:
             self.connections.pop(game_id, None)
 
-    async def broadcast(self, game_id: int, message: dict[str, Any]) -> int:
+    async def broadcast(
+        self,
+        game_id: int,
+        message: dict[str, Any],
+        *,
+        only_player: int | None = None,
+    ) -> int:
         sent = 0
-        players = list(self.connections.get(game_id, {}).items())
+        if only_player is None:
+            players = list(self.connections.get(game_id, {}).items())
+        else:
+            websocket = self.connections.get(game_id, {}).get(only_player)
+            players = [] if websocket is None else [(only_player, websocket)]
         for player, websocket in players:
             try:
                 await websocket.send_json(message)
@@ -257,10 +267,12 @@ class OnlineGameRealtimeModule:
         *,
         result: RealtimeResult | str | None = None,
         completed_round: dict[str, Any] | None = None,
+        only_player: int | None = None,
     ) -> int:
         return await self.connections.broadcast(
             game_id,
             state_message(game_state, result=result, completed_round=completed_round),
+            only_player=only_player,
         )
 
     def disconnect(

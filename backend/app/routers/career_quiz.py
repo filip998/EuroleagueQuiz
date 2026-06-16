@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, WebSocket
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -14,8 +15,35 @@ from app.schemas.career_quiz import (
     CareerSoloRoundRequest,
 )
 from app.services import career_quiz as career_service
+from app.services.game_action_orchestration import (
+    GameActionName,
+    HttpGameActionRejected,
+)
+from app.services.realtime import OnlineGameRealtimeModule
+from app.services.realtime_adapters import CareerQuizRealtimeAdapter
 
 router = APIRouter()
+career_quiz_realtime = OnlineGameRealtimeModule(CareerQuizRealtimeAdapter())
+
+
+async def _career_quiz_http_action(
+    db: Session,
+    action: GameActionName,
+    *,
+    payload=None,
+    game_id: int | None = None,
+    player: int | None = None,
+):
+    try:
+        return await career_quiz_realtime.game_actions.http_action(
+            db=db,
+            action=action,
+            payload=payload,
+            game_id=game_id,
+            player=player,
+        )
+    except HttpGameActionRejected as exc:
+        return JSONResponse(status_code=exc.status_code, content=exc.envelope)
 
 
 @router.post("/career/solo/round")
@@ -62,30 +90,21 @@ def autocomplete_career_players(
 
 
 @router.post("/career/games")
-def create_game(payload: CareerQuizCreateRequest, db: Session = Depends(get_db)):
-    game = run_http_game_action(
+async def create_game(payload: CareerQuizCreateRequest, db: Session = Depends(get_db)):
+    return await _career_quiz_http_action(
         db,
-        lambda: career_service.create_game(
-            db,
-            target_wins=payload.target_wins,
-            wrong_guess_visibility=payload.wrong_guess_visibility,
-            player1_name=payload.player1_name,
-        ),
+        GameActionName.CREATE,
+        payload=payload,
     )
-    return career_service.serialize_game_state(db, game)
 
 
 @router.post("/career/games/join")
-def join_game(payload: CareerQuizJoinRequest, db: Session = Depends(get_db)):
-    game = run_http_game_action(
+async def join_game(payload: CareerQuizJoinRequest, db: Session = Depends(get_db)):
+    return await _career_quiz_http_action(
         db,
-        lambda: career_service.join_game(
-            db,
-            payload.join_code,
-            player_name=payload.player_name,
-        ),
+        GameActionName.JOIN,
+        payload=payload,
     )
-    return career_service.serialize_game_state(db, game)
 
 
 @router.get("/career/games/{game_id}")
@@ -99,87 +118,53 @@ def get_game(game_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/career/games/{game_id}/guess")
-def submit_guess(
+async def submit_guess(
     game_id: int,
     payload: CareerQuizGuessRequest,
     player: int = Query(..., ge=1, le=2),
     db: Session = Depends(get_db),
 ):
-    def action():
-        game = career_service.get_game_or_404(db, game_id)
-        previous_round = game.round_number
-        result = career_service.submit_guess(
-            db,
-            game=game,
-            player_id=payload.player_id,
-            acting_player=player,
-            round_number=payload.round_number,
-        )
-        return {
-            "result": result,
-            "state": career_service.serialize_game_state(db, game),
-            "completed_round": career_service.serialize_completed_round(
-                db, game.id, previous_round
-            )
-            if result in {"round_won", "match_won"}
-            else None,
-        }
-
-    return run_http_game_action(db, action)
+    return await _career_quiz_http_action(
+        db,
+        GameActionName.GUESS,
+        payload=payload,
+        game_id=game_id,
+        player=player,
+    )
 
 
 @router.post("/career/games/{game_id}/no-answer-offer")
-def offer_no_answer(
+async def offer_no_answer(
     game_id: int,
     payload: CareerQuizNoAnswerOfferRequest,
     player: int = Query(..., ge=1, le=2),
     db: Session = Depends(get_db),
 ):
-    return run_http_game_action(
+    return await _career_quiz_http_action(
         db,
-        lambda: _offer_no_answer(db, game_id, player, payload.round_number),
+        GameActionName.OFFER_NO_ANSWER,
+        payload=payload,
+        game_id=game_id,
+        player=player,
     )
 
 
 @router.post("/career/games/{game_id}/no-answer-response")
-def respond_no_answer(
+async def respond_no_answer(
     game_id: int,
     payload: CareerQuizNoAnswerResponseRequest,
     player: int = Query(..., ge=1, le=2),
     db: Session = Depends(get_db),
 ):
-    def action():
-        game = career_service.get_game_or_404(db, game_id)
-        previous_round = game.round_number
-        result = career_service.respond_no_answer(
-            db,
-            game=game,
-            acting_player=player,
-            accept=payload.accept,
-            round_number=payload.round_number,
-        )
-        return {
-            "result": f"no_answer_{result}",
-            "state": career_service.serialize_game_state(db, game),
-            "completed_round": career_service.serialize_completed_round(
-                db, game.id, previous_round
-            )
-            if result == "accepted"
-            else None,
-        }
-
-    return run_http_game_action(db, action)
-
-
-def _offer_no_answer(db: Session, game_id: int, player: int, round_number: int):
-    game = career_service.get_game_or_404(db, game_id)
-    career_service.offer_no_answer(
+    return await _career_quiz_http_action(
         db,
-        game=game,
-        acting_player=player,
-        round_number=round_number,
+        GameActionName.RESPOND_NO_ANSWER,
+        payload=payload,
+        game_id=game_id,
+        player=player,
     )
-    return {
-        "result": "no_answer_offered",
-        "state": career_service.serialize_game_state(db, game),
-    }
+
+
+@router.websocket("/career/ws/{game_id}")
+async def career_quiz_websocket(websocket: WebSocket, game_id: int, player: int = 1):
+    await career_quiz_realtime.connect(websocket, game_id, player)

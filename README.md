@@ -76,11 +76,11 @@ Mutating quiz operations use a **Game action** seam in `backend/app/game_actions
 Routers, WebSocket handlers, and timer jobs run game actions through this helper so the
 application layer owns commit/rollback and game modules stay HTTP-agnostic.
 
-Online TicTacToe and Roster Guess share an **Online Game Realtime Module**. The backend
+Online TicTacToe, Roster Guess, and Career Quiz share an **Online Game Realtime Module**. The backend
 Module in `backend/app/services/realtime.py` owns WebSocket connection cleanup,
-broadcast envelopes, server-side turn timers, timer expiry, and schema-compliant
+broadcast envelopes, server-side turn timers for timer-enabled games, timer expiry, targeted broadcasts, and schema-compliant
 error/result messages. Game-specific Adapters in `backend/app/services/realtime_adapters.py`
-map TicTacToe and Roster Guess rules into that shared Interface.
+map TicTacToe, Roster Guess, and Career Quiz rules into that shared Interface.
 
 Career Quiz adds a **Wikipedia Career Ingestion Module** under `backend/ingestion/`.
 It resolves local EuroLeague players to English Wikipedia pages, parses basketball
@@ -93,13 +93,15 @@ Multiplayer Career Quiz resolved-round state includes
 backend rejects next-round guesses with `round_locked` until that UTC timestamp elapses.
 Multiplayer Career Quiz guess and no-answer mutations must include the client-visible
 `round_number`; stale actions are rejected with `round_stale` so the frontend can resync
-without applying old input to the current round.
+without applying old input to the current round. Career Quiz multiplayer uses WebSocket
+push as its primary sync path, while plain `GET /quiz/career/games/{id}` remains the
+refresh and fallback-sync Interface.
 
 The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
 `frontend/src/useOnlineGameRealtime.js`, so reconnect, background state sync,
 waiting-for-opponent polling, cleanup, and action dispatch stay out of the game boards.
 
-Mutating TicTacToe and Roster Guess HTTP endpoints now use the same realtime
+Mutating TicTacToe, Roster Guess, and Career Quiz HTTP endpoints now use the same realtime
 message envelopes as WebSocket broadcasts: successful actions return
 `{ "type": "state", "payload": { "game": ..., "result": ..., "completed_round": ..., "terminal": ... } }`
 and Game action errors return `{ "type": "error", "payload": { "code": ..., "message": ... } }`
