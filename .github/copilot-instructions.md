@@ -32,6 +32,8 @@ pytest tests/test_realtime_module.py -v               # shared realtime module t
 pytest tests/smoke/ --base-url http://localhost:8000  # smoke tests against a live API
 ```
 
+`tests/test_api.py` and `tests/test_higher_lower.py` use the tracked SQLite database and Higher or Lower tests create/finish games, so check `git status` after local backend test runs and include `backend/data/euroleague.db` changes only when they are intentional.
+
 ### Frontend
 
 ```bash
@@ -107,5 +109,5 @@ CI runs on pull requests to `main`: backend pytest, frontend Vitest, frontend bu
 - Mutating TicTacToe, Roster Guess, and Career Quiz HTTP endpoints use the same realtime message envelopes as WebSocket broadcasts: successful actions return `{"type":"state","payload":{...}}` and game action errors return `{"type":"error","payload":{...}}`. Read-only `GET /games/{id}` endpoints return plain game state for polling and refresh hydration.
 - When changing API paths or payload shapes, update `frontend/src/api.js` and the matching tests in `frontend/src/test/` and/or `frontend/e2e/`.
 - Frontend unit tests mock network calls at the API layer (`global.fetch` in `src/test/api.test.js`); Playwright tests exercise the real FastAPI backend and Vite dev server.
-- Backend API, Higher or Lower, Career Quiz, and Wikipedia ingestion tests use the real SQLite database at `backend/data/euroleague.db`; TicTacToe API tests build an isolated temporary SQLite database with deterministic random seeding.
+- Backend API and Higher or Lower tests use the real SQLite database at `backend/data/euroleague.db`. TicTacToe and Roster Guess API tests build isolated temporary SQLite databases; Career Quiz and Wikipedia ingestion tests use isolated in-memory SQLite databases with seeded fixtures.
 - For significant features, API changes, game mode changes, architecture changes, or workflow changes, update both `README.md` and this instructions file.
