@@ -47,11 +47,12 @@ describe("GameSetup", () => {
     expect(screen.getByPlaceholderText("Player 2")).toBeInTheDocument();
   });
 
-  it("shows join game form when clicking 'Join a game'", () => {
+  it("shows join code input when Online then Join is selected", () => {
     render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
-    fireEvent.click(screen.getByText("Join a game"));
-    expect(screen.getByText("JOIN GAME")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Online"));
+    fireEvent.click(screen.getByText("Join"));
     expect(screen.getByPlaceholderText("ABC123")).toBeInTheDocument();
+    expect(screen.getByText("Join Game")).toBeInTheDocument();
   });
 
   it("shows timer and target wins settings for multiplayer modes", () => {

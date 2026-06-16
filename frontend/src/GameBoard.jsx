@@ -5,6 +5,7 @@ import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import PlayerSearch from "./PlayerSearch";
 import { LogoMini } from "./Logo";
 import ClubLogo from "./ClubLogo";
+import WaitingLobby from "./WaitingLobby";
 
 function AxisLabel({ axis }) {
   const isTeam = axis.axis_type === "team";
@@ -273,36 +274,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
   // Waiting for opponent screen
   if (game?.status === "waiting_for_opponent") {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="text-center animate-fade-in-up">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-elq-orange/10 mb-6 animate-pulse-ring">
-              <svg className="w-8 h-8 text-elq-orange animate-spin-slow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-              </svg>
-            </div>
-            <h2 className="font-display text-4xl text-elq-dark mb-3">WAITING FOR OPPONENT</h2>
-            <p className="text-elq-muted mb-6">Share this code with your friend</p>
-            <div className="inline-block bg-elq-bg border-2 border-dashed border-elq-orange/30 rounded-2xl px-10 py-6 mb-6 select-all">
-              <span className="font-mono text-5xl tracking-[0.3em] text-elq-dark font-bold">
-                {game.join_code}
-              </span>
-            </div>
-            <p className="text-sm text-elq-muted mb-8">
-              The game will start automatically when they join.
-            </p>
-            <button
-              onClick={onNewGame}
-              className="text-sm text-elq-muted hover:text-elq-orange transition-colors underline underline-offset-2"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+    return <WaitingLobby joinCode={game.join_code} onCancel={onNewGame} />;
   }
 
   if (!game || !round) {
