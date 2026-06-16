@@ -65,7 +65,7 @@ alembic revision --autogenerate -m "description"
 alembic upgrade head
 ```
 
-The SQLite database (`backend/data/euroleague.db`) is gitignored and is not deployed by CI/CD. After schema changes, migrations, or ingestion changes that update data, remind the user to upload it:
+The SQLite database (`backend/data/euroleague.db`) is tracked and included in the backend deployment artifact. After schema changes, migrations, or ingestion changes that update data, include the resulting database change in the PR. For out-of-band production database refreshes, use:
 
 ```bash
 az webapp deploy --resource-group euroleague-quiz-rg --name euroleague-quiz-backend-app --src-path backend/data/euroleague.db --target-path data/euroleague.db --type static --restart true
