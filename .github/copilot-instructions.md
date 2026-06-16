@@ -1,170 +1,111 @@
-# Copilot Instructions — EuroLeague Quiz
+# Copilot Instructions - EuroLeague Quiz
 
-## Project Structure
+## Repository shape
 
-```
-backend/   — Python/FastAPI API server, data ingestion, SQLAlchemy models
-frontend/  — React (Vite) UI
-scripts/   — Startup scripts
-```
+- `backend/` - Python 3.11 FastAPI API, SQLAlchemy models, Alembic migrations, and data ingestion.
+- `frontend/` - React 19 + Vite 7 single-page app with Vitest, React Testing Library, ESLint, Tailwind, and Playwright.
+- `scripts/` - Windows convenience scripts for starting the backend/frontend and uploading the SQLite database.
 
-## Skills
+## Build, test, and lint commands
 
-### Run Backend
+### Backend
+
 ```bash
 cd backend
-.venv\Scripts\activate      # Windows (or source .venv/bin/activate on Linux/Mac)
+pip install -e ".[dev]"
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
-Or use the script: `scripts\start-backend.bat` (auto-creates venv, installs deps, runs migrations, starts server).
-Backend runs at http://localhost:8000 (docs at /docs).
 
-### Run Frontend
-```bash
-cd frontend
-npm install   # first time only
-npm run dev
-```
-Or use the script: `scripts\start-frontend.bat`.
-Frontend runs at http://localhost:5173.
+The API runs at `http://localhost:8000`; interactive docs are at `/docs`. On Windows, `scripts\start-backend.bat` creates the venv, installs dependencies, runs migrations, and starts the server.
 
-### Run Both
-Open two terminals and run `scripts\start-backend.bat` and `scripts\start-frontend.bat`.
-
-### Run Tests
-
-**Backend (pytest):**
 ```bash
 cd backend
-.venv\Scripts\activate
-pytest                              # all tests (excludes smoke)
-pytest tests/test_api.py            # API tests only
-pytest tests/test_tictactoe_api.py  # TicTacToe tests only
-pytest tests/smoke/ --base-url http://localhost:8000  # smoke tests against live API
+pytest tests/ --ignore=tests/smoke -v                 # backend CI test suite
+pytest tests/test_api.py -v                           # one backend test file
+pytest tests/test_api.py::test_get_team -v            # one pytest test
+pytest tests/test_tictactoe_api.py -v                 # TicTacToe tests
+pytest tests/test_roster_guess_api.py -v              # Roster Guess tests
+pytest tests/test_higher_lower.py -v                  # Higher or Lower tests
+pytest tests/test_career_quiz.py -v                   # Career Quiz tests
+pytest tests/test_realtime_module.py -v               # shared realtime module tests
+pytest tests/smoke/ --base-url http://localhost:8000  # smoke tests against a live API
 ```
 
-**Frontend unit tests (Vitest + React Testing Library):**
-```bash
-cd frontend
-npm test          # run once
-npm run test:watch  # watch mode
-```
-Test files live in `frontend/src/test/`. Tests cover: App navigation, API layer, GameSetup, PlayerSearch, HigherLowerBoard.
+### Frontend
 
-**Frontend E2E tests (Playwright):**
 ```bash
 cd frontend
+npm ci
+npm run dev        # local dev server at http://localhost:5173
+npm run build      # Vite production build
+npm run lint       # ESLint
+npm test           # Vitest unit tests, run once
+npm run test:watch # Vitest watch mode
+```
+
+Run narrower frontend tests with Vitest/Playwright arguments:
+
+```bash
+cd frontend
+npm test -- src/test/api.test.js
+npm test -- src/test/api.test.js -t "createGame sends POST"
+npm test -- src/test/CareerQuizBoard.test.jsx
 npm run test:e2e
+npm run test:e2e -- e2e/app.spec.js
+npm run test:e2e -- -g "Higher or Lower Flow"
 ```
-E2E tests live in `frontend/e2e/`. Playwright auto-starts both backend and frontend via `webServer` config. Requires the backend venv to exist (`backend/.venv`).
 
-### Run Data Ingestion
+Playwright auto-starts the backend and frontend from `frontend/playwright.config.js`; it expects `backend/.venv` to exist because the backend web server command uses `.venv/bin/uvicorn`. Use `E2E_BACKEND_PORT` and `E2E_FRONTEND_PORT` to override the default `8000`/`5173` ports. In CI/Linux setup, install browsers with `cd frontend && npx playwright install chromium --with-deps`.
+
+### Data ingestion and migrations
+
 ```bash
 cd backend
-.venv\Scripts\activate
-python -m ingestion.ingest --start-season 2000 --end-season 2025  # full ingestion
-python -m ingestion.ingest --step rosters --start-season 2024 --end-season 2024  # single step/season
-```
-
-### Deploy to Production
-
-**Workflow: push to a branch → open PR → merge to `main`**
-
-1. **Open a PR to `main`** → `.github/workflows/ci.yml` runs automatically:
-   - Backend tests (pytest)
-   - Frontend unit tests (vitest, 41 tests)
-   - Frontend build check (npm run build)
-   - Frontend E2E tests (Playwright, 6 tests) — runs after backend tests + build pass
-   - ❌ If any check fails, the PR is blocked.
-
-2. **Merge the PR** → `.github/workflows/deploy.yml` runs automatically:
-   - Runs backend + frontend tests again as a safety gate
-   - Deploys **backend** to Azure App Service (`euroleague-quiz-backend-app`)
-   - Builds and deploys **frontend** to Azure Static Web Apps
-   - Runs **post-deploy smoke tests** against the live API to verify the deployment
-
-**Do NOT push directly to `main`.** Always use a PR so CI checks run first.
-
-To run checks locally before pushing:
-```bash
-cd backend && pytest tests/ --ignore=tests/smoke  # backend tests
-cd frontend && npm test                             # frontend unit tests
-cd frontend && npm run test:e2e                     # E2E tests (needs backend venv)
-cd frontend && npm run build                        # build check
-```
-
-### Upload Database to Azure (required after schema or data changes)
-The SQLite database (`backend/data/euroleague.db`) is `.gitignore`d and NOT deployed via CI/CD.
-**You must upload it to Azure whenever:**
-- New tables are added (Alembic migrations)
-- Data ingestion is re-run
-- Any schema change is made
-
-Steps:
-1. Run migrations locally: `cd backend && .venv\Scripts\activate && alembic upgrade head`
-2. Upload via Azure CLI:
-   ```bash
-   az webapp deploy --resource-group euroleague-quiz-rg --name euroleague-quiz-backend-app --src-path backend/data/euroleague.db --target-path data/euroleague.db --type static --restart true
-   ```
-   Note: Azure CLI is installed at `C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd`. If `az` is not in PATH, add it: `$env:PATH += ";C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin"`.
-3. The `--restart true` flag automatically restarts the App Service after upload.
-
-**IMPORTANT:** Always remind the user to upload the database after making schema or data changes. When possible, run this command automatically after confirming with the user.
-
-A convenience script is also available: `scripts\upload-db.bat`
-
-### Create Migration
-```bash
-cd backend
-.venv\Scripts\activate
+python -m ingestion.ingest --start-season 2000 --end-season 2025
+python -m ingestion.ingest --step rosters --start-season 2024 --end-season 2024
+python -m ingestion.ingest --skip-boxscores --start-season 2024 --end-season 2024
+python -m ingestion.wikipedia_careers --limit 500 --report data/wikipedia-career-report.json --candidates-report data/wikipedia-career-candidates.json
 alembic revision --autogenerate -m "description"
 alembic upgrade head
 ```
 
-## Build & Run (legacy, use skills above)
+The SQLite database (`backend/data/euroleague.db`) is tracked and included in the backend deployment artifact. After schema changes, migrations, or ingestion changes that update data, include the resulting database change in the PR. For out-of-band production database refreshes, use:
 
 ```bash
-cd backend
-pip install -e ".[dev]"     # install with dev/test dependencies
+az webapp deploy --resource-group euroleague-quiz-rg --name euroleague-quiz-backend-app --src-path backend/data/euroleague.db --target-path data/euroleague.db --type static --restart true
 ```
 
-## Architecture
+There is also a Windows helper: `scripts\upload-db.bat`.
 
-This is a **EuroLeague Basketball quiz app** with two main subsystems, both under `backend/`:
+## High-level architecture
 
-1. **`backend/ingestion/`** — CLI pipeline that fetches data from the EuroLeague API (`euroleague-api` package) and writes it to the database. Runs per-season with a `RateLimiter` to respect API limits. Steps: `seasons → rosters → boxscores → aggregate`.
+The backend has two connected subsystems sharing the same SQLAlchemy model layer and `app.config.Settings`:
 
-2. **`backend/app/`** — FastAPI REST API that reads the same database and serves quiz-oriented endpoints (random player, season leaders, roster lookup, player clubs) plus the TicTacToe game engine (`/quiz/tictactoe/*`).
+- `backend/ingestion/` is a CLI pipeline around the `euroleague-api` package. `ingest.py` loops seasons, creates a SQLAlchemy session, applies a `RateLimiter`, runs selected steps (`fetch_seasons`, `fetch_rosters`, `fetch_boxscores`, `aggregate_stats`), and commits once per season.
+- `backend/ingestion/wikipedia_careers.py` populates cached Career Quiz timelines from Wikipedia basketball infobox career rows. EuroLeague data chooses eligible players; gameplay uses the cached Wikipedia timeline and does not call Wikipedia live.
+- `backend/app/` is the FastAPI API. `app/main.py` wires routers for seasons, teams, players, games, and quiz modes. The quiz routers are mounted under `/quiz` and cover TicTacToe, Roster Guess, Higher or Lower, and Career Quiz.
+- `backend/app/services/` contains quiz rules and database logic. Mutating quiz operations run through the game action seam in `backend/app/game_actions.py`, so application-layer helpers own commit/rollback and game modules stay HTTP-agnostic.
+- `backend/app/services/realtime.py` is the shared Online Game Realtime Module for online TicTacToe, Roster Guess, and Career Quiz. It owns WebSocket connection cleanup, state/error envelopes, server-side turn timers, timer expiry, targeted broadcasts, and schema-compliant messages. `backend/app/services/realtime_adapters.py` maps each game mode into that shared interface.
 
-3. **`frontend/`** — React (Vite) single-page app for the TicTacToe quiz game UI.
+The core data model uses upstream EuroLeague string codes (`euroleague_code`) for external player/team identity and integer primary keys internally. `PlayerSeasonTeam` is the central join table for player/team/season membership; `PlayerSeasonStats` hangs off it for aggregates, while `GamePlayerStats` stores per-game box score rows linked to `Game`. Career Quiz adds cached `PlayerCareerStint`, source mapping, and data revision models.
 
-Both backend subsystems share `backend/app/models/` (SQLAlchemy) and `backend/app/config.py` (settings via `pydantic-settings`, env prefix `ELQ_`).
+The frontend is route-driven from `frontend/src/App.jsx`. Each game mode has a setup component and a board/play component. `frontend/src/api.js` is the single place for REST and WebSocket paths; `VITE_API_URL` controls the API base URL and `WS_BASE` is derived from it. `frontend/src/realtimeSchema.js` and `frontend/src/useOnlineGameRealtime.js` mirror the shared realtime envelope interface for reconnect, background sync, waiting-for-opponent polling, cleanup, and action dispatch.
 
-Career Quiz multiplayer exposes `latest_completed_round.next_round_starts_at` during the
-three-second reveal countdown. The backend is authoritative: next-round guesses are
-rejected with `round_locked` until that UTC timestamp has elapsed. Multiplayer Career
-Quiz guess and no-answer mutations must include the client-visible `round_number`;
-stale actions are rejected with `round_stale` so the frontend can resync safely. Career
-Quiz multiplayer uses the shared Online Game Realtime Module for WebSocket push as the
-primary sync path; plain `GET /quiz/career/games/{id}` remains the refresh and fallback
-sync Interface.
+TicTacToe, Roster Guess, and Career Quiz can recover online game info from `sessionStorage`; Higher or Lower and Career Quiz solo pass initial game state through router state and do not survive a hard refresh. Career Quiz multiplayer exposes `latest_completed_round.next_round_starts_at` during the three-second reveal countdown; the backend rejects next-round guesses with `round_locked` until that UTC timestamp elapses. Career Quiz multiplayer guess and no-answer mutations must include the client-visible `round_number`; stale actions are rejected with `round_stale`.
 
-### Data model
+CI runs on pull requests to `main`: backend pytest, frontend Vitest, frontend build, then Playwright E2E after backend tests and build pass. Deploys from `main` run backend/frontend tests again, deploy the backend to Azure App Service and frontend to Azure Static Web Apps, then run smoke tests against the live backend.
 
-The central join table is `PlayerSeasonTeam` — it links a player to a team for a specific season and is the anchor for both `PlayerSeasonStats` (aggregated) and the roster endpoints. `GamePlayerStats` stores per-game box scores linked to `Game`.
+## Key conventions
 
-Entities are identified by `euroleague_code` (string codes like `"BAR"` for teams, `"P001234"` for players) from the upstream API. Internal integer `id` columns are autoincrement surrogates.
-
-## Conventions
-
-- **Config**: All settings go through `app.config.Settings` (pydantic-settings). Environment variables use the `ELQ_` prefix (e.g., `ELQ_DATABASE_URL`).
-- **Database**: Default is SQLite at `backend/data/euroleague.db`. The `get_db` dependency yields a session per request.
-- **Models**: SQLAlchemy declarative models in `backend/app/models/`, all inherit from `app.database.Base`. Each model file covers one domain entity. Re-exported via `app/models/__init__.py`.
-- **Schemas**: Pydantic v2 models in `backend/app/schemas/` with `model_config = {"from_attributes": True}` for ORM compatibility.
-- **Routers**: One router per domain in `backend/app/routers/`, mounted in `app/main.py` with a URL prefix matching the domain name.
-- **Services**: Game logic in `backend/app/services/` (e.g., `tictactoe.py`). Services are pure domain logic, called by routers.
-- **Ingestion**: Each step is a separate module (`fetch_seasons.py`, `fetch_rosters.py`, `fetch_boxscores.py`, `aggregate_stats.py`). They accept a SQLAlchemy session and a `RateLimiter`, and commit is handled by the caller in `ingest.py`.
-- **Tests (backend)**: Use FastAPI's `TestClient`. TicTacToe tests use isolated in-memory SQLite; API tests use the real database. Smoke tests (`tests/smoke/`) use `httpx` against a live URL.
-- **Tests (frontend)**: Vitest + React Testing Library for unit tests (`src/test/`). Playwright for E2E tests (`e2e/`). Mock API calls in unit tests; E2E tests run against the real backend.
-- **Documentation**: When making significant changes (new features, new game modes, architecture changes, new workflows, or API changes), update both `README.md` and this instructions file to keep them in sync.
+- Settings belong in `backend/app/config.py` via `pydantic-settings`; environment variables use the `ELQ_` prefix, such as `ELQ_DATABASE_URL`.
+- Use `get_db` from `backend/app/database.py` for request-scoped sessions. Keep manual `SessionLocal` usage to non-request flows such as WebSocket/timer contexts.
+- Add SQLAlchemy models under `backend/app/models/`, inherit from `app.database.Base`, and re-export them from `backend/app/models/__init__.py`.
+- Add Pydantic v2 schemas under `backend/app/schemas/`; ORM-backed schemas use `model_config = {"from_attributes": True}`.
+- Keep HTTP routing thin: validate request shape in schemas/routers, put quiz rules and DB mutations in services, and translate service/action exceptions to HTTP status codes in routers.
+- Mount new backend domains through `app/main.py`; quiz game endpoints should stay under `/quiz/...` to match the frontend API layer.
+- Mutating TicTacToe, Roster Guess, and Career Quiz HTTP endpoints use the same realtime message envelopes as WebSocket broadcasts: successful actions return `{"type":"state","payload":{...}}` and game action errors return `{"type":"error","payload":{...}}`. Read-only `GET /games/{id}` endpoints return plain game state for polling and refresh hydration.
+- When changing API paths or payload shapes, update `frontend/src/api.js` and the matching tests in `frontend/src/test/` and/or `frontend/e2e/`.
+- Frontend unit tests mock network calls at the API layer (`global.fetch` in `src/test/api.test.js`); Playwright tests exercise the real FastAPI backend and Vite dev server.
+- Backend API, Higher or Lower, Career Quiz, and Wikipedia ingestion tests use the real SQLite database at `backend/data/euroleague.db`; TicTacToe API tests build an isolated temporary SQLite database with deterministic random seeding.
+- For significant features, API changes, game mode changes, architecture changes, or workflow changes, update both `README.md` and this instructions file.
