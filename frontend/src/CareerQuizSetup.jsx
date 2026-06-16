@@ -1,8 +1,17 @@
 import { useState } from "react";
 import { createCareerGame, createCareerSoloRound, joinCareerGame } from "./api";
+import GameSetupShell from "./GameSetupShell";
+import GameModeSelector from "./GameModeSelector";
+
+const HEADER_ICON = (
+  <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m5-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+  </svg>
+);
 
 export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack }) {
   const [mode, setMode] = useState("solo");
+  const [sub, setSub] = useState("create");
   const [playerName, setPlayerName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [targetWins, setTargetWins] = useState(3);
@@ -10,15 +19,21 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  async function start() {
-    setLoading(true);
+  const isOnline = mode === "online";
+  const isJoin = isOnline && sub === "join";
+
+  async function handleSubmit(e) {
+    e.preventDefault();
     setError("");
+    const code = joinCode.trim().toUpperCase();
+    if (isJoin && code.length !== 6) return;
+    setLoading(true);
     try {
       if (mode === "solo") {
         onSoloRound(await createCareerSoloRound([]));
-      } else if (mode === "join") {
+      } else if (isJoin) {
         const state = careerGameStateFromResponse(
-          await joinCareerGame(joinCode, playerName || "Player 2")
+          await joinCareerGame(code, playerName || "Player 2")
         );
         onGameJoined(state, { playerNumber: 2, isOnline: true });
       } else {
@@ -38,103 +53,105 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
     }
   }
 
+  const submitDisabled = loading || (isJoin && joinCode.trim().length !== 6);
+  const ctaLabel = !isOnline ? "Start Game" : isJoin ? "Join Game" : "Create Online Game";
+
   return (
-    <div className="min-h-screen flex flex-col">
-      <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
-      <div className="flex-1 flex items-center justify-center p-4">
-        <div className="w-full max-w-lg bg-white rounded-3xl border border-elq-border shadow-sm p-6">
-          <button onClick={onBack} className="text-sm text-elq-muted hover:text-elq-orange mb-5">
-            ← Back
-          </button>
-          <h1 className="font-display text-4xl text-elq-dark mb-2">CAREER QUIZ</h1>
-          <p className="text-sm text-elq-muted mb-6">
-            Guess the player from his Wikipedia career timeline.
-          </p>
+    <GameSetupShell
+      accent="amber"
+      icon={HEADER_ICON}
+      title="CAREER QUIZ"
+      tagline="Guess the player from his Wikipedia career timeline."
+      onHome={onBack}
+      error={error || null}
+    >
+      <form onSubmit={handleSubmit}>
+        <GameModeSelector
+          modes={["solo", "online"]}
+          mode={mode}
+          onModeChange={setMode}
+          sub={sub}
+          onSubChange={setSub}
+        />
 
-          <div className="grid grid-cols-3 gap-2 mb-5">
-            {[
-              ["solo", "Solo"],
-              ["create", "Create"],
-              ["join", "Join"],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setMode(value)}
-                className={`py-2 rounded-xl text-sm font-bold border transition-colors ${
-                  mode === value
-                    ? "bg-elq-orange text-white border-elq-orange"
-                    : "bg-white border-elq-border text-elq-text"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+        {isOnline && (
+          <>
+            <div className="border-t border-elq-border mb-6" />
 
-          {mode !== "solo" && (
-            <label className="block text-sm font-semibold text-elq-text mb-4">
-              Your name
-              <input
-                value={playerName}
-                onChange={(event) => setPlayerName(event.target.value)}
-                className="mt-2 w-full px-4 py-3 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none"
-                placeholder={mode === "join" ? "Player 2" : "Player 1"}
-              />
-            </label>
-          )}
+            {isJoin ? (
+              <div className="space-y-4 mb-8">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-2">
+                    Game Code
+                  </label>
+                  <input
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                    placeholder="ABC123"
+                    maxLength={6}
+                    className="w-full px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-elq-text mb-1.5">Your Name</label>
+                  <input
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="Your name"
+                    className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4 mb-8">
+                <div>
+                  <label className="block text-sm text-elq-text mb-1.5">Your Name</label>
+                  <input
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="Your name"
+                    className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-elq-text mb-1.5">First to</label>
+                    <select
+                      value={targetWins}
+                      onChange={(e) => setTargetWins(Number(e.target.value))}
+                      className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer"
+                    >
+                      {[1, 3, 5, 7].map((value) => (
+                        <option key={value} value={value}>{value} wins</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-elq-text mb-1.5">Wrong guesses</label>
+                    <select
+                      value={wrongGuessVisibility}
+                      onChange={(e) => setWrongGuessVisibility(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer"
+                    >
+                      <option value="private">Private</option>
+                      <option value="shared">Shared</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
 
-          {mode === "join" && (
-            <label className="block text-sm font-semibold text-elq-text mb-4">
-              Join code
-              <input
-                value={joinCode}
-                onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
-                className="mt-2 w-full px-4 py-3 rounded-xl border-2 border-elq-border bg-elq-bg font-mono tracking-[0.2em] uppercase focus:border-elq-orange focus:outline-none"
-                maxLength={6}
-                placeholder="ABC123"
-              />
-            </label>
-          )}
-
-          {mode === "create" && (
-            <div className="space-y-4 mb-5">
-              <label className="block text-sm font-semibold text-elq-text">
-                Target wins
-                <select
-                  value={targetWins}
-                  onChange={(event) => setTargetWins(Number(event.target.value))}
-                  className="mt-2 w-full px-4 py-3 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none"
-                >
-                  {[1, 3, 5, 7].map((value) => (
-                    <option key={value} value={value}>First to {value}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm font-semibold text-elq-text">
-                Wrong guesses
-                <select
-                  value={wrongGuessVisibility}
-                  onChange={(event) => setWrongGuessVisibility(event.target.value)}
-                  className="mt-2 w-full px-4 py-3 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none"
-                >
-                  <option value="private">Private</option>
-                  <option value="shared">Shared</option>
-                </select>
-              </label>
-            </div>
-          )}
-
-          {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
-          <button
-            onClick={start}
-            disabled={loading || (mode === "join" && joinCode.length !== 6)}
-            className="w-full py-3 rounded-xl bg-elq-orange text-white font-bold hover:bg-elq-orange-dark disabled:opacity-50 transition-colors"
-          >
-            {loading ? "Starting..." : mode === "solo" ? "Start Solo" : mode === "join" ? "Join Game" : "Create Game"}
-          </button>
-        </div>
-      </div>
-    </div>
+        <button
+          type="submit"
+          disabled={submitDisabled}
+          className="w-full py-3.5 px-6 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg tracking-wide"
+        >
+          {loading ? (isJoin ? "Joining..." : "Starting...") : ctaLabel}
+        </button>
+      </form>
+    </GameSetupShell>
   );
 }
 

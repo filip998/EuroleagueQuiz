@@ -126,6 +126,24 @@ npm run dev
 
 Opens at `http://localhost:5173`.
 
+### Shared Pre-Game Setup UX
+
+Every game's pre-game screen is built from three shared building blocks in `frontend/src/`:
+
+- `GameSetupShell.jsx` — common chrome (Home logo, per-game accent header, canonical
+  card, error slot, optional second card such as the Higher or Lower leaderboard).
+- `GameModeSelector.jsx` — the controlled Solo / Local 1v1 / Online mode cards. Selecting
+  **Online** reveals a slim **Create / Join** sub-toggle, so joining a friend's game lives
+  inside the same screen instead of a separate "join game" page. It renders nothing for
+  single-mode games (Higher or Lower).
+- `WaitingLobby.jsx` — the shared "waiting for opponent" screen (join code with
+  copy-to-clipboard, auto-start helper text, and Cancel) used by every online board.
+
+`GameSetup.jsx` (TicTacToe), `RosterGuessSetup.jsx`, `CareerQuizSetup.jsx`, and
+`HigherLowerSetup.jsx` compose these, mapping the canonical UI keys (`solo` / `local` /
+`online`, sub `create` / `join`) onto their own backend modes.
+
+
 ## Testing
 
 ### Backend (pytest)

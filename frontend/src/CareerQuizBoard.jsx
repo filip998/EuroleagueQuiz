@@ -12,6 +12,7 @@ import {
 } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
+import WaitingLobby from "./WaitingLobby";
 
 export const CAREER_REVEAL_COUNTDOWN_SECONDS = 3;
 const CAREER_FEEDBACK_MESSAGES = {
@@ -284,17 +285,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   }
 
   if (game?.status === "waiting_for_opponent") {
-    return (
-      <Shell onHome={onHome}>
-        <div className="text-center">
-          <h1 className="font-display text-4xl text-elq-dark mb-2">WAITING FOR OPPONENT</h1>
-          <p className="text-elq-muted mb-4">Share this code</p>
-          <div className="font-mono text-5xl tracking-[0.3em] bg-elq-bg rounded-2xl px-8 py-5 border-2 border-dashed border-elq-orange/30">
-            {game.join_code}
-          </div>
-        </div>
-      </Shell>
-    );
+    return <WaitingLobby joinCode={game.join_code} onCancel={onNewGame} />;
   }
 
   if (game?.status === "finished") {
