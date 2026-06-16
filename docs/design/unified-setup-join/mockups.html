@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>EuroLeague Quiz — Unified Setup/Join · Direction Options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          elq: {
+            orange: "#FF6600",
+            "orange-light": "#FF8533",
+            "orange-dark": "#E85D00",
+            dark: "#0F1923",
+            bg: "#F5F6F8",
+            card: "#FFFFFF",
+            text: "#1E293B",
+            muted: "#94A3B8",
+            border: "#E2E8F0",
+            player1: "#2563EB",
+            player2: "#DC2626",
+          },
+        },
+        fontFamily: {
+          display: ['"Bebas Neue"', "Impact", "sans-serif"],
+          sans: ['"DM Sans"', "system-ui", "sans-serif"],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { background-color: #F5F6F8; }
+  .font-display { letter-spacing: 0.02em; }
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394A3B8' d='M6 8.825c-.2 0-.4-.075-.55-.225l-3-3a.776.776 0 010-1.1.776.776 0 011.1 0L6 6.95 8.45 4.5a.776.776 0 011.1 0 .776.776 0 010 1.1l-3 3c-.15.15-.35.225-.55.225z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 36px;
+  }
+  @keyframes fade-in-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .panel { animation: fade-in-up 0.28s ease-out both; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body class="font-sans text-elq-text">
+  <div class="h-1 bg-gradient-to-r from-elq-orange to-[#FF8533]"></div>
+
+  <div class="max-w-[1400px] mx-auto px-4 py-10">
+    <header class="text-center mb-10">
+      <p class="text-xs font-semibold uppercase tracking-[0.25em] text-elq-orange mb-2">EuroLeague Quiz · Design Review</p>
+      <h1 class="font-display text-5xl text-elq-dark">UNIFIED SETUP &amp; JOIN</h1>
+      <p class="text-elq-muted text-sm mt-3 max-w-2xl mx-auto">
+        Three structural directions for one shared pre-game screen used by every game. Same palette, fonts, header, card, and waiting lobby — only the <strong>mode + join layout</strong> changes. All three are shown with <strong>Roster Guess</strong> (the richest settings). Click the modes in each card — especially <strong>Join</strong>.
+      </p>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+
+      <!-- ============ DIRECTION A ============ -->
+      <section>
+        <div class="mb-4">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-elq-orange text-white font-display text-lg">A</span>
+            <h2 class="font-display text-2xl text-elq-dark tracking-wide">ONLINE EXPANDS</h2>
+          </div>
+          <p class="text-xs text-elq-muted leading-relaxed">Familiar 3 mode cards. Choosing <strong>Online</strong> reveals a Create / Join sub-toggle. Join lives <em>inside</em> Online.</p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-lg shadow-black/5 border border-elq-border overflow-hidden" data-card="A">
+          <div class="px-6 pt-6 pb-5">
+            <!-- header -->
+            <div class="flex items-center gap-2 mb-5 text-elq-muted text-sm font-medium">
+              <span class="w-7 h-7 rounded-lg bg-elq-orange/10 flex items-center justify-center">
+                <svg class="w-4 h-4 text-elq-orange" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93V16a2 2 0 0 0-2-2v-1L6.2 10.2A8 8 0 0 0 13 19.93z"/></svg>
+              </span>
+              <span class="font-display text-2xl text-elq-dark tracking-wide leading-none">ROSTER GUESS</span>
+            </div>
+
+            <label class="block text-[11px] font-semibold uppercase tracking-wider text-elq-muted mb-2">Game Mode</label>
+            <div class="grid grid-cols-3 gap-2.5 mb-5">
+              <button data-mode="solo" class="mode-card p-3 rounded-xl border-2 transition-all text-center">
+                <span class="block mb-1.5 flex justify-center"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.1a7.5 7.5 0 0 1 15 0A17.9 17.9 0 0 1 12 21.75c-2.68 0-5.22-.58-7.5-1.63Z"/></svg></span>
+                <span class="block font-semibold text-xs text-elq-text">Solo</span>
+              </button>
+              <button data-mode="local" class="mode-card p-3 rounded-xl border-2 transition-all text-center">
+                <span class="block mb-1.5 flex justify-center"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.1a9.4 9.4 0 0 0 2.6.4 9.3 9.3 0 0 0 4.1-1 4.1 4.1 0 0 0-7.5-2.5M15 19.1c0-1.1-.3-2.2-.8-3.1M15 19.1v.1A12.3 12.3 0 0 1 8.6 21c-2.3 0-4.5-.6-6.4-1.8v-.1a6.4 6.4 0 0 1 12-3.1M12 6.4a3.4 3.4 0 1 1-6.8 0 3.4 3.4 0 0 1 6.8 0Zm8.3 2.2a2.6 2.6 0 1 1-5.3 0 2.6 2.6 0 0 1 5.3 0Z"/></svg></span>
+                <span class="block font-semibold text-xs text-elq-text">Local</span>
+              </button>
+              <button data-mode="online" class="mode-card p-3 rounded-xl border-2 transition-all text-center">
+                <span class="block mb-1.5 flex justify-center"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9 9 0 0 0 8.7-6.7M12 21a9 9 0 0 1-8.7-6.7M12 21c2.5 0 4.5-4 4.5-9S14.5 3 12 3m0 18c-2.5 0-4.5-4-4.5-9S9.5 3 12 3m0 0a9 9 0 0 1 7.8 4.6M12 3a9 9 0 0 0-7.8 4.6m15.6 0A11.95 11.95 0 0 1 12 10.5c-3 0-5.7-1.1-7.8-2.9m15.6 0A9 9 0 0 1 21 12c0 .8-.1 1.5-.3 2.3m0 0A17.9 17.9 0 0 1 12 16.5c-3.2 0-6.1-.8-8.7-2.2m0 0A9 9 0 0 1 3 12c0-1.6.4-3.1 1.2-4.4"/></svg></span>
+                <span class="block font-semibold text-xs text-elq-text">Online</span>
+              </button>
+            </div>
+
+            <!-- online sub toggle -->
+            <div data-panel="online-sub" class="hidden panel mb-4">
+              <div class="grid grid-cols-2 gap-2 p-1 rounded-xl bg-elq-bg border border-elq-border">
+                <button data-sub="create" class="sub-btn py-2 rounded-lg text-sm font-semibold transition-all">Create</button>
+                <button data-sub="join" class="sub-btn py-2 rounded-lg text-sm font-semibold transition-all">Join</button>
+              </div>
+            </div>
+
+            <!-- settings (solo/local/online-create) -->
+            <div data-panel="settings" class="panel">
+              <div class="border-t border-elq-border my-4"></div>
+              <label class="block text-[11px] font-semibold uppercase tracking-wider text-elq-muted mb-2">Season Range</label>
+              <div class="grid grid-cols-2 gap-3 mb-4">
+                <select class="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:outline-none"><option>2000/01</option></select>
+                <select class="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:outline-none"><option>2025/26</option></select>
+              </div>
+              <div data-panel="vs-settings" class="hidden">
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                  <select class="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:outline-none"><option>First to 3</option></select>
+                  <select class="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:outline-none"><option>40 seconds</option></select>
+                </div>
+              </div>
+            </div>
+
+            <!-- join code -->
+            <div data-panel="code" class="hidden panel">
+              <div class="border-t border-elq-border my-4"></div>
+              <label class="block text-[11px] font-semibold uppercase tracking-wider text-elq-muted mb-2">Game Code</label>
+              <input value="ABC123" maxlength="6" class="w-full mb-4 px-4 py-3 text-center text-2xl font-mono tracking-[0.4em] rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none uppercase" />
+            </div>
+
+            <!-- name -->
+            <div data-panel="name" class="panel">
+              <label class="block text-sm text-elq-text mb-1.5" data-label="name">Your Name</label>
+              <input placeholder="Player 1" class="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none mb-2.5" />
+              <input data-panel="name2" placeholder="Player 2" class="hidden w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none mb-2.5" />
+            </div>
+
+            <button data-cta class="w-full mt-3 py-3.5 px-6 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark transition-all text-lg tracking-wide">Start Game</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ DIRECTION B ============ -->
+      <section>
+        <div class="mb-4">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-elq-orange text-white font-display text-lg">B</span>
+            <h2 class="font-display text-2xl text-elq-dark tracking-wide">FLAT MODE ROW</h2>
+          </div>
+          <p class="text-xs text-elq-muted leading-relaxed"><strong>Join is a first-class peer</strong> in one row: Solo · Local · Online · Join. Each game shows only the modes it supports.</p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-lg shadow-black/5 border border-elq-border overflow-hidden" data-card="B">
+          <div class="px-6 pt-6 pb-5">
+            <div class="flex items-center gap-2 mb-5 text-elq-muted text-sm font-medium">
+              <span class="w-7 h-7 rounded-lg bg-elq-orange/10 flex items-center justify-center">
+                <svg class="w-4 h-4 text-elq-orange" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93V16a2 2 0 0 0-2-2v-1L6.2 10.2A8 8 0 0 0 13 19.93z"/></svg>
+              </span>
+              <span class="font-display text-2xl text-elq-dark tracking-wide leading-none">ROSTER GUESS</span>
+            </div>
+
+            <label class="block text-[11px] font-semibold uppercase tracking-wider text-elq-muted mb-2">Game Mode</label>
+            <div class="grid grid-cols-4 gap-2 mb-5">
+              <button data-mode="solo" class="chip py-2.5 rounded-xl border-2 text-xs font-semibold transition-all">Solo</button>
+              <button data-mode="local" class="chip py-2.5 rounded-xl border-2 text-xs font-semibold transition-all">Local</button>
+              <button data-mode="online" class="chip py-2.5 rounded-xl border-2 text-xs font-semibold transition-all">Online</button>
+              <button data-mode="join" class="chip py-2.5 rounded-xl border-2 text-xs font-semibold transition-all">Join</button>
+            </div>
+
+            <div data-panel="settings" class="panel">
+              <label class="block text-[11px] font-semibold uppercase tracking-wider text-elq-muted mb-2">Season Range</label>
+              <div class="grid grid-cols-2 gap-3 mb-4">
+                <select class="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:outline-none"><option>2000/01</option></select>
+                <select class="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:outline-none"><option>2025/26</option></select>
+              </div>
+              <div data-panel="vs-settings" class="hidden">
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                  <select class="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:outline-none"><option>First to 3</option></select>
+                  <select class="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:outline-none"><option>40 seconds</option></select>
+                </div>
+              </div>
+            </div>
+
+            <div data-panel="code" class="hidden panel">
+              <label class="block text-[11px] font-semibold uppercase tracking-wider text-elq-muted mb-2">Game Code</label>
+              <input value="ABC123" maxlength="6" class="w-full mb-4 px-4 py-3 text-center text-2xl font-mono tracking-[0.4em] rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none uppercase" />
+            </div>
+
+            <div data-panel="name" class="panel">
+              <label class="block text-sm text-elq-text mb-1.5" data-label="name">Your Name</label>
+              <input placeholder="Player 1" class="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none mb-2.5" />
+              <input data-panel="name2" placeholder="Player 2" class="hidden w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none mb-2.5" />
+            </div>
+
+            <button data-cta class="w-full mt-3 py-3.5 px-6 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark transition-all text-lg tracking-wide">Start Game</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ DIRECTION C ============ -->
+      <section>
+        <div class="mb-4">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-elq-orange text-white font-display text-lg">C</span>
+            <h2 class="font-display text-2xl text-elq-dark tracking-wide">NEW vs JOIN SPLIT</h2>
+          </div>
+          <p class="text-xs text-elq-muted leading-relaxed">A top fork: <strong>New Game</strong> vs <strong>Join Game</strong>. New reveals the mode cards; Join is a clean code screen. Clearest two-intent split.</p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-lg shadow-black/5 border border-elq-border overflow-hidden" data-card="C">
+          <div class="px-6 pt-6 pb-5">
+            <div class="flex items-center gap-2 mb-5 text-elq-muted text-sm font-medium">
+              <span class="w-7 h-7 rounded-lg bg-elq-orange/10 flex items-center justify-center">
+                <svg class="w-4 h-4 text-elq-orange" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93V16a2 2 0 0 0-2-2v-1L6.2 10.2A8 8 0 0 0 13 19.93z"/></svg>
+              </span>
+              <span class="font-display text-2xl text-elq-dark tracking-wide leading-none">ROSTER GUESS</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-1 p-1 rounded-xl bg-elq-bg border border-elq-border mb-5">
+              <button data-top="new" class="top-btn py-2.5 rounded-lg text-sm font-bold transition-all">New Game</button>
+              <button data-top="join" class="top-btn py-2.5 rounded-lg text-sm font-bold transition-all">Join Game</button>
+            </div>
+
+            <div data-panel="new-wrap" class="panel">
+              <label class="block text-[11px] font-semibold uppercase tracking-wider text-elq-muted mb-2">Mode</label>
+              <div class="grid grid-cols-3 gap-2.5 mb-4">
+                <button data-mode="solo" class="mode-card p-3 rounded-xl border-2 transition-all text-center">
+                  <span class="block mb-1.5 flex justify-center"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.1a7.5 7.5 0 0 1 15 0A17.9 17.9 0 0 1 12 21.75c-2.68 0-5.22-.58-7.5-1.63Z"/></svg></span>
+                  <span class="block font-semibold text-xs text-elq-text">Solo</span>
+                </button>
+                <button data-mode="local" class="mode-card p-3 rounded-xl border-2 transition-all text-center">
+                  <span class="block mb-1.5 flex justify-center"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.1a9.4 9.4 0 0 0 2.6.4 9.3 9.3 0 0 0 4.1-1 4.1 4.1 0 0 0-7.5-2.5M15 19.1c0-1.1-.3-2.2-.8-3.1M15 19.1v.1A12.3 12.3 0 0 1 8.6 21c-2.3 0-4.5-.6-6.4-1.8v-.1a6.4 6.4 0 0 1 12-3.1M12 6.4a3.4 3.4 0 1 1-6.8 0 3.4 3.4 0 0 1 6.8 0Zm8.3 2.2a2.6 2.6 0 1 1-5.3 0 2.6 2.6 0 0 1 5.3 0Z"/></svg></span>
+                  <span class="block font-semibold text-xs text-elq-text">Local</span>
+                </button>
+                <button data-mode="online" class="mode-card p-3 rounded-xl border-2 transition-all text-center">
+                  <span class="block mb-1.5 flex justify-center"><svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9 9 0 0 0 8.7-6.7M12 21a9 9 0 0 1-8.7-6.7M12 21c2.5 0 4.5-4 4.5-9S14.5 3 12 3m0 18c-2.5 0-4.5-4-4.5-9S9.5 3 12 3m0 0a9 9 0 0 1 7.8 4.6M12 3a9 9 0 0 0-7.8 4.6m15.6 0A11.95 11.95 0 0 1 12 10.5c-3 0-5.7-1.1-7.8-2.9m15.6 0A9 9 0 0 1 21 12c0 .8-.1 1.5-.3 2.3m0 0A17.9 17.9 0 0 1 12 16.5c-3.2 0-6.1-.8-8.7-2.2m0 0A9 9 0 0 1 3 12c0-1.6.4-3.1 1.2-4.4"/></svg></span>
+                  <span class="block font-semibold text-xs text-elq-text">Online</span>
+                </button>
+              </div>
+              <div class="grid grid-cols-2 gap-3 mb-4">
+                <select class="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:outline-none"><option>2000/01</option></select>
+                <select class="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:outline-none"><option>2025/26</option></select>
+              </div>
+              <input placeholder="Your name" class="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none" />
+            </div>
+
+            <div data-panel="join-wrap" class="hidden panel">
+              <label class="block text-[11px] font-semibold uppercase tracking-wider text-elq-muted mb-2">Game Code</label>
+              <input value="ABC123" maxlength="6" class="w-full mb-3 px-4 py-3 text-center text-2xl font-mono tracking-[0.4em] rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none uppercase" />
+              <label class="block text-sm text-elq-text mb-1.5">Your Name</label>
+              <input placeholder="Enter your name" class="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none" />
+            </div>
+
+            <button data-cta class="w-full mt-5 py-3.5 px-6 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark transition-all text-lg tracking-wide">Start Game</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- shared waiting lobby preview -->
+    <div class="mt-12 max-w-md mx-auto text-center">
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-elq-muted mb-4">Shared across all three — Waiting lobby</p>
+      <div class="bg-white rounded-2xl shadow-lg shadow-black/5 border border-elq-border p-8">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-full bg-elq-orange/10 mb-4">
+          <svg class="w-7 h-7 text-elq-orange" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+        </div>
+        <h2 class="font-display text-3xl text-elq-dark mb-1">WAITING FOR OPPONENT</h2>
+        <p class="text-elq-muted text-sm mb-5">Share this code with your friend</p>
+        <div class="flex items-stretch gap-2 justify-center mb-4">
+          <div class="bg-elq-bg border-2 border-dashed border-elq-orange/30 rounded-xl px-6 py-4">
+            <span class="font-mono text-4xl tracking-[0.3em] text-elq-dark font-bold">ABC123</span>
+          </div>
+          <button class="px-4 rounded-xl border-2 border-elq-border text-elq-muted hover:border-elq-orange hover:text-elq-orange transition-all" title="Copy">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg>
+          </button>
+        </div>
+        <p class="text-xs text-elq-muted">Starts automatically when they join · <button class="underline hover:text-elq-orange">Cancel</button></p>
+      </div>
+    </div>
+  </div>
+
+<script>
+  function setActiveCard(el, on, kind) {
+    if (kind === "mode") {
+      el.classList.toggle("border-elq-orange", on);
+      el.classList.toggle("bg-elq-orange/5", on);
+      el.classList.toggle("text-elq-orange", on);
+      el.classList.toggle("border-elq-border", !on);
+    } else if (kind === "chip") {
+      el.classList.toggle("bg-elq-orange", on);
+      el.classList.toggle("text-white", on);
+      el.classList.toggle("border-elq-orange", on);
+      el.classList.toggle("border-elq-border", !on);
+      el.classList.toggle("text-elq-text", !on);
+      el.classList.toggle("bg-white", !on);
+    } else if (kind === "sub" || kind === "top") {
+      el.classList.toggle("bg-white", on);
+      el.classList.toggle("shadow-sm", on);
+      el.classList.toggle("text-elq-orange", on);
+      el.classList.toggle("text-elq-muted", !on);
+    }
+  }
+  const show = (el, on) => el && el.classList.toggle("hidden", !on);
+
+  // ---- Direction A ----
+  (function () {
+    const card = document.querySelector('[data-card="A"]');
+    const state = { mode: "solo", sub: "create" };
+    const cta = card.querySelector("[data-cta]");
+    function render() {
+      card.querySelectorAll("[data-mode]").forEach((b) => setActiveCard(b, b.dataset.mode === state.mode, "mode"));
+      card.querySelectorAll("[data-sub]").forEach((b) => setActiveCard(b, b.dataset.sub === state.sub, "sub"));
+      const online = state.mode === "online";
+      const joining = online && state.sub === "join";
+      show(card.querySelector('[data-panel="online-sub"]'), online);
+      show(card.querySelector('[data-panel="settings"]'), !joining);
+      show(card.querySelector('[data-panel="vs-settings"]'), state.mode === "local" || (online && state.sub === "create"));
+      show(card.querySelector('[data-panel="code"]'), joining);
+      show(card.querySelector('[data-panel="name"]'), true);
+      show(card.querySelector('[data-panel="name2"]'), state.mode === "local");
+      card.querySelector('[data-label="name"]').textContent = state.mode === "local" ? "Player 1" : "Your Name";
+      cta.textContent = joining ? "Join Game" : online ? "Create Online Game" : state.mode === "local" ? "Start Local Game" : "Start Game";
+    }
+    card.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => { state.mode = b.dataset.mode; render(); }));
+    card.querySelectorAll("[data-sub]").forEach((b) => b.addEventListener("click", () => { state.sub = b.dataset.sub; render(); }));
+    render();
+  })();
+
+  // ---- Direction B ----
+  (function () {
+    const card = document.querySelector('[data-card="B"]');
+    const state = { mode: "solo" };
+    const cta = card.querySelector("[data-cta]");
+    function render() {
+      card.querySelectorAll("[data-mode]").forEach((b) => setActiveCard(b, b.dataset.mode === state.mode, "chip"));
+      const joining = state.mode === "join";
+      show(card.querySelector('[data-panel="settings"]'), !joining);
+      show(card.querySelector('[data-panel="vs-settings"]'), state.mode === "local" || state.mode === "online");
+      show(card.querySelector('[data-panel="code"]'), joining);
+      show(card.querySelector('[data-panel="name2"]'), state.mode === "local");
+      card.querySelector('[data-label="name"]').textContent = state.mode === "local" ? "Player 1" : "Your Name";
+      cta.textContent = joining ? "Join Game" : state.mode === "online" ? "Create Online Game" : state.mode === "local" ? "Start Local Game" : "Start Game";
+    }
+    card.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => { state.mode = b.dataset.mode; render(); }));
+    render();
+  })();
+
+  // ---- Direction C ----
+  (function () {
+    const card = document.querySelector('[data-card="C"]');
+    const state = { top: "new", mode: "solo" };
+    const cta = card.querySelector("[data-cta]");
+    function render() {
+      card.querySelectorAll("[data-top]").forEach((b) => setActiveCard(b, b.dataset.top === state.top, "top"));
+      card.querySelectorAll("[data-mode]").forEach((b) => setActiveCard(b, b.dataset.mode === state.mode, "mode"));
+      const joining = state.top === "join";
+      show(card.querySelector('[data-panel="new-wrap"]'), !joining);
+      show(card.querySelector('[data-panel="join-wrap"]'), joining);
+      cta.textContent = joining ? "Join Game" : state.mode === "online" ? "Create Online Game" : state.mode === "local" ? "Start Local Game" : "Start Game";
+    }
+    card.querySelectorAll("[data-top]").forEach((b) => b.addEventListener("click", () => { state.top = b.dataset.top; render(); }));
+    card.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => { state.mode = b.dataset.mode; render(); }));
+    render();
+  })();
+</script>
+</body>
+</html>
