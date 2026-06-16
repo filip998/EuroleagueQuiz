@@ -6,8 +6,10 @@ import RosterGuessSetup from "./RosterGuessSetup";
 import RosterGuessBoard from "./RosterGuessBoard";
 import HigherLowerSetup from "./HigherLowerSetup";
 import HigherLowerBoard from "./HigherLowerBoard";
+import CareerQuizSetup from "./CareerQuizSetup";
+import CareerQuizBoard from "./CareerQuizBoard";
 import { LogoFull } from "./Logo";
-import { getGame, getRosterGame } from "./api";
+import { getCareerGame, getGame, getRosterGame } from "./api";
 
 // ---------------------------------------------------------------------------
 // Helpers for persisting online game info across page refreshes
@@ -72,7 +74,7 @@ function HomePage() {
           </div>
 
           {/* Game cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 animate-fade-in-up" style={{ animationDelay: "150ms" }}>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 sm:gap-5 animate-fade-in-up" style={{ animationDelay: "150ms" }}>
             {/* TicTacToe card */}
             <Link
               to="/tictactoe"
@@ -129,6 +131,25 @@ function HomePage() {
                 PLAY →
               </div>
             </Link>
+
+            {/* Career Quiz card */}
+            <Link
+              to="/career"
+              className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center mb-4 group-hover:bg-amber-200 transition-colors">
+                <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m5-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+              </div>
+              <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">CAREER QUIZ</h2>
+              <p className="text-sm text-elq-muted leading-relaxed">
+                Guess the player from a professional club career timeline powered by Wikipedia.
+              </p>
+              <div className="mt-4 text-xs font-semibold text-elq-orange opacity-0 group-hover:opacity-100 transition-opacity">
+                PLAY →
+              </div>
+            </Link>
           </div>
         </div>
       </div>
@@ -144,7 +165,7 @@ function TicTacToeSetupPage() {
   const navigate = useNavigate();
 
   function handleGameCreated(resp, online) {
-    const gameData = resp.game || resp;
+    const gameData = resp.state || resp.game || resp;
     const id = gameData.id;
     saveOnlineInfo(id, online);
     navigate(`/tictactoe/${id}`);
@@ -191,7 +212,7 @@ function RosterSetupPage() {
   const navigate = useNavigate();
 
   function handleGameCreated(resp, online) {
-    const gameData = resp.game || resp;
+    const gameData = resp.state || resp.game || resp;
     const id = gameData.id;
     saveOnlineInfo(id, online);
     navigate(`/roster/${id}`);
@@ -266,6 +287,83 @@ function HigherLowerGamePage() {
 }
 
 // ---------------------------------------------------------------------------
+// Career Quiz pages
+// ---------------------------------------------------------------------------
+
+function CareerSetupPage() {
+  const navigate = useNavigate();
+
+  function handleSoloRound(round) {
+    navigate("/career/play", { state: { soloRound: round } });
+  }
+
+  function handleGameCreated(game, online) {
+    const gameData = game?.state || game?.game || game;
+    saveOnlineInfo(gameData.id, online);
+    navigate(`/career/${gameData.id}`);
+  }
+
+  return (
+    <CareerQuizSetup
+      onSoloRound={handleSoloRound}
+      onGameCreated={handleGameCreated}
+      onGameJoined={handleGameCreated}
+      onBack={() => navigate("/")}
+    />
+  );
+}
+
+function CareerSoloPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const soloRound = location.state?.soloRound;
+
+  useEffect(() => {
+    if (!soloRound) navigate("/career", { replace: true });
+  }, [soloRound, navigate]);
+
+  if (!soloRound) return null;
+
+  return (
+    <CareerQuizBoard
+      soloInitialRound={soloRound}
+      onNewGame={() => navigate("/career")}
+      onHome={() => navigate("/")}
+    />
+  );
+}
+
+function CareerGamePage() {
+  const { gameId } = useParams();
+  const navigate = useNavigate();
+  const [game, setGame] = useState(null);
+  const [onlineInfo, setOnlineInfo] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getCareerGame(gameId)
+      .then((data) => {
+        setGame(data);
+        setOnlineInfo(loadOnlineInfo(gameId));
+      })
+      .catch(() => navigate("/career", { replace: true }))
+      .finally(() => setLoading(false));
+  }, [gameId, navigate]);
+
+  if (loading) return <LoadingScreen />;
+  if (!game) return null;
+
+  return (
+    <CareerQuizBoard
+      initialState={game}
+      onlineInfo={onlineInfo}
+      onNewGame={() => navigate("/career")}
+      onHome={() => navigate("/")}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Root — route definitions
 // ---------------------------------------------------------------------------
 
@@ -279,6 +377,9 @@ function App() {
       <Route path="/roster/:gameId" element={<RosterGamePage />} />
       <Route path="/higherlower" element={<HigherLowerSetupPage />} />
       <Route path="/higherlower/play" element={<HigherLowerGamePage />} />
+      <Route path="/career" element={<CareerSetupPage />} />
+      <Route path="/career/play" element={<CareerSoloPage />} />
+      <Route path="/career/:gameId" element={<CareerGamePage />} />
     </Routes>
   );
 }

@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { getGame, submitMove, offerDraw, respondDraw, giveUpGame, connectWebSocket } from "./api";
+import { useState, useEffect } from "react";
+import { getGame, submitMove, offerDraw, respondDraw, giveUpGame, connectTicTacToeRealtime } from "./api";
+import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
+import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import PlayerSearch from "./PlayerSearch";
 import { LogoMini } from "./Logo";
 import ClubLogo from "./ClubLogo";
@@ -65,81 +67,34 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const [loading, setLoading] = useState(false);
   const [timeLeft, setTimeLeft] = useState(null);
   const [roundTransition, setRoundTransition] = useState(null);
-  const wsRef = useRef(null);
 
   const isOnline = onlineInfo?.isOnline;
   const myPlayer = onlineInfo?.playerNumber;
   const isSolo = game?.mode === "single_player";
+  const realtimeUnavailableMessage = "Realtime connection unavailable. Reconnecting...";
 
-  // Connect WebSocket for online games (with auto-reconnect)
-  useEffect(() => {
-    if (!isOnline || !game?.id) return;
-    let ws = null;
-    let reconnectTimeout = null;
-    let closed = false;
-
-    function connect() {
-      if (closed) return;
-      ws = connectWebSocket(game.id, myPlayer, (data) => {
-        if (data.error) {
-          setError(data.error);
-        } else {
-          const result = data.last_result;
-          const completedRound = data.completed_round;
-          const gameData = { ...data };
-          delete gameData.last_result;
-          delete gameData.completed_round;
-          setGame(gameData);
-          setError(null);
-          if (result && completedRound && ["round_won", "round_drawn", "match_won", "board_complete", "draw_accepted"].includes(result)) {
-            startRoundTransition(result, completedRound);
-          } else if (result) {
-            setLastResult(result);
-          }
-        }
-      }, () => {
-        if (!closed) {
-          reconnectTimeout = setTimeout(connect, 2000);
-        }
-      });
-      wsRef.current = ws;
+  function handleRealtimeState(message) {
+    const result = message.result;
+    setGame(message.state);
+    setError(null);
+    if (result && message.completedRound && ["round_won", "round_drawn", "match_won", "board_complete", "draw_accepted"].includes(result)) {
+      startRoundTransition(result, message.completedRound);
+    } else if (result) {
+      setLastResult(result);
+      setSelectedCell(null);
     }
+  }
 
-    connect();
-
-    return () => {
-      closed = true;
-      clearTimeout(reconnectTimeout);
-      if (ws) ws.close();
-      wsRef.current = null;
-    };
-  }, [isOnline, game?.id, myPlayer]);
-
-  // Periodic state sync for online games
-  useEffect(() => {
-    if (!isOnline || !game?.id || game?.status === "waiting_for_opponent") return;
-    const interval = setInterval(async () => {
-      try {
-        const fresh = await getGame(game.id);
-        setGame(fresh);
-      } catch {}
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [isOnline, game?.id, game?.status]);
-
-  // Poll for opponent joining while waiting
-  useEffect(() => {
-    if (!isOnline || game?.status !== "waiting_for_opponent") return;
-    const interval = setInterval(async () => {
-      try {
-        const fresh = await getGame(game.id);
-        if (fresh.status === "active") {
-          setGame(fresh);
-        }
-      } catch {}
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [isOnline, game?.id, game?.status]);
+  const realtime = useOnlineGameRealtime({
+    enabled: isOnline,
+    gameId: game?.id,
+    gameStatus: game?.status,
+    playerNumber: myPlayer,
+    connect: connectTicTacToeRealtime,
+    fetchState: getGame,
+    onState: handleRealtimeState,
+    onError: setError,
+  });
 
   const round = game?.round;
 
@@ -190,7 +145,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     }
     const timer = setTimeout(() => setTimeLeft((t) => t - 1), 1000);
     return () => clearTimeout(timer);
-  }, [timeLeft, game?.turn_seconds, game?.status, isOnline]);
+  }, [timeLeft, game?.turn_seconds, game?.status, isOnline, isSolo]);
 
   // Round transition countdown
   useEffect(() => {
@@ -216,16 +171,6 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setSelectedCell(null);
   }
 
-  const refreshGame = useCallback(async () => {
-    if (!game) return;
-    try {
-      const fresh = await getGame(game.id);
-      setGame(fresh);
-    } catch (err) {
-      setError(err.message);
-    }
-  }, [game?.id]);
-
   function handleCellClick(cell) {
     if (game.status !== "active") return;
     if (cell.claimed_by_player) return;
@@ -241,26 +186,25 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setLoading(true);
     setError(null);
     try {
-      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          action: "move",
+      if (isOnline) {
+        if (realtime.sendAction(REALTIME_CLIENT_ACTIONS.MOVE, {
           row_index: selectedCell.row_index,
           col_index: selectedCell.col_index,
           player_id: player.player_id,
-        }));
-      } else {
-        const res = await submitMove(game.id, {
-          row_index: selectedCell.row_index,
-          col_index: selectedCell.col_index,
-          player_id: player.player_id,
-        });
-        setGame(res.game);
-        if (res.completed_round && ["round_won", "round_drawn", "match_won", "board_complete"].includes(res.result)) {
-          startRoundTransition(res.result, res.completed_round);
+        })) {
+          setSelectedCell(null);
         } else {
-          setLastResult(res.result);
+          setError(realtimeUnavailableMessage);
         }
+        return;
       }
+
+      const res = await submitMove(game.id, {
+        row_index: selectedCell.row_index,
+        col_index: selectedCell.col_index,
+        player_id: player.player_id,
+      });
+      handleRealtimeState(res);
       setSelectedCell(null);
     } catch (err) {
       setError(err.message);
@@ -273,13 +217,15 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setLoading(true);
     setError(null);
     try {
-      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ action: "offer_draw" }));
-      } else {
-        const res = await offerDraw(game.id);
-        setGame(res.game);
-        setLastResult("draw_offered");
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.OFFER_DRAW)) {
+          setError(realtimeUnavailableMessage);
+        }
+        return;
       }
+
+      const res = await offerDraw(game.id);
+      handleRealtimeState(res);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -291,17 +237,15 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setLoading(true);
     setError(null);
     try {
-      if (isOnline && wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ action: "respond_draw", accept }));
-      } else {
-        const res = await respondDraw(game.id, accept);
-        setGame(res.game);
-        if (accept && res.completed_round) {
-          startRoundTransition("draw_accepted", res.completed_round);
-        } else {
-          setLastResult(accept ? "draw_accepted" : "draw_declined");
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.RESPOND_DRAW, { accept })) {
+          setError(realtimeUnavailableMessage);
         }
+        return;
       }
+
+      const res = await respondDraw(game.id, accept);
+      handleRealtimeState(res);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -314,9 +258,9 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setError(null);
     try {
       const res = await giveUpGame(game.id);
-      setGame(res.game);
-      if (res.completed_round) {
-        setRoundTransition({ countdown: null, completedRound: res.completed_round, result: "gave_up" });
+      setGame(res.state);
+      if (res.completedRound) {
+        setRoundTransition({ countdown: null, completedRound: res.completedRound, result: "gave_up" });
         setLastResult("gave_up");
         setSelectedCell(null);
       }

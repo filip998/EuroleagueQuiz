@@ -1,3 +1,5 @@
+import { parseRealtimeMessage } from "./realtimeSchema";
+
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
 
@@ -10,13 +12,21 @@ async function request(method, path, body = null) {
   const res = await fetch(`${API_BASE}${path}`, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    const error = new Error(err.payload?.message || err.detail || `HTTP ${res.status}`);
+    error.status = res.status;
+    error.detail = err.detail;
+    error.payload = err.payload;
+    throw error;
   }
   return res.json();
 }
 
+async function actionRequest(method, path, body = null) {
+  return parseRealtimeMessage(await request(method, path, body));
+}
+
 export function createGame(payload) {
-  return request("POST", "/quiz/tictactoe/games", payload);
+  return actionRequest("POST", "/quiz/tictactoe/games", payload);
 }
 
 export function getGame(gameId) {
@@ -24,28 +34,28 @@ export function getGame(gameId) {
 }
 
 export function joinGame(joinCode, playerName) {
-  return request("POST", "/quiz/tictactoe/games/join", {
+  return actionRequest("POST", "/quiz/tictactoe/games/join", {
     join_code: joinCode,
     player_name: playerName,
   });
 }
 
 export function submitMove(gameId, move) {
-  return request("POST", `/quiz/tictactoe/games/${gameId}/moves`, move);
+  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/moves`, move);
 }
 
 export function offerDraw(gameId) {
-  return request("POST", `/quiz/tictactoe/games/${gameId}/draw-offer`);
+  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/draw-offer`);
 }
 
 export function respondDraw(gameId, accept) {
-  return request("POST", `/quiz/tictactoe/games/${gameId}/draw-response`, {
+  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/draw-response`, {
     accept,
   });
 }
 
 export function giveUpGame(gameId) {
-  return request("POST", `/quiz/tictactoe/games/${gameId}/give-up`);
+  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/give-up`);
 }
 
 export function autocompletePlayer(q, teamCode1, teamCode2, limit = 15) {
@@ -55,18 +65,22 @@ export function autocompletePlayer(q, teamCode1, teamCode2, limit = 15) {
   return request("GET", `/quiz/tictactoe/players/autocomplete?${params}`);
 }
 
-export function connectWebSocket(gameId, playerNumber, onMessage, onClose) {
-  const ws = new WebSocket(
-    `${WS_BASE}/quiz/tictactoe/ws/${gameId}?player=${playerNumber}`
+function connectRealtimeWebSocket(path, { onMessage, onClose, WebSocketImpl = WebSocket }) {
+  const ws = new WebSocketImpl(`${WS_BASE}${path}`);
+  ws.onmessage = (event) => onMessage(parseRealtimeMessage(event.data));
+  ws.onclose = () => onClose?.();
+  return {
+    send: (message) => ws.send(JSON.stringify(message)),
+    close: () => ws.close(),
+    isOpen: () => ws.readyState === (WebSocketImpl.OPEN ?? 1),
+  };
+}
+
+export function connectTicTacToeRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+  return connectRealtimeWebSocket(
+    `/quiz/tictactoe/ws/${gameId}?player=${playerNumber}`,
+    { onMessage, onClose, WebSocketImpl }
   );
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    onMessage(data);
-  };
-  ws.onclose = () => {
-    if (onClose) onClose();
-  };
-  return ws;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +88,7 @@ export function connectWebSocket(gameId, playerNumber, onMessage, onClose) {
 // ---------------------------------------------------------------------------
 
 export function createRosterGame(payload) {
-  return request("POST", "/quiz/roster-guess/games", payload);
+  return actionRequest("POST", "/quiz/roster-guess/games", payload);
 }
 
 export function getRosterGame(gameId) {
@@ -82,30 +96,30 @@ export function getRosterGame(gameId) {
 }
 
 export function joinRosterGame(joinCode, playerName) {
-  return request("POST", "/quiz/roster-guess/games/join", {
+  return actionRequest("POST", "/quiz/roster-guess/games/join", {
     join_code: joinCode,
     player_name: playerName,
   });
 }
 
 export function submitRosterGuess(gameId, playerId) {
-  return request("POST", `/quiz/roster-guess/games/${gameId}/guess`, {
+  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/guess`, {
     player_id: playerId,
   });
 }
 
 export function offerEndRound(gameId) {
-  return request("POST", `/quiz/roster-guess/games/${gameId}/end-offer`);
+  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/end-offer`);
 }
 
 export function respondEndRound(gameId, accept) {
-  return request("POST", `/quiz/roster-guess/games/${gameId}/end-response`, {
+  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/end-response`, {
     accept,
   });
 }
 
 export function giveUpRosterRound(gameId) {
-  return request("POST", `/quiz/roster-guess/games/${gameId}/give-up`);
+  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/give-up`);
 }
 
 export function autocompleteRosterPlayer(q, limit = 15) {
@@ -113,18 +127,11 @@ export function autocompleteRosterPlayer(q, limit = 15) {
   return request("GET", `/quiz/roster-guess/players/autocomplete?${params}`);
 }
 
-export function connectRosterWebSocket(gameId, playerNumber, onMessage, onClose) {
-  const ws = new WebSocket(
-    `${WS_BASE}/quiz/roster-guess/ws/${gameId}?player=${playerNumber}`
+export function connectRosterGuessRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+  return connectRealtimeWebSocket(
+    `/quiz/roster-guess/ws/${gameId}?player=${playerNumber}`,
+    { onMessage, onClose, WebSocketImpl }
   );
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    onMessage(data);
-  };
-  ws.onclose = () => {
-    if (onClose) onClose();
-  };
-  return ws;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,4 +148,74 @@ export function submitHigherLowerAnswer(gameId, choice) {
 
 export function getHigherLowerLeaderboard(tier) {
   return request("GET", `/quiz/higher-lower/leaderboard/${tier}`);
+}
+
+// ---------------------------------------------------------------------------
+// Career Quiz API
+// ---------------------------------------------------------------------------
+
+export function createCareerSoloRound(recentPlayerIds = []) {
+  return request("POST", "/quiz/career/solo/round", {
+    recent_player_ids: recentPlayerIds,
+  });
+}
+
+export function submitCareerSoloGuess(roundToken, playerId) {
+  return request("POST", "/quiz/career/solo/guess", {
+    round_token: roundToken,
+    player_id: playerId,
+  });
+}
+
+export function revealCareerSoloAnswer(roundToken) {
+  return request("POST", "/quiz/career/solo/reveal", {
+    round_token: roundToken,
+  });
+}
+
+export function autocompleteCareerPlayer(q, limit = 15) {
+  const params = new URLSearchParams({ q, limit });
+  return request("GET", `/quiz/career/players/autocomplete?${params}`);
+}
+
+export function createCareerGame(payload) {
+  return actionRequest("POST", "/quiz/career/games", payload);
+}
+
+export function getCareerGame(gameId) {
+  return request("GET", `/quiz/career/games/${gameId}`);
+}
+
+export function joinCareerGame(joinCode, playerName) {
+  return actionRequest("POST", "/quiz/career/games/join", {
+    join_code: joinCode,
+    player_name: playerName,
+  });
+}
+
+export function submitCareerGuess(gameId, playerNumber, playerId, roundNumber) {
+  return actionRequest("POST", `/quiz/career/games/${gameId}/guess?player=${playerNumber}`, {
+    player_id: playerId,
+    round_number: roundNumber,
+  });
+}
+
+export function offerCareerNoAnswer(gameId, playerNumber, roundNumber) {
+  return actionRequest("POST", `/quiz/career/games/${gameId}/no-answer-offer?player=${playerNumber}`, {
+    round_number: roundNumber,
+  });
+}
+
+export function respondCareerNoAnswer(gameId, playerNumber, accept, roundNumber) {
+  return actionRequest("POST", `/quiz/career/games/${gameId}/no-answer-response?player=${playerNumber}`, {
+    accept,
+    round_number: roundNumber,
+  });
+}
+
+export function connectCareerRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+  return connectRealtimeWebSocket(
+    `/quiz/career/ws/${gameId}?player=${playerNumber}`,
+    { onMessage, onClose, WebSocketImpl }
+  );
 }

@@ -85,8 +85,8 @@ export default function RosterGuessSetup({ onGameCreated, onBack }) {
     try {
       const resp = await joinRosterGame(joinCode.toUpperCase(), joinName || null);
       onGameCreated(
-        { game: resp.game },
-        { playerNumber: 2, isOnline: true, gameId: resp.game_id }
+        resp,
+        { playerNumber: 2, isOnline: true, gameId: resp.state.id }
       );
     } catch (err) {
       setError(err.message);

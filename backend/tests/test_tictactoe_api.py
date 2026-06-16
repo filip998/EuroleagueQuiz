@@ -75,6 +75,12 @@ def _invalid_player_for_cell(client: TestClient, cell: dict) -> int | None:
     return None
 
 
+def _action_payload(response) -> dict:
+    payload = response.json()
+    assert payload["type"] == "state"
+    return payload["payload"]
+
+
 @pytest.fixture()
 def client(tmp_path: Path):
     db_path = tmp_path / "ttt_api_test.db"
@@ -159,7 +165,7 @@ def _create_ttt_game(client: TestClient, target_wins: int = 2) -> dict:
         },
     )
     assert response.status_code == 200
-    return response.json()
+    return _action_payload(response)["game"]
 
 
 def test_create_tictactoe_game_has_board(client: TestClient):
@@ -186,7 +192,7 @@ def test_submit_correct_and_incorrect_moves_switch_turn(client: TestClient):
         },
     )
     assert move_1.status_code == 200
-    move_1_payload = move_1.json()
+    move_1_payload = _action_payload(move_1)
     assert move_1_payload["result"] == "correct"
     assert move_1_payload["game"]["current_player"] == 2
 
@@ -202,7 +208,7 @@ def test_submit_correct_and_incorrect_moves_switch_turn(client: TestClient):
             },
         )
         assert move_2.status_code == 200
-        move_2_payload = move_2.json()
+        move_2_payload = _action_payload(move_2)
         assert move_2_payload["result"] == "incorrect"
         assert move_2_payload["game"]["current_player"] == 1
 
@@ -217,8 +223,8 @@ def test_draw_offer_accept_starts_new_round(client: TestClient):
 
     offer = client.post(f"/quiz/tictactoe/games/{game_id}/draw-offer")
     assert offer.status_code == 200
-    offer_payload = offer.json()
-    assert offer_payload["result"] == "offered"
+    offer_payload = _action_payload(offer)
+    assert offer_payload["result"] == "draw_offered"
     assert offer_payload["game"]["pending_draw"] == {"offered_by": 1, "respond_to": 2}
     assert offer_payload["game"]["current_player"] == 2
 
@@ -227,8 +233,8 @@ def test_draw_offer_accept_starts_new_round(client: TestClient):
         json={"accept": True},
     )
     assert accept.status_code == 200
-    accept_payload = accept.json()
-    assert accept_payload["result"] == "accepted"
+    accept_payload = _action_payload(accept)
+    assert accept_payload["result"] == "draw_accepted"
     assert accept_payload["game"]["pending_draw"] is None
     assert accept_payload["game"]["round_number"] == starting_round + 1
     assert accept_payload["game"]["player1_score"] == 0
@@ -251,7 +257,7 @@ def test_round_win_and_match_win_progression(client: TestClient):
             json={"row_index": row_index, "col_index": col_index, "player_id": player_id},
         )
         assert correct_move.status_code == 200
-        result = correct_move.json()
+        result = _action_payload(correct_move)
 
         if row_col != (2, 2):
             assert result["result"] == "correct"
@@ -265,7 +271,7 @@ def test_round_win_and_match_win_progression(client: TestClient):
                     json={"row_index": 0, "col_index": 1, "player_id": bad_player},
                 )
                 assert incorrect_move.status_code == 200
-                assert incorrect_move.json()["result"] == "incorrect"
+                assert _action_payload(incorrect_move)["result"] == "incorrect"
         else:
             assert result["result"] == "round_won"
             assert result["game"]["player1_score"] == 1
@@ -282,7 +288,7 @@ def test_round_win_and_match_win_progression(client: TestClient):
             json={"row_index": 0, "col_index": 1, "player_id": bad_player},
         )
         assert first_move_round_2.status_code == 200
-        assert first_move_round_2.json()["result"] == "incorrect"
+        assert _action_payload(first_move_round_2)["result"] == "incorrect"
 
     # Then Player 1 wins another diagonal and finishes the match.
     for row_col in ((0, 0), (1, 1), (2, 2)):
@@ -296,7 +302,7 @@ def test_round_win_and_match_win_progression(client: TestClient):
             json={"row_index": row_index, "col_index": col_index, "player_id": player_id},
         )
         assert correct_move.status_code == 200
-        result = correct_move.json()
+        result = _action_payload(correct_move)
 
         if row_col != (2, 2):
             assert result["result"] == "correct"
@@ -310,7 +316,7 @@ def test_round_win_and_match_win_progression(client: TestClient):
                     json={"row_index": 0, "col_index": 1, "player_id": bad_player},
                 )
                 assert incorrect_move.status_code == 200
-                assert incorrect_move.json()["result"] == "incorrect"
+                assert _action_payload(incorrect_move)["result"] == "incorrect"
         else:
             assert result["result"] == "match_won"
             assert result["game"]["status"] == "finished"
@@ -330,7 +336,7 @@ def test_online_game_create_and_join(client: TestClient):
         },
     )
     assert response.status_code == 200
-    data = response.json()
+    data = _action_payload(response)["game"]
     assert data["status"] == "waiting_for_opponent"
     assert data["join_code"] is not None
     assert len(data["join_code"]) == 6
@@ -344,10 +350,24 @@ def test_online_game_create_and_join(client: TestClient):
         json={"join_code": join_code, "player_name": "Joiner"},
     )
     assert response2.status_code == 200
-    joined = response2.json()
-    assert joined["game"]["status"] == "active"
-    assert joined["game"]["player2_name"] == "Joiner"
-    assert joined["game"]["round"] is not None  # board generated
+    joined = _action_payload(response2)["game"]
+    assert joined["status"] == "active"
+    assert joined["player2_name"] == "Joiner"
+    assert joined["round"] is not None  # board generated
+    assert joined["id"] == data["id"]
+
+    missing_player = client.post(
+        f"/quiz/tictactoe/games/{joined['id']}/moves",
+        json={"row_index": 0, "col_index": 0, "player_id": 1},
+    )
+    assert missing_player.status_code == 400
+    assert missing_player.json() == {
+        "type": "error",
+        "payload": {
+            "code": "invalid_input",
+            "message": "Online game actions require player identity",
+        },
+    }
 
     # Cannot join again
     response3 = client.post(
@@ -355,3 +375,4 @@ def test_online_game_create_and_join(client: TestClient):
         json={"join_code": join_code, "player_name": "Late"},
     )
     assert response3.status_code == 409
+    assert response3.json()["type"] == "error"

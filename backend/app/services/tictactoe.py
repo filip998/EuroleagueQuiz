@@ -8,6 +8,12 @@ from typing import Optional
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import Session
 
+from app.game_actions import (
+    ConflictGameActionError,
+    InvalidGameActionError,
+    NotFoundGameActionError,
+    UnsupportedGameActionError,
+)
 from app.models import (
     Player,
     PlayerSeasonStats,
@@ -26,24 +32,10 @@ TARGET_WINS_OPTIONS = {2, 3, 5}
 TIMER_MODE_TO_SECONDS = {"15s": 15, "40s": 40, "unlimited": None}
 
 
-class TicTacToeError(Exception):
-    status_code = 400
-
-    def __init__(self, detail: str):
-        super().__init__(detail)
-        self.detail = detail
-
-
-class TicTacToeNotFoundError(TicTacToeError):
-    status_code = 404
-
-
-class TicTacToeConflictError(TicTacToeError):
-    status_code = 409
-
-
-class TicTacToeNotImplementedError(TicTacToeError):
-    status_code = 501
+TicTacToeError = InvalidGameActionError
+TicTacToeNotFoundError = NotFoundGameActionError
+TicTacToeConflictError = ConflictGameActionError
+TicTacToeNotImplementedError = UnsupportedGameActionError
 
 
 # ---------------------------------------------------------------------------
@@ -589,8 +581,9 @@ def submit_move(
     if game.pending_draw_from is not None:
         raise TicTacToeConflictError("Resolve pending draw offer before making a move")
 
-    # Online turn enforcement
-    if game.mode == "online_friend" and acting_player is not None:
+    if game.mode == "online_friend":
+        if acting_player is None:
+            raise TicTacToeConflictError("Online game actions require realtime player identity")
         if acting_player != game.current_player:
             raise TicTacToeConflictError("It is not your turn")
 
@@ -697,7 +690,9 @@ def offer_draw(db: Session, game: QuizTicTacToeGame, *, acting_player: Optional[
     if game.pending_draw_from is not None:
         raise TicTacToeConflictError("A draw offer is already pending")
 
-    if game.mode == "online_friend" and acting_player is not None:
+    if game.mode == "online_friend":
+        if acting_player is None:
+            raise TicTacToeConflictError("Online game actions require realtime player identity")
         if acting_player != game.current_player:
             raise TicTacToeConflictError("It is not your turn")
 
@@ -706,7 +701,9 @@ def offer_draw(db: Session, game: QuizTicTacToeGame, *, acting_player: Optional[
     game.pending_draw_from = offered_by
     game.pending_draw_to = _other_player(offered_by)
     game.current_player = game.pending_draw_to
-    game.updated_at = datetime.utcnow()
+    now = datetime.utcnow()
+    game.turn_started_at = now
+    game.updated_at = now
     db.flush()
 
 
@@ -715,7 +712,9 @@ def respond_draw(db: Session, game: QuizTicTacToeGame, *, accept: bool, acting_p
     if game.pending_draw_from is None or game.pending_draw_to is None:
         raise TicTacToeConflictError("No pending draw offer")
 
-    if game.mode == "online_friend" and acting_player is not None:
+    if game.mode == "online_friend":
+        if acting_player is None:
+            raise TicTacToeConflictError("Online game actions require realtime player identity")
         if acting_player != game.pending_draw_to:
             raise TicTacToeConflictError("Only the recipient can respond to the draw offer")
 
@@ -734,9 +733,35 @@ def respond_draw(db: Session, game: QuizTicTacToeGame, *, accept: bool, acting_p
 
     game.pending_draw_from = None
     game.pending_draw_to = None
-    game.updated_at = datetime.utcnow()
+    now = datetime.utcnow()
+    game.turn_started_at = now
+    game.updated_at = now
     db.flush()
     return "declined"
+
+
+def handle_time_expired(
+    db: Session,
+    game: QuizTicTacToeGame,
+    *,
+    expected_player: Optional[int] = None,
+    expected_round: Optional[int] = None,
+) -> None:
+    _ensure_game_playable(game)
+    if expected_player is not None and game.current_player != expected_player:
+        return
+    if expected_round is not None and game.round_number != expected_round:
+        return
+
+    game.pending_draw_from = None
+    game.pending_draw_to = None
+    if game.mode != "single_player":
+        game.current_player = _other_player(game.current_player)
+
+    now = datetime.utcnow()
+    game.turn_started_at = now
+    game.updated_at = now
+    db.flush()
 
 
 def create_next_round(

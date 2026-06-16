@@ -11,6 +11,12 @@ import {
   createHigherLowerGame,
   submitHigherLowerAnswer,
   getHigherLowerLeaderboard,
+  createCareerGame,
+  joinCareerGame,
+  offerCareerNoAnswer,
+  respondCareerNoAnswer,
+  submitCareerGuess,
+  connectCareerRealtime,
 } from "../api";
 
 // Mock fetch globally
@@ -26,6 +32,17 @@ function mockJsonResponse(data, ok = true) {
   });
 }
 
+function stateEnvelope(game, result = null) {
+  return {
+    type: "state",
+    payload: {
+      game,
+      ...(result ? { result } : {}),
+      terminal: game.status === "finished",
+    },
+  };
+}
+
 beforeEach(() => {
   mockFetch.mockReset();
 });
@@ -33,7 +50,7 @@ beforeEach(() => {
 describe("TicTacToe API", () => {
   it("createGame sends POST with correct payload", async () => {
     const payload = { mode: "single_player", target_wins: 3 };
-    mockFetch.mockReturnValue(mockJsonResponse({ game_id: 1 }));
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 1 })));
 
     const result = await createGame(payload);
 
@@ -44,7 +61,7 @@ describe("TicTacToe API", () => {
         body: JSON.stringify(payload),
       })
     );
-    expect(result.game_id).toBe(1);
+    expect(result.state.id).toBe(1);
   });
 
   it("getGame sends GET to correct path", async () => {
@@ -59,8 +76,8 @@ describe("TicTacToe API", () => {
   });
 
   it("joinGame sends join_code and player_name", async () => {
-    mockFetch.mockReturnValue(mockJsonResponse({ game_id: 5 }));
-    await joinGame("ABC123", "TestPlayer");
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 5 })));
+    const result = await joinGame("ABC123", "TestPlayer");
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/tictactoe/games/join",
@@ -69,12 +86,13 @@ describe("TicTacToe API", () => {
         body: JSON.stringify({ join_code: "ABC123", player_name: "TestPlayer" }),
       })
     );
+    expect(result.state.id).toBe(5);
   });
 
   it("submitMove sends move data", async () => {
     const move = { row_index: 0, col_index: 1, player_id: 123 };
-    mockFetch.mockReturnValue(mockJsonResponse({ result: "correct" }));
-    await submitMove(7, move);
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "correct")));
+    const result = await submitMove(7, move);
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/tictactoe/games/7/moves",
@@ -83,6 +101,7 @@ describe("TicTacToe API", () => {
         body: JSON.stringify(move),
       })
     );
+    expect(result.result).toBe("correct");
   });
 
   it("autocompletePlayer includes team codes in query params", async () => {
@@ -101,18 +120,19 @@ describe("TicTacToe API", () => {
 describe("Roster Guess API", () => {
   it("createRosterGame sends POST", async () => {
     const payload = { mode: "single_player", season_start: 2020, season_end: 2024 };
-    mockFetch.mockReturnValue(mockJsonResponse({ game_id: 10 }));
-    await createRosterGame(payload);
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 })));
+    const result = await createRosterGame(payload);
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/roster-guess/games",
       expect.objectContaining({ method: "POST", body: JSON.stringify(payload) })
     );
+    expect(result.state.id).toBe(10);
   });
 
   it("submitRosterGuess sends player_id", async () => {
-    mockFetch.mockReturnValue(mockJsonResponse({ result: "correct" }));
-    await submitRosterGuess(10, 456);
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 }, "correct")));
+    const result = await submitRosterGuess(10, 456);
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/roster-guess/games/10/guess",
@@ -121,6 +141,7 @@ describe("Roster Guess API", () => {
         body: JSON.stringify({ player_id: 456 }),
       })
     );
+    expect(result.result).toBe("correct");
   });
 
   it("autocompleteRosterPlayer sends query", async () => {
@@ -171,6 +192,112 @@ describe("Higher or Lower API", () => {
   });
 });
 
+describe("Career Quiz API", () => {
+  it("createCareerGame parses the realtime state envelope", async () => {
+    const payload = { target_wins: 3, wrong_guess_visibility: "private" };
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 })));
+
+    const result = await createCareerGame(payload);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(payload),
+      })
+    );
+    expect(result.state.id).toBe(7);
+  });
+
+  it("joinCareerGame parses the realtime state envelope", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 8 })));
+
+    const result = await joinCareerGame("ABC123", "Player 2");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games/join",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ join_code: "ABC123", player_name: "Player 2" }),
+      })
+    );
+    expect(result.state.id).toBe(8);
+  });
+
+  it("submitCareerGuess sends player_id and round_number", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "incorrect")));
+
+    const result = await submitCareerGuess(7, 1, 99, 3);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games/7/guess?player=1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ player_id: 99, round_number: 3 }),
+      })
+    );
+    expect(result.result).toBe("incorrect");
+  });
+
+  it("offerCareerNoAnswer sends round_number", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "no_answer_offered")));
+
+    const result = await offerCareerNoAnswer(7, 2, 4);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games/7/no-answer-offer?player=2",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ round_number: 4 }),
+      })
+    );
+    expect(result.result).toBe("no_answer_offered");
+  });
+
+  it("respondCareerNoAnswer sends accept and round_number", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "no_answer_accepted")));
+
+    const result = await respondCareerNoAnswer(7, 1, true, 4);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games/7/no-answer-response?player=1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ accept: true, round_number: 4 }),
+      })
+    );
+    expect(result.result).toBe("no_answer_accepted");
+  });
+
+  it("connectCareerRealtime opens the Career websocket path", () => {
+    const messages = [];
+    class FakeWebSocket {
+      static OPEN = 1;
+      constructor(url) {
+        FakeWebSocket.lastUrl = url;
+        this.url = url;
+        this.readyState = FakeWebSocket.OPEN;
+      }
+      send(message) {
+        messages.push(JSON.parse(message));
+      }
+      close() {}
+    }
+
+    const connection = connectCareerRealtime({
+      gameId: 7,
+      playerNumber: 2,
+      onMessage: vi.fn(),
+      WebSocketImpl: FakeWebSocket,
+    });
+    connection.send({ action: "offer_no_answer", round_number: 1 });
+
+    expect(connection.isOpen()).toBe(true);
+    expect(FakeWebSocket.lastUrl).toBe("ws://localhost:8000/quiz/career/ws/7?player=2");
+    expect(messages).toEqual([{ action: "offer_no_answer", round_number: 1 }]);
+  });
+});
+
 describe("Error handling", () => {
   it("throws error with detail message on non-ok response", async () => {
     mockFetch.mockReturnValue(
@@ -178,6 +305,22 @@ describe("Error handling", () => {
     );
 
     await expect(getGame(999)).rejects.toThrow("Game not found");
+  });
+
+  it("throws error with realtime error envelope message on non-ok response", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(
+        {
+          type: "error",
+          payload: { code: "conflict", message: "It is not your turn" },
+        },
+        false
+      )
+    );
+
+    await expect(submitMove(7, { row_index: 0, col_index: 0, player_id: 1 })).rejects.toThrow(
+      "It is not your turn"
+    );
   });
 
   it("throws error with status text if no detail", async () => {
