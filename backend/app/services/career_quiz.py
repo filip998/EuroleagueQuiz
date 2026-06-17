@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import random
 import string
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -24,12 +26,16 @@ from app.services.solo_round_token import (
     create_solo_round_token,
     validate_solo_round_token,
 )
+from app.services.tictactoe import NATIONALITY_TO_COUNTRY_CODE
 
 
 VALID_TARGET_WINS = {1, 3, 5, 7}
 VALID_WRONG_GUESS_VISIBILITY = {"private", "shared"}
 CAREER_REVEAL_COUNTDOWN_SECONDS = 3
 GUEST_ID_MAX_LENGTH = 64
+SOLO_HINT_NATIONALITY = "nationality"
+SOLO_HINT_POSITION = "position"
+SOLO_HINT_NAME_SKELETON = "name_skeleton"
 
 
 def _clean_guest_id(guest_id: str | None) -> str | None:
@@ -71,6 +77,37 @@ def submit_solo_guess(db: Session, *, round_token: str, player_id: int) -> dict[
 def reveal_solo_answer(db: Session, *, round_token: str) -> dict[str, Any]:
     answer_id = _validate_solo_answer_id(db, round_token)
     return {"answer": _player_payload(db, answer_id)}
+
+
+def get_solo_hint(
+    db: Session,
+    *,
+    round_token: str,
+    shown_hints: list[str] | None = None,
+    revealed_letters: list[str] | None = None,
+) -> dict[str, Any]:
+    answer_id = _validate_solo_answer_id(db, round_token)
+    player = _get_player_or_404(db, answer_id)
+    shown = set(shown_hints or [])
+
+    if SOLO_HINT_NATIONALITY not in shown:
+        nationality = player.nationality or "Unknown"
+        payload = {"type": SOLO_HINT_NATIONALITY, "nationality": nationality}
+        country_code = NATIONALITY_TO_COUNTRY_CODE.get(nationality)
+        if country_code:
+            payload["country_code"] = country_code
+        return payload
+
+    if SOLO_HINT_POSITION not in shown:
+        return {"type": SOLO_HINT_POSITION, "position": player.position or "Unknown"}
+
+    if SOLO_HINT_NAME_SKELETON not in shown:
+        return {
+            "type": SOLO_HINT_NAME_SKELETON,
+            "skeleton": _solo_name_skeleton(player),
+        }
+
+    return _solo_letter_hint(player, revealed_letters or [])
 
 
 def autocomplete_players(db: Session, *, q: str, limit: int = 15) -> list[dict[str, Any]]:
@@ -509,9 +546,7 @@ def _display_end_season(stint: PlayerCareerStint) -> str | None:
 
 
 def _player_payload(db: Session, player_id: int) -> dict[str, Any]:
-    player = db.query(Player).filter_by(id=player_id).first()
-    if player is None:
-        raise NotFoundGameActionError("Player not found")
+    player = _get_player_or_404(db, player_id)
     return {
         "id": player.id,
         "name": _player_display_name(player),
@@ -521,6 +556,76 @@ def _player_payload(db: Session, player_id: int) -> dict[str, Any]:
         "position": player.position,
         "image_url": player.euroleague_image_url,
     }
+
+
+def _get_player_or_404(db: Session, player_id: int) -> Player:
+    player = db.query(Player).filter_by(id=player_id).first()
+    if player is None:
+        raise NotFoundGameActionError("Player not found")
+    return player
+
+
+def _solo_name_skeleton(player: Player) -> list[dict[str, Any]]:
+    skeleton = []
+    for index, character in enumerate(_player_display_name(player)):
+        if character.isalpha():
+            skeleton.append({"kind": "hidden_letter", "index": index})
+        elif character.isspace():
+            skeleton.append({"kind": "space", "index": index, "value": " "})
+        else:
+            skeleton.append({"kind": "punctuation", "index": index, "value": character})
+    return skeleton
+
+
+def _solo_letter_hint(player: Player, revealed_letters: list[str]) -> dict[str, Any]:
+    positions_by_letter = _solo_letter_positions_by_key(player)
+    distinct_letters = set(positions_by_letter)
+    reserved_letter = _reserved_solo_hint_letter(player, distinct_letters)
+    revealed = {
+        normalized
+        for letter in revealed_letters
+        if (normalized := _solo_letter_key(letter)) is not None
+    }
+    available_letters = sorted(distinct_letters - revealed - {reserved_letter})
+    if not available_letters:
+        return {"type": "exhausted"}
+
+    letter = random.choice(available_letters)
+    return {
+        "type": "letter_reveal",
+        "letter": letter,
+        "positions": positions_by_letter[letter],
+    }
+
+
+def _solo_letter_positions_by_key(player: Player) -> dict[str, list[int]]:
+    positions_by_letter: dict[str, list[int]] = {}
+    for index, character in enumerate(_player_display_name(player)):
+        letter = _solo_letter_key(character)
+        if letter is not None:
+            positions_by_letter.setdefault(letter, []).append(index)
+    return positions_by_letter
+
+
+def _solo_letter_key(character: str) -> str | None:
+    if len(character) != 1:
+        return None
+    normalized_letters = [
+        value
+        for value in unicodedata.normalize("NFKD", character.casefold())
+        if value.isalpha()
+    ]
+    return normalized_letters[0] if normalized_letters else None
+
+
+def _reserved_solo_hint_letter(player: Player, distinct_letters: set[str]) -> str | None:
+    if not distinct_letters:
+        return None
+    ordered_letters = sorted(distinct_letters)
+    seed = f"{player.id}:{_player_display_name(player)}".encode("utf-8")
+    digest = hashlib.sha256(seed).digest()
+    index = int.from_bytes(digest, "big") % len(ordered_letters)
+    return ordered_letters[index]
 
 
 def _wrong_guess_player_payload(player: Player) -> dict[str, Any]:

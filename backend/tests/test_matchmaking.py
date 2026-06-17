@@ -92,6 +92,65 @@ def test_find_or_create_pairs_two_tictactoe_requests(session_factory):
         assert second.game.round_number == 1
 
 
+def test_matched_guest_retry_returns_active_game(session_factory):
+    adapter = TicTacToeMatchmakingAdapter()
+    with session_factory() as db:
+        host = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="standard",
+                    player_name="Host",
+                    guest_id="host-guest",
+                ),
+            )
+        )
+        joiner = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="standard",
+                    player_name="Joiner",
+                    guest_id="joiner-guest",
+                ),
+            )
+        )
+        host_retry = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="standard",
+                    player_name="Host Retry",
+                    guest_id="host-guest",
+                ),
+            )
+        )
+        joiner_retry = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="standard",
+                    player_name="Joiner Retry",
+                    guest_id="joiner-guest",
+                ),
+            )
+        )
+
+        assert host.status == MatchmakingStatus.SEARCHING
+        assert joiner.status == MatchmakingStatus.MATCHED
+        assert host_retry.status == MatchmakingStatus.MATCHED
+        assert host_retry.player == 1
+        assert host_retry.game.id == joiner.game.id
+        assert joiner_retry.status == MatchmakingStatus.MATCHED
+        assert joiner_retry.player == 2
+        assert joiner_retry.game.id == joiner.game.id
+        assert db.query(QuizTicTacToeGame).count() == 1
+
+
 def test_tictactoe_matchmaking_ignores_friend_games(session_factory):
     adapter = TicTacToeMatchmakingAdapter()
     with session_factory() as db:
@@ -305,13 +364,16 @@ def test_cancel_search_requires_guest_id(session_factory):
             )
 
 
-def test_two_simultaneous_requests_to_empty_pool_create_exactly_one_match(session_factory):
+def test_two_simultaneous_requests_to_empty_pool_create_exactly_one_match(
+    session_factory,
+    monkeypatch,
+):
     adapter = TicTacToeMatchmakingAdapter()
 
     async def yield_after_find():
         await asyncio.sleep(0)
 
-    matchmaking._after_find_hook = yield_after_find
+    monkeypatch.setattr(matchmaking, "_after_find_hook", yield_after_find)
 
     async def request(player_name: str, guest_id: str):
         db = session_factory()
@@ -329,13 +391,10 @@ def test_two_simultaneous_requests_to_empty_pool_create_exactly_one_match(sessio
             db.close()
 
     async def run_requests():
-        try:
-            return await asyncio.gather(
-                request("Player A", "guest-a"),
-                request("Player B", "guest-b"),
-            )
-        finally:
-            matchmaking._after_find_hook = None
+        return await asyncio.gather(
+            request("Player A", "guest-a"),
+            request("Player B", "guest-b"),
+        )
 
     first, second = asyncio.run(run_requests())
 

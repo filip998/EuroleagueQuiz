@@ -11,9 +11,9 @@ import asyncio
 import random
 import threading
 import weakref
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from collections.abc import Awaitable, Callable
 from typing import Any, Mapping, Protocol
 
 from sqlalchemy.orm import Session
@@ -55,14 +55,22 @@ class MatchmakingResult:
     starting_player: int | None = None
 
 
+@dataclass(frozen=True)
+class ExistingMatchmakingGame:
+    status: MatchmakingStatus
+    game: Any
+    player: int
+    starting_player: int | None = None
+
+
 class MatchmakingAdapter(Protocol):
     game_kind: str
 
-    def find_existing_search(
+    def find_existing_game(
         self,
         db: Session,
         request: MatchmakingRequest,
-    ) -> Any | None: ...
+    ) -> ExistingMatchmakingGame | None: ...
 
     def find_waiting_game(
         self,
@@ -135,16 +143,17 @@ async def find_or_create_match(
 
         try:
             db.expire_all()
-            existing_search = adapter.find_existing_search(db, normalized)
-            if existing_search is not None:
+            existing_game = adapter.find_existing_game(db, normalized)
+            if existing_game is not None:
                 return run_game_action(
                     db,
                     lambda: MatchmakingResult(
-                        status=MatchmakingStatus.SEARCHING,
+                        status=existing_game.status,
                         game_kind=game_kind,
                         preset=normalized.preset,
-                        game=existing_search,
-                        player=1,
+                        game=existing_game.game,
+                        player=existing_game.player,
+                        starting_player=existing_game.starting_player,
                     ),
                 )
 

@@ -11,6 +11,7 @@ from app.schemas.career_quiz import (
     CareerQuizNoAnswerOfferRequest,
     CareerQuizNoAnswerResponseRequest,
     CareerSoloGuessRequest,
+    CareerSoloHintRequest,
     CareerSoloRevealRequest,
     CareerSoloRoundRequest,
 )
@@ -73,6 +74,19 @@ def reveal_solo_answer(payload: CareerSoloRevealRequest, db: Session = Depends(g
     return run_http_game_action(
         db,
         lambda: career_service.reveal_solo_answer(db, round_token=payload.round_token),
+    )
+
+
+@router.post("/career/solo/hint")
+def get_solo_hint(payload: CareerSoloHintRequest, db: Session = Depends(get_db)):
+    return run_http_game_action(
+        db,
+        lambda: career_service.get_solo_hint(
+            db,
+            round_token=payload.round_token,
+            shown_hints=payload.shown_hints,
+            revealed_letters=payload.revealed_letters,
+        ),
     )
 
 

@@ -1,3 +1,5 @@
+import base64
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -25,6 +27,21 @@ def test_solo_round_token_round_trip():
 
     assert payload.player_id == 42
     assert payload.data_revision == "rev1"
+
+
+def test_solo_round_token_is_opaque_to_clients():
+    token = create_solo_round_token(
+        player_id=42,
+        data_revision="rev1",
+        secret="secret",
+        issued_at=datetime.now(timezone.utc),
+    )
+
+    assert "." not in token
+    decoded_token = base64.urlsafe_b64decode(token.encode("ascii"))
+    assert b"player_id" not in decoded_token
+    with pytest.raises((UnicodeDecodeError, json.JSONDecodeError)):
+        json.loads(decoded_token.decode("utf-8"))
 
 
 def test_solo_round_token_rejects_tampering():

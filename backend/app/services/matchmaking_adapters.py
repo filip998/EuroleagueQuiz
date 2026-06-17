@@ -16,8 +16,10 @@ from app.models import QuizTicTacToeGame
 from app.services import tictactoe as ttt_service
 from app.services.game_action_orchestration import GameKind
 from app.services.matchmaking import (
+    ExistingMatchmakingGame,
     MatchmakingCancelRequest,
     MatchmakingRequest,
+    MatchmakingStatus,
     clean_guest_id,
     clean_preset,
 )
@@ -44,27 +46,41 @@ class TicTacToeMatchmakingAdapter:
         source = DEFAULT_TICTACTOE_MATCHMAKING_PRESETS if presets is None else presets
         self._presets = {clean_preset(key): value for key, value in source.items()}
 
-    def find_existing_search(
+    def find_existing_game(
         self,
         db: Session,
         request: MatchmakingRequest,
-    ) -> QuizTicTacToeGame | None:
+    ) -> ExistingMatchmakingGame | None:
         self._preset_config(request.preset)
-        return (
+        game = (
             db.query(QuizTicTacToeGame)
             .filter(
                 QuizTicTacToeGame.mode == "online_friend",
-                QuizTicTacToeGame.status == "waiting_for_opponent",
+                QuizTicTacToeGame.status.in_(("waiting_for_opponent", "active")),
                 QuizTicTacToeGame.is_public.is_(True),
                 QuizTicTacToeGame.preset == request.preset,
-                QuizTicTacToeGame.player1_guest_id == request.guest_id,
+                or_(
+                    QuizTicTacToeGame.player1_guest_id == request.guest_id,
+                    QuizTicTacToeGame.player2_guest_id == request.guest_id,
+                ),
             )
             .order_by(
+                QuizTicTacToeGame.status.asc(),
                 QuizTicTacToeGame.created_at.asc(),
                 QuizTicTacToeGame.id.asc(),
             )
             .first()
         )
+        if game is None:
+            return None
+
+        player = 1 if clean_guest_id(game.player1_guest_id) == request.guest_id else 2
+        status = (
+            MatchmakingStatus.MATCHED
+            if game.status == "active"
+            else MatchmakingStatus.SEARCHING
+        )
+        return ExistingMatchmakingGame(status=status, game=game, player=player)
 
     def find_waiting_game(
         self,
