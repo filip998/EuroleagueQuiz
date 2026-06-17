@@ -38,3 +38,13 @@ class TicTacToeQuickMatchCancelRequest(BaseModel):
     preset: str
     game_id: int
     guest_id: Optional[str] = None
+
+
+class TicTacToeQuickMatchPoolCounts(BaseModel):
+    searching: int = Field(ge=0)
+    in_progress: int = Field(ge=0)
+
+
+class TicTacToeQuickMatchPoolsResponse(BaseModel):
+    pools: dict[str, TicTacToeQuickMatchPoolCounts]
+    poll_interval_seconds: int = Field(gt=0)
