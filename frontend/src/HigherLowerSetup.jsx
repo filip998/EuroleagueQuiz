@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { createHigherLowerGame, getHigherLowerLeaderboard } from "./api";
 import { getNickname, setNickname as saveNickname } from "./identity";
+import { useClerkPrefilledName } from "./identityBridge";
 import GameSetupShell from "./GameSetupShell";
 
 const HEADER_ICON = (
@@ -42,7 +43,7 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
   const [tier, setTier] = useState("easy");
   const [seasonStart, setSeasonStart] = useState(2007);
   const [seasonEnd, setSeasonEnd] = useState(2025);
-  const [nickname, setNickname] = useState(() => getNickname());
+  const [nickname, setNickname] = useClerkPrefilledName(getNickname);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
@@ -62,7 +63,6 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
     setError(null);
     setLoading(true);
     try {
-      saveNickname(nickname);
       const resp = await createHigherLowerGame({
         tier,
         season_range_start: seasonStart,

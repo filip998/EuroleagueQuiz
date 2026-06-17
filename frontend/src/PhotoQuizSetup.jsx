@@ -6,6 +6,7 @@ import {
   photoQuickMatch,
 } from "./api";
 import { getNickname, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
+import { useClerkPrefilledName } from "./identityBridge";
 import { formatPresence } from "./quickMatch";
 import {
   PHOTO_QUICK_MATCH_PRESETS,
@@ -41,7 +42,7 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
   // Friend sub-mode: "create" | "join".
   const [friendSub, setFriendSub] = useState("create");
   const [preset, setPreset] = useState(DEFAULT_PHOTO_QUICK_MATCH_PRESET);
-  const [playerName, setPlayerName] = useState(() => getNickname());
+  const [playerName, setPlayerName] = useClerkPrefilledName(getNickname);
   const [joinCode, setJoinCode] = useState("");
   const [targetWins, setTargetWins] = useState(3);
   const [wrongGuessVisibility, setWrongGuessVisibility] = useState("private");
