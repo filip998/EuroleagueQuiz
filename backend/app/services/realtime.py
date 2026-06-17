@@ -7,8 +7,17 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from fastapi import WebSocket, WebSocketDisconnect
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.auth.clerk import (
+    ClerkAuthConfigurationError,
+    ClerkAuthError,
+    ClerkAuthServiceError,
+    get_clerk_jwt_verifier,
+)
+from app.auth.users import UserProvisioningError, get_or_create_user_for_claims
+from app.auth_database import SessionLocal as AuthSessionLocal
 from app.config import settings
 from app.database import SessionLocal
 from app.game_actions import (
@@ -28,8 +37,14 @@ from app.services.game_action_orchestration import (
     GameActionOrchestrator,
     RealtimeActionOutcome,
 )
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RealtimeConnectionContext:
+    user: User | None = None
 
 
 @dataclass(frozen=True)
@@ -83,12 +98,22 @@ class OnlineGameAdapter(Protocol):
 class ConnectionManager:
     def __init__(self):
         self.connections: dict[int, dict[int, WebSocket]] = {}
+        self.contexts: dict[int, dict[int, RealtimeConnectionContext]] = {}
 
-    async def connect(self, game_id: int, player: int, websocket: WebSocket) -> None:
+    async def connect(
+        self,
+        game_id: int,
+        player: int,
+        websocket: WebSocket,
+        *,
+        context: RealtimeConnectionContext | None = None,
+    ) -> None:
         await websocket.accept()
         players = self.connections.setdefault(game_id, {})
+        contexts = self.contexts.setdefault(game_id, {})
         previous = players.get(player)
         players[player] = websocket
+        contexts[player] = context or RealtimeConnectionContext()
         if previous is not None and previous is not websocket:
             await _close_quietly(previous)
 
@@ -103,12 +128,22 @@ class ConnectionManager:
         if player not in players:
             return False
         players.pop(player, None)
+        contexts = self.contexts.get(game_id)
+        if contexts is not None:
+            contexts.pop(player, None)
+            if not contexts:
+                self.contexts.pop(game_id, None)
         if not players:
             self.connections.pop(game_id, None)
         return True
 
     def has_player(self, game_id: int, player: int) -> bool:
         return player in self.connections.get(game_id, {})
+
+    def get_context(
+        self, game_id: int, player: int
+    ) -> RealtimeConnectionContext | None:
+        return self.contexts.get(game_id, {}).get(player)
 
     async def broadcast(
         self,
@@ -242,6 +277,7 @@ class OnlineGameRealtimeModule:
         adapter: OnlineGameAdapter,
         *,
         session_factory: Callable[[], Session] = SessionLocal,
+        auth_session_factory: Callable[[], Session] = AuthSessionLocal,
         connections: ConnectionManager | None = None,
         timer: TurnTimerManager | None = None,
         disconnect_grace_timer: DisconnectGraceTimerManager | None = None,
@@ -249,6 +285,7 @@ class OnlineGameRealtimeModule:
     ):
         self.adapter = adapter
         self.session_factory = session_factory
+        self.auth_session_factory = auth_session_factory
         self.connections = connections or ConnectionManager()
         self.timer = timer or TurnTimerManager(self._expire_turn)
         self.disconnect_grace_timer = (
@@ -302,10 +339,42 @@ class OnlineGameRealtimeModule:
             state = self.adapter.serialize_state(db, game)
         finally:
             db.close()
+        context = await self._connection_context_from_websocket(websocket)
 
-        await self.connections.connect(game_id, player, websocket)
+        await self.connections.connect(game_id, player, websocket, context=context)
         self.disconnect_grace_timer.cancel(game_id, player)
         await websocket.send_json(state_message(state))
+
+    async def _connection_context_from_websocket(
+        self, websocket: WebSocket
+    ) -> RealtimeConnectionContext:
+        token = _websocket_query_param(websocket, "token")
+        if token is None:
+            return RealtimeConnectionContext()
+        try:
+            user = await asyncio.to_thread(self._resolve_realtime_user, token)
+        except ClerkAuthError:
+            return RealtimeConnectionContext()
+        except (ClerkAuthConfigurationError, ClerkAuthServiceError):
+            logger.warning(
+                "Realtime WebSocket auth unavailable; falling back to guest",
+                exc_info=True,
+            )
+            return RealtimeConnectionContext()
+        except (SQLAlchemyError, UserProvisioningError):
+            logger.exception(
+                "Failed to resolve realtime WebSocket user; falling back to guest"
+            )
+            return RealtimeConnectionContext()
+        return RealtimeConnectionContext(user=user)
+
+    def _resolve_realtime_user(self, token: str) -> User:
+        claims = get_clerk_jwt_verifier().verify(token)
+        db = self.auth_session_factory()
+        try:
+            return get_or_create_user_for_claims(db, claims)
+        finally:
+            db.close()
 
     async def handle_client_message(
         self,
@@ -591,3 +660,14 @@ class OnlineGameRealtimeModule:
             return None
         finally:
             db.close()
+
+
+def _websocket_query_param(websocket: WebSocket, name: str) -> str | None:
+    query_params = getattr(websocket, "query_params", None)
+    if query_params is None or not hasattr(query_params, "get"):
+        return None
+    value = query_params.get(name)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None

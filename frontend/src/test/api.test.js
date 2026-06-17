@@ -9,6 +9,7 @@ import {
   cancelQuickMatchTicTacToe,
   fetchTicTacToeQuickMatchPools,
   autocompletePlayer,
+  connectTicTacToeRealtime,
   createRosterGame,
   joinRosterGame,
   submitRosterGuess,
@@ -140,6 +141,53 @@ describe("TicTacToe API", () => {
     expect(calledUrl).toContain("team_code_1=BAR");
     expect(calledUrl).toContain("team_code_2=RMB");
     expect(calledUrl).toContain("limit=10");
+  });
+
+  it("connectTicTacToeRealtime opens the websocket path without an auth token", () => {
+    class FakeWebSocket {
+      static OPEN = 1;
+      constructor(url) {
+        FakeWebSocket.lastUrl = url;
+        this.readyState = FakeWebSocket.OPEN;
+      }
+      send() {}
+      close() {}
+    }
+
+    const connection = connectTicTacToeRealtime({
+      gameId: 7,
+      playerNumber: 2,
+      onMessage: vi.fn(),
+      WebSocketImpl: FakeWebSocket,
+    });
+
+    expect(connection.isOpen()).toBe(true);
+    expect(FakeWebSocket.lastUrl).toBe("ws://localhost:8000/quiz/tictactoe/ws/7?player=2");
+  });
+
+  it("connectTicTacToeRealtime appends an encoded auth token when supplied", () => {
+    class FakeWebSocket {
+      static OPEN = 1;
+      constructor(url) {
+        FakeWebSocket.lastUrl = url;
+        this.readyState = FakeWebSocket.OPEN;
+      }
+      send() {}
+      close() {}
+    }
+
+    connectTicTacToeRealtime({
+      gameId: 7,
+      playerNumber: 2,
+      onMessage: vi.fn(),
+      WebSocketImpl: FakeWebSocket,
+      authToken: "abc+/= token",
+    });
+
+    const url = new URL(FakeWebSocket.lastUrl);
+    expect(url.pathname).toBe("/quiz/tictactoe/ws/7");
+    expect(url.searchParams.get("player")).toBe("2");
+    expect(url.searchParams.get("token")).toBe("abc+/= token");
   });
 });
 

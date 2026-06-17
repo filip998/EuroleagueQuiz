@@ -3,10 +3,16 @@ from typing import Any
 
 
 class FakeWebSocket:
-    def __init__(self, *, fail_send: bool = False):
+    def __init__(
+        self,
+        *,
+        fail_send: bool = False,
+        query_params: dict[str, Any] | None = None,
+    ):
         self.accepted = False
         self.closed = False
         self.fail_send = fail_send
+        self.query_params = query_params or {}
         self.sent: list[dict[str, Any]] = []
 
     async def accept(self):

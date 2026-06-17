@@ -2,6 +2,7 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { clearAuthTokenProvider, setAuthTokenProvider } from "../authToken";
 import { REALTIME_CLIENT_ACTIONS, REALTIME_MESSAGE_TYPES, parseRealtimeMessage } from "../realtimeSchema";
 import { useOnlineGameRealtime } from "../useOnlineGameRealtime";
 
@@ -70,6 +71,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.clearAllMocks();
+  clearAuthTokenProvider();
 });
 
 describe("parseRealtimeMessage", () => {
@@ -106,6 +108,14 @@ describe("parseRealtimeMessage", () => {
 });
 
 describe("useOnlineGameRealtime", () => {
+  async function flushAsyncConnect() {
+    await act(async () => {
+      for (let i = 0; i < 3; i += 1) {
+        await Promise.resolve();
+      }
+    });
+  }
+
   it("reconnects after a socket close with fake timers", () => {
     vi.useFakeTimers();
     const { connect, connections } = renderHarness();
@@ -206,6 +216,51 @@ describe("useOnlineGameRealtime", () => {
     expect(connections[0].sent).toEqual([
       { action: "move", player_id: 7 },
     ]);
+  });
+
+  it("passes the auth token to the websocket connector when signed in", async () => {
+    setAuthTokenProvider(async () => "session-token");
+
+    const { connect } = renderHarness();
+    expect(connect).not.toHaveBeenCalled();
+    await flushAsyncConnect();
+
+    expect(connect).toHaveBeenCalledWith(
+      expect.objectContaining({ authToken: "session-token" })
+    );
+  });
+
+  it("connects as guest when the registered token provider returns no token", async () => {
+    setAuthTokenProvider(async () => null);
+
+    const { connect } = renderHarness();
+    expect(connect).not.toHaveBeenCalled();
+    await flushAsyncConnect();
+
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(connect.mock.calls[0][0].authToken).toBeUndefined();
+  });
+
+  it("does not open a stale socket if unmounted while resolving the token", async () => {
+    let resolveToken;
+    setAuthTokenProvider(
+      () =>
+        new Promise((resolve) => {
+          resolveToken = resolve;
+        })
+    );
+
+    const { connect, unmount } = renderHarness();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    unmount();
+    await act(async () => {
+      resolveToken("late-token");
+      await Promise.resolve();
+    });
+
+    expect(connect).not.toHaveBeenCalled();
   });
 
   it("runs background polling sync for active games", async () => {

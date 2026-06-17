@@ -32,6 +32,10 @@ export function clearAuthTokenProvider() {
   tokenProvider = null;
 }
 
+export function hasAuthTokenProvider() {
+  return tokenProvider !== null;
+}
+
 // Resolve the current Bearer token, or `null` when signed out / unavailable.
 // Never throws and never hangs: provider errors and timeouts degrade to null.
 export async function getAuthToken() {
