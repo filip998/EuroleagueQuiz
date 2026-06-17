@@ -1,6 +1,3 @@
-import base64
-import json
-
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -9,7 +6,7 @@ from app.database import Base
 from app.game_actions import ConflictGameActionError, InvalidGameActionError
 from app.models import PhotoQuizRound, Player
 from app.services import photo_quiz
-from app.services.solo_round_token import create_solo_round_token
+from app.services.solo_round_token import create_solo_round_token, validate_solo_round_token
 
 
 def test_eligible_pool_requires_wikipedia_page_and_any_usable_image():
@@ -89,7 +86,11 @@ def test_solo_round_uses_wikipedia_image_fallback_without_revealing_answer():
         assert "answer" not in round_data
         assert player.first_name not in repr(round_data)
         assert player.last_name not in repr(round_data)
-        assert _decoded_token_payload(round_data["round_token"])["player_id"] != player.id
+        token_payload = validate_solo_round_token(
+            round_data["round_token"],
+            current_data_revision=photo_quiz.PHOTO_QUIZ_DATA_REVISION,
+        )
+        assert token_payload.player_id != player.id
     finally:
         db.close()
 
@@ -193,12 +194,15 @@ def test_token_payload_contains_round_token_id_not_answer_id():
         db.commit()
 
         token = photo_quiz.create_solo_round(db, recent_player_ids=[])["round_token"]
-        payload = _decoded_token_payload(token)
+        payload = validate_solo_round_token(
+            token,
+            current_data_revision=photo_quiz.PHOTO_QUIZ_DATA_REVISION,
+        )
 
-        assert payload["player_id"] != answer.id
+        assert payload.player_id != answer.id
         assert (
             db.query(PhotoQuizRound)
-            .filter(PhotoQuizRound.solo_token_id == payload["player_id"])
+            .filter(PhotoQuizRound.solo_token_id == payload.player_id)
             .one()
             .answer_player_id
             == answer.id
@@ -253,14 +257,6 @@ def _session():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine)()
-
-
-def _decoded_token_payload(token: str) -> dict:
-    encoded_payload = token.split(".", 1)[0]
-    padding = "=" * (-len(encoded_payload) % 4)
-    return json.loads(
-        base64.urlsafe_b64decode((encoded_payload + padding).encode("ascii"))
-    )
 
 
 def _player(
