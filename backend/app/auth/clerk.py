@@ -1,0 +1,416 @@
+from __future__ import annotations
+
+import binascii
+from dataclasses import dataclass
+import json
+import threading
+import time
+from typing import Any, Callable, Mapping
+
+import httpx
+import jwt
+from jwt import InvalidTokenError, PyJWTError
+from jwt.algorithms import RSAAlgorithm
+
+from app.config import settings
+
+
+class ClerkAuthConfigurationError(RuntimeError):
+    pass
+
+
+class ClerkAuthError(ValueError):
+    pass
+
+
+class ClerkTokenError(ClerkAuthError):
+    pass
+
+
+class ClerkAuthServiceError(RuntimeError):
+    pass
+
+
+class ClerkJWKSUnavailableError(ClerkAuthServiceError):
+    pass
+
+
+JWKSFetcher = Callable[[str], Mapping[str, Any]]
+Clock = Callable[[], float]
+
+
+def parse_authorized_parties(raw_value: str | None) -> tuple[str, ...]:
+    if not raw_value:
+        return ()
+    return tuple(party.strip() for party in raw_value.split(",") if party.strip())
+
+
+def extract_bearer_token(authorization: str | None) -> str:
+    if authorization is None:
+        raise ClerkTokenError("Missing bearer token")
+    scheme, separator, token = authorization.strip().partition(" ")
+    if scheme.lower() != "bearer" or not separator or not token.strip():
+        raise ClerkTokenError("Invalid authorization header")
+    token = token.strip()
+    if " " in token:
+        raise ClerkTokenError("Invalid bearer token")
+    return token
+
+
+def _default_fetch_jwks(url: str) -> Mapping[str, Any]:
+    try:
+        response = httpx.get(url, timeout=5.0)
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise ClerkJWKSUnavailableError("Unable to fetch Clerk JWKS") from exc
+    if not isinstance(payload, Mapping):
+        raise ClerkJWKSUnavailableError("Invalid Clerk JWKS response")
+    return payload
+
+
+@dataclass(frozen=True)
+class _CachedJWKS:
+    keys_by_kid: dict[str, Mapping[str, Any]]
+    fetched_at: float
+
+
+@dataclass
+class _InFlightJWKSFetch:
+    event: threading.Event
+    result: _CachedJWKS | None = None
+    error: Exception | None = None
+
+
+@dataclass(frozen=True)
+class _UnknownKidRefresh:
+    refreshed_at: float
+    service_error_message: str | None = None
+
+
+class JWKSCache:
+    def __init__(
+        self,
+        *,
+        fetcher: JWKSFetcher = _default_fetch_jwks,
+        ttl_seconds: float = 300.0,
+        refresh_cooldown_seconds: float = 30.0,
+        unknown_kid_min_refresh_interval_seconds: float = 1.0,
+        clock: Clock = time.monotonic,
+    ) -> None:
+        self._fetcher = fetcher
+        self._ttl_seconds = max(0.0, ttl_seconds)
+        self._refresh_cooldown_seconds = max(0.0, refresh_cooldown_seconds)
+        self._unknown_kid_min_refresh_interval_seconds = max(0.0, unknown_kid_min_refresh_interval_seconds)
+        self._clock = clock
+        self._cache: dict[str, _CachedJWKS] = {}
+        self._in_flight_fetches: dict[str, _InFlightJWKSFetch] = {}
+        self._unknown_kid_refreshes: dict[str, dict[str, _UnknownKidRefresh]] = {}
+        self._unknown_kid_last_refresh_at: dict[str, float] = {}
+        self._unknown_kid_last_service_error: dict[str, _UnknownKidRefresh] = {}
+        self._lock = threading.RLock()
+
+    def get_key(self, jwks_url: str, kid: str) -> Mapping[str, Any]:
+        cached, refreshed = self._get_cached(jwks_url)
+        key = cached.keys_by_kid.get(kid)
+        if key is not None:
+            return key
+
+        if not refreshed:
+            cached = self._refresh_for_unknown_kid(jwks_url, kid)
+            key = cached.keys_by_kid.get(kid)
+            if key is not None:
+                return key
+
+        raise ClerkTokenError("Unknown Clerk signing key")
+
+    def _get_cached(self, jwks_url: str) -> tuple[_CachedJWKS, bool]:
+        now = self._clock()
+        with self._lock:
+            cached = self._cache.get(jwks_url)
+            if cached is not None and now - cached.fetched_at < self._ttl_seconds:
+                return cached, False
+        return self._fetch_and_store(jwks_url, now=now, minimum_fetched_at=now), True
+
+    def _refresh_for_unknown_kid(self, jwks_url: str, kid: str) -> _CachedJWKS:
+        now = self._clock()
+        wait_for: _InFlightJWKSFetch | None = None
+        with self._lock:
+            cached = self._cache.get(jwks_url)
+            if cached is not None and kid in cached.keys_by_kid:
+                return cached
+            if cached is not None:
+                in_flight = self._in_flight_fetches.get(jwks_url)
+                if in_flight is not None:
+                    wait_for = in_flight
+                elif not self._reserve_unknown_kid_refresh(jwks_url, kid, now):
+                    error = self._suppressed_unknown_kid_service_error(jwks_url, kid, now)
+                    if error is not None:
+                        raise error
+                    return cached
+        if wait_for is not None:
+            try:
+                return self._wait_for_fetch(wait_for)
+            except ClerkJWKSUnavailableError as exc:
+                self._record_unknown_kid_service_error(jwks_url, kid, now, exc)
+                raise
+        try:
+            return self._fetch_and_store(jwks_url, now=now)
+        except ClerkJWKSUnavailableError as exc:
+            self._record_unknown_kid_service_error(jwks_url, kid, now, exc)
+            raise
+
+    def _fetch_and_store(
+        self,
+        jwks_url: str,
+        *,
+        now: float,
+        minimum_fetched_at: float | None = None,
+    ) -> _CachedJWKS:
+        with self._lock:
+            cached = self._cache.get(jwks_url)
+            if minimum_fetched_at is not None and cached is not None and cached.fetched_at >= minimum_fetched_at:
+                return cached
+            in_flight = self._in_flight_fetches.get(jwks_url)
+            if in_flight is None:
+                in_flight = _InFlightJWKSFetch(event=threading.Event())
+                self._in_flight_fetches[jwks_url] = in_flight
+                owns_fetch = True
+            else:
+                owns_fetch = False
+
+        if not owns_fetch:
+            return self._wait_for_fetch(in_flight)
+
+        try:
+            jwks = self._fetcher(jwks_url)
+            with self._lock:
+                cached = _CachedJWKS(
+                    keys_by_kid=_keys_by_kid(jwks),
+                    fetched_at=now,
+                )
+                self._cache[jwks_url] = cached
+                self._clear_unknown_kid_service_errors(jwks_url)
+                in_flight.result = cached
+                return cached
+        except Exception as exc:
+            with self._lock:
+                in_flight.error = exc
+            raise
+        finally:
+            with self._lock:
+                self._in_flight_fetches.pop(jwks_url, None)
+                in_flight.event.set()
+
+    def _wait_for_fetch(self, in_flight: _InFlightJWKSFetch) -> _CachedJWKS:
+        in_flight.event.wait()
+        if in_flight.error is not None:
+            raise in_flight.error
+        if in_flight.result is None:
+            raise ClerkJWKSUnavailableError("Unable to fetch Clerk JWKS")
+        return in_flight.result
+
+    def _reserve_unknown_kid_refresh(self, jwks_url: str, kid: str, now: float) -> bool:
+        refreshes = {
+            refreshed_kid: refresh
+            for refreshed_kid, refresh in self._unknown_kid_refreshes.get(jwks_url, {}).items()
+            if now - refresh.refreshed_at < self._refresh_cooldown_seconds
+        }
+        self._unknown_kid_refreshes[jwks_url] = refreshes
+        if kid in refreshes:
+            return False
+        last_refresh_at = self._unknown_kid_last_refresh_at.get(jwks_url)
+        if (
+            last_refresh_at is not None
+            and now - last_refresh_at < self._unknown_kid_min_refresh_interval_seconds
+        ):
+            return False
+        refreshes[kid] = _UnknownKidRefresh(refreshed_at=now)
+        self._unknown_kid_last_refresh_at[jwks_url] = now
+        return True
+
+    def _suppressed_unknown_kid_service_error(
+        self,
+        jwks_url: str,
+        kid: str,
+        now: float,
+    ) -> ClerkJWKSUnavailableError | None:
+        refresh = self._unknown_kid_refreshes.get(jwks_url, {}).get(kid)
+        if refresh is not None and refresh.service_error_message is not None:
+            return ClerkJWKSUnavailableError(refresh.service_error_message)
+        last_error = self._unknown_kid_last_service_error.get(jwks_url)
+        if (
+            last_error is not None
+            and now - last_error.refreshed_at < self._unknown_kid_min_refresh_interval_seconds
+            and last_error.service_error_message is not None
+        ):
+            return ClerkJWKSUnavailableError(last_error.service_error_message)
+        return None
+
+    def _record_unknown_kid_service_error(
+        self,
+        jwks_url: str,
+        kid: str,
+        now: float,
+        error: ClerkJWKSUnavailableError,
+    ) -> None:
+        message = str(error) or "Unable to fetch Clerk JWKS"
+        with self._lock:
+            refreshes = {
+                refreshed_kid: refresh
+                for refreshed_kid, refresh in self._unknown_kid_refreshes.get(jwks_url, {}).items()
+                if now - refresh.refreshed_at < self._refresh_cooldown_seconds
+            }
+            refresh = refreshes.get(kid)
+            refreshes[kid] = _UnknownKidRefresh(
+                refreshed_at=refresh.refreshed_at if refresh is not None else now,
+                service_error_message=message,
+            )
+            self._unknown_kid_refreshes[jwks_url] = refreshes
+            self._unknown_kid_last_service_error[jwks_url] = _UnknownKidRefresh(
+                refreshed_at=now,
+                service_error_message=message,
+            )
+
+    def _clear_unknown_kid_service_errors(self, jwks_url: str) -> None:
+        self._unknown_kid_last_service_error.pop(jwks_url, None)
+        refreshes = self._unknown_kid_refreshes.get(jwks_url)
+        if refreshes is None:
+            return
+        self._unknown_kid_refreshes[jwks_url] = {
+            kid: _UnknownKidRefresh(refreshed_at=refresh.refreshed_at)
+            for kid, refresh in refreshes.items()
+        }
+
+
+def _keys_by_kid(jwks: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    raw_keys = jwks.get("keys")
+    if not isinstance(raw_keys, list):
+        raise ClerkJWKSUnavailableError("Invalid Clerk JWKS keys")
+
+    keys: dict[str, Mapping[str, Any]] = {}
+    for key in raw_keys:
+        if not isinstance(key, Mapping):
+            continue
+        kid = key.get("kid")
+        if (
+            isinstance(kid, str)
+            and key.get("kty") == "RSA"
+            and key.get("use") in (None, "sig")
+            and key.get("alg") in (None, "RS256")
+        ):
+            keys[kid] = key
+    return keys
+
+
+class ClerkJWTVerifier:
+    def __init__(
+        self,
+        *,
+        issuer: str,
+        jwks_url: str,
+        authorized_parties: tuple[str, ...] = (),
+        leeway_seconds: int = 60,
+        jwks_cache: JWKSCache | None = None,
+    ) -> None:
+        if not issuer:
+            raise ClerkAuthConfigurationError("Clerk issuer is not configured")
+        if not jwks_url:
+            raise ClerkAuthConfigurationError("Clerk JWKS URL is not configured")
+        self._issuer = issuer.rstrip("/")
+        self._jwks_url = jwks_url
+        self._authorized_parties = frozenset(authorized_parties)
+        self._leeway_seconds = leeway_seconds
+        self._jwks_cache = jwks_cache or JWKSCache(
+            ttl_seconds=settings.clerk_jwks_cache_ttl_seconds,
+            refresh_cooldown_seconds=settings.clerk_jwks_refresh_cooldown_seconds,
+            unknown_kid_min_refresh_interval_seconds=(
+                settings.clerk_jwks_unknown_kid_min_refresh_interval_seconds
+            ),
+        )
+
+    @classmethod
+    def from_settings(cls) -> "ClerkJWTVerifier":
+        if not settings.clerk_issuer or not settings.clerk_jwks_url:
+            raise ClerkAuthConfigurationError("ELQ_CLERK_ISSUER and ELQ_CLERK_JWKS_URL are required")
+        return cls(
+            issuer=settings.clerk_issuer,
+            jwks_url=settings.clerk_jwks_url,
+            authorized_parties=parse_authorized_parties(settings.clerk_authorized_parties),
+            leeway_seconds=settings.clerk_jwt_leeway_seconds,
+            jwks_cache=JWKSCache(
+                ttl_seconds=settings.clerk_jwks_cache_ttl_seconds,
+                refresh_cooldown_seconds=settings.clerk_jwks_refresh_cooldown_seconds,
+                unknown_kid_min_refresh_interval_seconds=(
+                    settings.clerk_jwks_unknown_kid_min_refresh_interval_seconds
+                ),
+            ),
+        )
+
+    def verify(self, token: str) -> Mapping[str, Any]:
+        try:
+            header = jwt.get_unverified_header(token)
+        except InvalidTokenError as exc:
+            raise ClerkTokenError("Invalid Clerk token header") from exc
+
+        kid = header.get("kid")
+        alg = header.get("alg")
+        if not isinstance(kid, str) or not kid:
+            raise ClerkTokenError("Missing Clerk token key id")
+        if alg != "RS256":
+            raise ClerkTokenError("Unsupported Clerk token algorithm")
+
+        jwk = self._jwks_cache.get_key(self._jwks_url, kid)
+        try:
+            public_key = RSAAlgorithm.from_jwk(json.dumps(jwk))
+        except (binascii.Error, PyJWTError, TypeError, ValueError) as exc:
+            raise ClerkJWKSUnavailableError("Invalid Clerk JWKS key") from exc
+
+        try:
+            claims = jwt.decode(
+                token,
+                public_key,
+                algorithms=["RS256"],
+                issuer=self._issuer,
+                leeway=self._leeway_seconds,
+                options={
+                    "require": ["iss", "sub", "exp"],
+                    "verify_aud": False,
+                },
+            )
+        except PyJWTError as exc:
+            raise ClerkTokenError("Invalid Clerk token") from exc
+
+        if not isinstance(claims, Mapping):
+            raise ClerkTokenError("Invalid Clerk token claims")
+        sub = claims.get("sub")
+        if not isinstance(sub, str) or not sub:
+            raise ClerkTokenError("Invalid Clerk token subject")
+        self._validate_authorized_party(claims)
+        return claims
+
+    def _validate_authorized_party(self, claims: Mapping[str, Any]) -> None:
+        if not self._authorized_parties:
+            return
+        azp = claims.get("azp")
+        if not isinstance(azp, str) or azp not in self._authorized_parties:
+            raise ClerkTokenError("Invalid Clerk authorized party")
+
+
+_default_verifier: ClerkJWTVerifier | None = None
+_default_verifier_lock = threading.Lock()
+
+
+def get_clerk_jwt_verifier() -> ClerkJWTVerifier:
+    global _default_verifier
+    if _default_verifier is None:
+        with _default_verifier_lock:
+            if _default_verifier is None:
+                _default_verifier = ClerkJWTVerifier.from_settings()
+    return _default_verifier
+
+
+def reset_clerk_jwt_verifier() -> None:
+    global _default_verifier
+    with _default_verifier_lock:
+        _default_verifier = None

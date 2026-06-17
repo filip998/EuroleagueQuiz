@@ -52,6 +52,18 @@ Service. A later managed Postgres cutover can use a driver-qualified URL such
 as `postgresql+psycopg://...`. Local `backend/data/users.db*` files are
 gitignored and must not be committed.
 
+Clerk-backed account auth is configured with `ELQ_CLERK_ISSUER` and
+`ELQ_CLERK_JWKS_URL` so the backend can verify `Authorization: Bearer <token>`
+session JWTs against Clerk's cached JWKS. `ELQ_CLERK_SECRET_KEY` is reserved for
+Clerk Backend API operations, and `ELQ_CLERK_AUTHORIZED_PARTIES` can restrict
+accepted token `azp` values. Unknown JWT `kid` refreshes are per-key cached and
+globally throttled by `ELQ_CLERK_JWKS_UNKNOWN_KID_MIN_REFRESH_INTERVAL_SECONDS`
+to avoid JWKS fetch amplification while still recovering from Clerk key
+rotation. JWKS fetch/parse failures surface as service errors rather than
+anonymous fallback. `GET /auth/me` requires a valid token and JIT-provisions a
+local user in the auth datastore; existing gameplay endpoints remain open to
+anonymous callers.
+
 ### Run API Server
 
 ```bash
@@ -98,6 +110,13 @@ environment (`backend/alembic_auth/`, run with `alembic -c alembic_auth.ini`).
 The auth schema is kept portable for a later managed Postgres move: UUIDs are
 stored as strings, timestamps are normalized to UTC-aware datetimes in the
 application layer, and migrations avoid SQLite-only types or PRAGMAs.
+
+The backend acts as a Clerk resource server for authenticated requests. Auth
+dependencies under `backend/app/auth/` verify Clerk session JWTs with a cached
+JWKS, map the Clerk `sub` to `users.clerk_user_id`, JIT-provision missing local
+users, and expose required (`get_current_user`) and additive
+(`get_optional_user`) FastAPI dependencies. Invalid or absent tokens never gate
+anonymous gameplay unless an endpoint explicitly opts into required auth.
 
 Mutating quiz operations use a **Game action** seam in `backend/app/game_actions.py`.
 Routers, WebSocket handlers, and timer jobs run game actions through this helper so the

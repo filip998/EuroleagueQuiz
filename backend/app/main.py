@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import (
+    auth,
     career_quiz,
     games,
     higher_lower,
@@ -32,6 +33,7 @@ app.include_router(seasons.router, prefix="/seasons", tags=["Seasons"])
 app.include_router(teams.router, prefix="/teams", tags=["Teams"])
 app.include_router(players.router, prefix="/players", tags=["Players"])
 app.include_router(games.router, prefix="/games", tags=["Games"])
+app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(quiz.router, prefix="/quiz", tags=["Quiz"])
 app.include_router(roster_guess.router, prefix="/quiz", tags=["Roster Guess"])
 app.include_router(higher_lower.router, prefix="/quiz", tags=["Higher or Lower"])
