@@ -765,6 +765,22 @@ class PhotoQuizRealtimeAdapter:
             return GAME_ACTION_NOOP
         return game
 
+    def handle_unattended_time_expired(
+        self,
+        db: Session,
+        game: Any,
+        *,
+        expected_player: int,
+        expected_round: int,
+    ) -> Any:
+        if not photo_service.handle_public_game_unattended_time_expired(
+            db,
+            game=game,
+            expected_round=expected_round,
+        ):
+            return GAME_ACTION_NOOP
+        return game
+
     def timer_state_from_game(self, game: Any) -> TurnTimerState | None:
         round_seconds = self._round_seconds_for_preset(getattr(game, "preset", None))
         if round_seconds is None:

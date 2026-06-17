@@ -463,6 +463,58 @@ def handle_public_round_time_expired(
     return True
 
 
+def handle_public_game_unattended_time_expired(
+    db: Session,
+    *,
+    game: PhotoQuizGame,
+    expected_round: int,
+) -> bool:
+    if (
+        game.mode != "online_friend"
+        or not game.is_public
+        or game.status != "active"
+        or game.round_number != expected_round
+    ):
+        return False
+    if _active_next_round_lock_starts_at(game) is not None:
+        return False
+
+    try:
+        round_obj = _current_round(game)
+    except ConflictGameActionError:
+        return False
+    if round_obj.status != "active":
+        return False
+
+    try:
+        _claim_active_round(
+            db,
+            round_obj,
+            status="no_answer",
+            winner_player=None,
+            completed_at=datetime.utcnow(),
+        )
+    except ConflictGameActionError:
+        return False
+
+    _update_active_game_round(
+        db,
+        game,
+        expected_round,
+        {
+            "status": "finished",
+            "winner_player": None,
+            "pending_no_answer_from": None,
+            "pending_no_answer_to": None,
+        },
+    )
+    game.status = "finished"
+    game.winner_player = None
+    game.pending_no_answer_from = None
+    game.pending_no_answer_to = None
+    return True
+
+
 def serialize_game_state(db: Session, game: PhotoQuizGame) -> dict[str, Any]:
     current_round = None
     if game.status == "active":

@@ -1759,6 +1759,72 @@ async def test_photo_quick_match_public_round_timeout_auto_skips_with_injected_c
     assert message["payload"]["game"]["latest_completed_round"]["status"] == "no_answer"
 
 
+@pytest.mark.asyncio
+async def test_photo_quick_match_unattended_timeout_finishes_without_rearming(
+    tmp_path: Path,
+):
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        for index in range(3):
+            _player(
+                setup,
+                "Abandoned",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/abandoned-{index}",
+                euroleague_image_url=f"https://cdn/abandoned-{index}.png",
+            )
+        setup.commit()
+
+        game = photo_quiz.create_game(setup, target_wins=3, player1_name="A")
+        game.is_public = True
+        game.preset = "standard"
+        photo_quiz.join_game(setup, game.join_code, player_name="B")
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    sleep = _ControlledSleep()
+    module = OnlineGameRealtimeModule(
+        PhotoQuizRealtimeAdapter(),
+        session_factory=SessionLocal,
+    )
+    module.timer = TurnTimerManager(module._expire_turn, sleep=sleep)
+
+    state_db = SessionLocal()
+    try:
+        state = photo_quiz.serialize_game_state(
+            state_db,
+            state_db.get(PhotoQuizGame, game_id),
+        )
+    finally:
+        state_db.close()
+
+    module.start_timer_from_state(state)
+    await sleep.wait_for_call()
+    sleep.release(0)
+    await _drain_async_tasks()
+
+    assert len(sleep.calls) == 1
+    assert not module.timer.has_timer(game_id)
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(PhotoQuizGame, game_id)
+        assert stored.status == "finished"
+        assert stored.winner_player is None
+        assert stored.round_number == 1
+        assert stored.player1_score == 0
+        assert stored.player2_score == 0
+        assert [round_obj.status for round_obj in stored.rounds] == ["no_answer"]
+        assert photo_quiz.serialize_game_state(verify, stored)["latest_completed_round"][
+            "status"
+        ] == "no_answer"
+    finally:
+        verify.close()
+
+
 def _session():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)

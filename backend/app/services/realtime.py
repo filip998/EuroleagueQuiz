@@ -537,6 +537,22 @@ class OnlineGameRealtimeModule:
                     game = self.adapter.get_game(db, game_id)
                 except GameActionError:
                     return GAME_ACTION_NOOP
+                handle_unattended_time_expired = getattr(
+                    self.adapter,
+                    "handle_unattended_time_expired",
+                    None,
+                )
+                if (
+                    handle_unattended_time_expired is not None
+                    and not self.connections.has_player(game_id, 1)
+                    and not self.connections.has_player(game_id, 2)
+                ):
+                    return handle_unattended_time_expired(
+                        db,
+                        game,
+                        expected_player=expected_player,
+                        expected_round=expected_round,
+                    )
                 return self.adapter.handle_time_expired(
                     db,
                     game,
