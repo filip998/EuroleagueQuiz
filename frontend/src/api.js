@@ -1,14 +1,17 @@
 import { parseRealtimeMessage } from "./realtimeSchema";
 import { getGuestId } from "./identity";
+import { getAuthToken } from "./authToken";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 async function request(method, path, body = null) {
-  const opts = {
-    method,
-    headers: { "Content-Type": "application/json" },
-  };
+  const headers = { "Content-Type": "application/json" };
+  // Additive auth: attach the Clerk session token only when signed in. Signed-out
+  // (anonymous) play registers no provider, so no Authorization header is sent.
+  const token = await getAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`${API_BASE}${path}`, opts);
   if (!res.ok) {
@@ -19,11 +22,29 @@ async function request(method, path, body = null) {
     error.payload = err.payload;
     throw error;
   }
+  if (res.status === 204) return null;
   return res.json();
 }
 
 async function actionRequest(method, path, body = null) {
   return parseRealtimeMessage(await request(method, path, body));
+}
+
+// ---------------------------------------------------------------------------
+// Auth (additive — only meaningful when signed in via Clerk)
+// ---------------------------------------------------------------------------
+
+// Resolves the local user for the current Clerk Bearer token, JIT-provisioning
+// on first call. Requires a valid token (caller must be signed in).
+export function getAuthMe() {
+  return request("GET", "/auth/me");
+}
+
+// Best-effort: associate the current guest id with the signed-in user after
+// sign-in. Idempotent server-side; callers must swallow failures so a missing
+// or briefly-unavailable endpoint never blocks sign-in.
+export function linkGuest() {
+  return request("POST", "/auth/link-guest", { guest_id: getGuestId() });
 }
 
 export function createGame(payload) {

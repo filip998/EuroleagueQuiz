@@ -299,6 +299,41 @@ anonymous play keeps working. `frontend/src/api.js` attaches `guest_id` to TicTa
 Guess, Career Quiz, and Photo Quiz online `create`/`join` requests; the nickname rides the
 existing `player1_name` / `player_name` field.
 
+### Account Auth (Clerk, frontend)
+
+Sign-in is **purely additive** and built on Clerk's prebuilt components, so anonymous play
+keeps working with zero friction. The integration is isolated to a few modules:
+
+- `frontend/src/auth.jsx` is the **only** module that imports `@clerk/clerk-react`. It exposes
+  `AuthProvider` (wraps the app in `<ClerkProvider>` when `VITE_CLERK_PUBLISHABLE_KEY` is set,
+  otherwise renders children unchanged), `AuthMenu` (a fixed header control showing Sign in /
+  Sign up when signed out and `<UserButton/>` when signed in), and a future-use `RequireAuth`
+  stub for protected routes. When the publishable key is missing the whole thing is inert: no
+  provider mounts, no token is issued, and a one-line dev `console.info` notes sign-in is off.
+- `frontend/src/authToken.js` is a tiny, framework-free token registry
+  (`setAuthTokenProvider` / `clearAuthTokenProvider` / `getAuthToken`). It decouples `api.js`
+  from Clerk: `api.js` simply `await getAuthToken()` in `request()` and adds an
+  `Authorization: Bearer …` header **only when a token is present**. The Clerk bridge registers
+  a provider only while signed in and the effect cleanup clears it on sign-out, so signed-out
+  REST calls structurally cannot attach a token. `getAuthToken()` also races the provider
+  against a timeout and swallows errors to `null`, so token trouble never breaks a request.
+- `frontend/src/identityBridge.js` bridges Clerk into a neutral `AuthContext` (default
+  "signed out", so setup screens and unit tests render with no provider). `resolveDisplayName`
+  is the pure precedence rule — Clerk `username` → `fullName` → `firstName`, clamped to
+  `NICKNAME_MAX_LENGTH`, never the email address — falling back to the guest value.
+  `useClerkPrefilledName(getFallback)` is the hook every setup screen uses for its name field:
+  it seeds from the guest fallback, upgrades to the Clerk name once it loads (via the
+  "adjust state while rendering" pattern, no effect), and never clobbers a value the user has
+  typed — so the Local 1v1 "Player 1" placeholder and manual edits are preserved.
+- After sign-in the bridge makes a **best-effort** `POST /auth/link-guest` (with the Bearer
+  token and the current `getGuestId()`), once per `(user, guest)` pair. It fetches the token
+  first and bails if absent, only marks the pair linked on success (so a transient failure
+  retries on a later mount), and swallows all failures so a missing or briefly-unavailable
+  endpoint never blocks sign-in.
+
+Set `VITE_CLERK_PUBLISHABLE_KEY` in `frontend/.env.development` / `.env.production` (or the
+deploy environment) to enable sign-in; leave it blank for fully anonymous builds.
+
 
 ## Testing
 

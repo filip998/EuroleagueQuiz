@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { createGame, joinGame, quickMatchTicTacToe } from "./api";
 import { getDisplayName, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
+import { useClerkPrefilledName } from "./identityBridge";
 import { normalizeJoinCode } from "./inviteLink";
 import {
   QUICK_MATCH_PRESETS,
@@ -46,7 +47,7 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
   const [friendSub, setFriendSub] = useState(prefillCode ? "join" : "create");
   const [targetWins, setTargetWins] = useState(3);
   const [timerMode, setTimerMode] = useState("40s");
-  const [player1Name, setPlayer1Name] = useState(() => getDisplayName());
+  const [player1Name, setPlayer1Name] = useClerkPrefilledName(getDisplayName);
   const [player2Name, setPlayer2Name] = useState("");
   const [joinCode, setJoinCode] = useState(prefillCode);
   const [error, setError] = useState(null);

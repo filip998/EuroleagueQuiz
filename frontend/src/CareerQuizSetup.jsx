@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createCareerGame, createCareerSoloRound, joinCareerGame } from "./api";
 import { getNickname, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
+import { useClerkPrefilledName } from "./identityBridge";
 import GameSetupShell from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 
@@ -13,7 +14,7 @@ const HEADER_ICON = (
 export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack }) {
   const [mode, setMode] = useState("solo");
   const [sub, setSub] = useState("create");
-  const [playerName, setPlayerName] = useState(() => getNickname());
+  const [playerName, setPlayerName] = useClerkPrefilledName(getNickname);
   const [joinCode, setJoinCode] = useState("");
   const [targetWins, setTargetWins] = useState(3);
   const [wrongGuessVisibility, setWrongGuessVisibility] = useState("private");

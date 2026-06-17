@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createRosterGame, joinRosterGame } from "./api";
 import { getNickname, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
+import { useClerkPrefilledName } from "./identityBridge";
 import GameSetupShell from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 
@@ -25,7 +26,7 @@ export default function RosterGuessSetup({ onGameCreated, onBack }) {
   const [timerMode, setTimerMode] = useState("40s");
   const [seasonStart, setSeasonStart] = useState(2000);
   const [seasonEnd, setSeasonEnd] = useState(2025);
-  const [player1Name, setPlayer1Name] = useState(() => getNickname());
+  const [player1Name, setPlayer1Name] = useClerkPrefilledName(getNickname);
   const [player2Name, setPlayer2Name] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState(null);
