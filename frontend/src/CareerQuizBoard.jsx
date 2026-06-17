@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   autocompleteCareerPlayer,
   connectCareerRealtime,
@@ -73,6 +73,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const [soloHintLoading, setSoloHintLoading] = useState(false);
   const [soloHintError, setSoloHintError] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const soloRoundTokenRef = useRef(soloInitialRound?.round_token || null);
 
   const solo = Boolean(soloRound);
   const isOnline = !solo && Boolean(onlineInfo);
@@ -85,6 +86,10 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const revealCountdownRemaining = getRevealCountdownRemaining(revealNextRoundStartsAt, nowMs);
   const roundLocked = revealCountdownRemaining > 0;
   const sharedWrongGuesses = solo ? [] : game?.current_round?.wrong_guesses || [];
+
+  useEffect(() => {
+    soloRoundTokenRef.current = soloRound?.round_token || null;
+  }, [soloRound?.round_token]);
 
   useEffect(() => {
     if (!revealNextRoundStartsAt) return undefined;
@@ -191,6 +196,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   async function nextSoloRound() {
     const next = await createCareerSoloRound(recentIds);
+    soloRoundTokenRef.current = next.round_token || null;
     setSoloRound(next);
     setAnswer(null);
     setMessage("");
@@ -244,6 +250,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   async function revealSoloHint() {
     if (!soloRound?.round_token || soloHints.exhausted || soloHintLoading) return;
+    const requestedRoundToken = soloRound.round_token;
     setSoloHintLoading(true);
     setSoloHintError("");
     const progress = {
@@ -251,12 +258,16 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
       revealed_letters: soloHints.revealedLetters,
     };
     try {
-      const hint = await fetchCareerSoloHint(soloRound.round_token, progress);
+      const hint = await fetchCareerSoloHint(requestedRoundToken, progress);
+      if (soloRoundTokenRef.current !== requestedRoundToken) return;
       setSoloHints((current) => applySoloHint(current, hint));
     } catch {
+      if (soloRoundTokenRef.current !== requestedRoundToken) return;
       setSoloHintError("Could not load a hint. Try again.");
     } finally {
-      setSoloHintLoading(false);
+      if (soloRoundTokenRef.current === requestedRoundToken) {
+        setSoloHintLoading(false);
+      }
     }
   }
 

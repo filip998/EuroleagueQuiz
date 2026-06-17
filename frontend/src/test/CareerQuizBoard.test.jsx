@@ -581,6 +581,42 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(screen.getByText("Hints used: 0")).toBeInTheDocument();
   });
 
+  it("ignores stale hint responses after advancing to a new solo round", async () => {
+    let resolveHint;
+    fetchCareerSoloHint.mockReturnValueOnce(new Promise((resolve) => {
+      resolveHint = resolve;
+    }));
+    autocompleteCareerPlayer.mockResolvedValueOnce({ players: [{ id: 52, name: "Solo Hit" }] });
+    submitCareerSoloGuess.mockResolvedValueOnce({
+      correct: true,
+      answer: careerAnswer({ id: 52, name: "Solo Hit" }),
+    });
+    createCareerSoloRound.mockResolvedValueOnce(soloCareerRound({ round_token: "next-round" }));
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reveal a hint" }));
+    expect(await screen.findByRole("button", { name: "Loading hint..." })).toBeDisabled();
+
+    await selectCareerPlayer("Solo Hit");
+    fireEvent.click(screen.getByRole("button", { name: "Next career" }));
+    await waitFor(() => expect(createCareerSoloRound).toHaveBeenCalledWith([52]));
+
+    await act(async () => {
+      resolveHint({ type: "nationality", nationality: "Stale Country" });
+    });
+
+    expect(screen.queryByText("Stale Country")).not.toBeInTheDocument();
+    expect(screen.getByText("Hints used: 0")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reveal a hint" })).toBeEnabled();
+  });
+
   it("does not show solo hints in multiplayer", () => {
     render(
       <CareerQuizBoard
