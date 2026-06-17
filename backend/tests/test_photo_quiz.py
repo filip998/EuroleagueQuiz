@@ -319,6 +319,54 @@ def test_multiplayer_first_correct_answer_wins_match_when_target_is_one():
         db.close()
 
 
+def test_multiplayer_stale_second_join_is_rejected_without_duplicate_round(tmp_path: Path):
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        _player(
+            setup,
+            "JoinRace",
+            "One",
+            wikipedia_url="https://wiki/join-race-one",
+            euroleague_image_url="https://cdn/join-race-one.png",
+        )
+        setup.commit()
+        game = photo_quiz.create_game(setup, target_wins=1, player1_name="A")
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    first = SessionLocal()
+    second = SessionLocal()
+    try:
+        first_game = first.get(PhotoQuizGame, game_id)
+        second_game = second.get(PhotoQuizGame, game_id)
+
+        photo_quiz.join_game(first, first_game.join_code, player_name="B")
+        first.commit()
+
+        with pytest.raises(
+            ConflictGameActionError,
+            match="Game is not waiting for an opponent",
+        ):
+            photo_quiz.join_game(second, second_game.join_code, player_name="C")
+        second.rollback()
+    finally:
+        first.close()
+        second.close()
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(PhotoQuizGame, game_id)
+        assert stored.status == "active"
+        assert stored.player2_name == "B"
+        assert len(stored.rounds) == 1
+        assert stored.rounds[0].round_number == 1
+    finally:
+        verify.close()
+
+
 def test_multiplayer_shared_wrong_guesses_include_safe_image_payloads(monkeypatch):
     db = _session()
     try:
@@ -1016,6 +1064,94 @@ def test_multiplayer_stale_no_answer_accept_after_decline_is_rejected(tmp_path: 
         assert stored.player2_score == 0
         assert stored.pending_no_answer_from is None
         assert stored.pending_no_answer_to is None
+        assert stored.round_number == 1
+        assert [round_obj.status for round_obj in stored.rounds] == ["active"]
+    finally:
+        verify.close()
+
+
+def test_multiplayer_stale_no_answer_accept_after_reoffer_is_rejected(tmp_path: Path):
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        for index in range(2):
+            _player(
+                setup,
+                "NoAnswerReofferRace",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/no-answer-reoffer-race-{index}",
+                euroleague_image_url=f"https://cdn/no-answer-reoffer-race-{index}.png",
+            )
+        setup.commit()
+        game = photo_quiz.create_game(setup, target_wins=3, player1_name="A")
+        photo_quiz.join_game(setup, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+        photo_quiz.offer_no_answer(
+            setup,
+            game=game,
+            acting_player=1,
+            round_number=current.round_number,
+        )
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    stale = SessionLocal()
+    decline = SessionLocal()
+    reoffer = SessionLocal()
+    try:
+        stale_game = stale.get(PhotoQuizGame, game_id)
+        stale_round = photo_quiz._current_round(stale_game)
+
+        decline_game = decline.get(PhotoQuizGame, game_id)
+        decline_round = photo_quiz._current_round(decline_game)
+        assert (
+            photo_quiz.respond_no_answer(
+                decline,
+                game=decline_game,
+                acting_player=2,
+                accept=False,
+                round_number=decline_round.round_number,
+            )
+            == "declined"
+        )
+        decline.commit()
+
+        reoffer_game = reoffer.get(PhotoQuizGame, game_id)
+        reoffer_round = photo_quiz._current_round(reoffer_game)
+        photo_quiz.offer_no_answer(
+            reoffer,
+            game=reoffer_game,
+            acting_player=1,
+            round_number=reoffer_round.round_number,
+        )
+        reoffer.commit()
+
+        with pytest.raises(
+            ConflictGameActionError,
+            match="No answer offer is not pending for this player",
+        ):
+            photo_quiz.respond_no_answer(
+                stale,
+                game=stale_game,
+                acting_player=2,
+                accept=True,
+                round_number=stale_round.round_number,
+            )
+        stale.rollback()
+    finally:
+        stale.close()
+        decline.close()
+        reoffer.close()
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(PhotoQuizGame, game_id)
+        assert stored.player1_score == 0
+        assert stored.player2_score == 0
+        assert stored.pending_no_answer_from == 1
+        assert stored.pending_no_answer_to == 2
         assert stored.round_number == 1
         assert [round_obj.status for round_obj in stored.rounds] == ["active"]
     finally:

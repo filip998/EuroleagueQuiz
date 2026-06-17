@@ -187,9 +187,28 @@ def join_game(
         raise NotFoundGameActionError("Game not found")
     if game.status != "waiting_for_opponent":
         raise ConflictGameActionError("Game is not waiting for an opponent")
+    joined_at = datetime.utcnow()
+    updated = (
+        db.query(PhotoQuizGame)
+        .filter(PhotoQuizGame.id == game.id)
+        .filter(PhotoQuizGame.status == "waiting_for_opponent")
+        .update(
+            {
+                "player2_name": player_name or "Player 2",
+                "player2_guest_id": _clean_guest_id(guest_id)
+                or game.player2_guest_id,
+                "status": "active",
+                "updated_at": joined_at,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated != 1:
+        raise ConflictGameActionError("Game is not waiting for an opponent")
     game.player2_name = player_name or "Player 2"
     game.player2_guest_id = _clean_guest_id(guest_id) or game.player2_guest_id
     game.status = "active"
+    game.updated_at = joined_at
     _create_next_round(db, game)
     return game
 
@@ -596,6 +615,7 @@ def _update_pending_no_answer_offer(
     values: dict[str, Any],
 ) -> None:
     expected_from = 2 if acting_player == 1 else 1
+    expected_updated_at = game.updated_at
     update_values = dict(values)
     update_values.setdefault("updated_at", datetime.utcnow())
     updated = (
@@ -603,6 +623,7 @@ def _update_pending_no_answer_offer(
         .filter(PhotoQuizGame.id == game.id)
         .filter(PhotoQuizGame.status == "active")
         .filter(PhotoQuizGame.round_number == round_number)
+        .filter(PhotoQuizGame.updated_at == expected_updated_at)
         .filter(PhotoQuizGame.pending_no_answer_from == expected_from)
         .filter(PhotoQuizGame.pending_no_answer_to == acting_player)
         .update(update_values, synchronize_session=False)
