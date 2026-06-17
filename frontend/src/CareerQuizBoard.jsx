@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   autocompleteCareerPlayer,
   connectCareerRealtime,
   createCareerSoloRound,
+  fetchCareerSoloHint,
   getCareerGame,
   offerCareerNoAnswer,
   revealCareerSoloAnswer,
@@ -51,6 +52,11 @@ const CAREER_FEEDBACK_STYLES = {
     dot: "bg-slate-400",
   },
 };
+const SOLO_HINT_TYPES = {
+  nationality: "nationality",
+  position: "position",
+  nameSkeleton: "name_skeleton",
+};
 
 export default function CareerQuizBoard({ initialState, soloInitialRound, onlineInfo, onNewGame, onHome }) {
   const [soloRound, setSoloRound] = useState(soloInitialRound || null);
@@ -63,7 +69,11 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const [answer, setAnswer] = useState(null);
   const [message, setMessage] = useState("");
   const [noAnswerOfferMessageRoundNumber, setNoAnswerOfferMessageRoundNumber] = useState(null);
+  const [soloHints, setSoloHints] = useState(createEmptySoloHints);
+  const [soloHintLoading, setSoloHintLoading] = useState(false);
+  const [soloHintError, setSoloHintError] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const soloRoundTokenRef = useRef(soloInitialRound?.round_token || null);
 
   const solo = Boolean(soloRound);
   const isOnline = !solo && Boolean(onlineInfo);
@@ -78,8 +88,11 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const sharedWrongGuesses = solo ? [] : game?.current_round?.wrong_guesses || [];
 
   useEffect(() => {
+    soloRoundTokenRef.current = soloRound?.round_token || null;
+  }, [soloRound?.round_token]);
+
+  useEffect(() => {
     if (!revealNextRoundStartsAt) return undefined;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNowMs(Date.now());
     const timer = setInterval(() => setNowMs(Date.now()), 250);
     return () => clearInterval(timer);
@@ -94,7 +107,6 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   useEffect(() => {
     const latestRound = game?.latest_completed_round;
     if (!shouldRevealCompletedRound(latestRound, lastRevealedRoundNumber)) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCompletedRound(latestRound);
     setLastRevealedRoundNumber(latestRound.round_number);
   }, [game?.latest_completed_round, lastRevealedRoundNumber]);
@@ -118,9 +130,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
       && latestCompletedRoundNumber != null
       && latestCompletedRoundNumber >= noAnswerOfferMessageRoundNumber
     );
-
     if (!offerStillPendingFromPlayer || offerRoundChanged || offerRoundCompleted) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMessage("");
       setNoAnswerOfferMessageRoundNumber(null);
     }
@@ -186,10 +196,14 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   async function nextSoloRound() {
     const next = await createCareerSoloRound(recentIds);
+    soloRoundTokenRef.current = next.round_token || null;
     setSoloRound(next);
     setAnswer(null);
     setMessage("");
     setNoAnswerOfferMessageRoundNumber(null);
+    setSoloHints(createEmptySoloHints());
+    setSoloHintError("");
+    setSoloHintLoading(false);
   }
 
   async function handleGuess(player) {
@@ -232,6 +246,29 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     const result = await revealCareerSoloAnswer(soloRound.round_token);
     setAnswer(result.answer);
     setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+  }
+
+  async function revealSoloHint() {
+    if (!soloRound?.round_token || soloHints.exhausted || soloHintLoading) return;
+    const requestedRoundToken = soloRound.round_token;
+    setSoloHintLoading(true);
+    setSoloHintError("");
+    const progress = {
+      shown_hints: soloHints.shownHints,
+      revealed_letters: soloHints.revealedLetters,
+    };
+    try {
+      const hint = await fetchCareerSoloHint(requestedRoundToken, progress);
+      if (soloRoundTokenRef.current !== requestedRoundToken) return;
+      setSoloHints((current) => applySoloHint(current, hint));
+    } catch {
+      if (soloRoundTokenRef.current !== requestedRoundToken) return;
+      setSoloHintError("Could not load a hint. Try again.");
+    } finally {
+      if (soloRoundTokenRef.current === requestedRoundToken) {
+        setSoloHintLoading(false);
+      }
+    }
   }
 
   async function offerNoAnswer() {
@@ -346,6 +383,16 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
           <div>
             <CareerGuessBox onGuess={handleGuess} disabled={Boolean(answer) || roundLocked} />
 
+            {solo && (
+              <SoloHintsPanel
+                hints={soloHints}
+                loading={soloHintLoading}
+                error={soloHintError}
+                disabled={Boolean(answer)}
+                onReveal={revealSoloHint}
+              />
+            )}
+
             <CareerFeedbackMessage message={message} />
 
             <SharedWrongGuesses
@@ -433,6 +480,179 @@ function shouldShowCareerMultiplayerFeedback(message, playerNumber) {
   }
 
   return true;
+}
+
+function createEmptySoloHints() {
+  return {
+    shownHints: [],
+    revealedLetters: [],
+    revealedPositions: {},
+    nationality: null,
+    countryCode: null,
+    position: null,
+    skeleton: null,
+    exhausted: false,
+    usedCount: 0,
+  };
+}
+
+function applySoloHint(current, hint) {
+  if (hint?.type === "exhausted") {
+    return { ...current, exhausted: true };
+  }
+
+  if (hint?.type === SOLO_HINT_TYPES.nationality) {
+    return {
+      ...current,
+      shownHints: addUnique(current.shownHints, SOLO_HINT_TYPES.nationality),
+      nationality: hint.nationality || "Unknown",
+      countryCode: hint.country_code || null,
+      usedCount: current.usedCount + 1,
+    };
+  }
+
+  if (hint?.type === SOLO_HINT_TYPES.position) {
+    return {
+      ...current,
+      shownHints: addUnique(current.shownHints, SOLO_HINT_TYPES.position),
+      position: hint.position || "Unknown",
+      usedCount: current.usedCount + 1,
+    };
+  }
+
+  if (hint?.type === SOLO_HINT_TYPES.nameSkeleton) {
+    return {
+      ...current,
+      shownHints: addUnique(current.shownHints, SOLO_HINT_TYPES.nameSkeleton),
+      skeleton: hint.skeleton || [],
+      usedCount: current.usedCount + 1,
+    };
+  }
+
+  if (hint?.type === "letter_reveal") {
+    const revealedPositions = { ...current.revealedPositions };
+    for (const position of hint.positions || []) {
+      revealedPositions[position] = hint.letter;
+    }
+    return {
+      ...current,
+      revealedLetters: addUnique(current.revealedLetters, hint.letter),
+      revealedPositions,
+      usedCount: current.usedCount + 1,
+    };
+  }
+
+  return current;
+}
+
+function addUnique(values, value) {
+  if (!value || values.includes(value)) return values;
+  return [...values, value];
+}
+
+function SoloHintsPanel({ hints, loading, error, disabled, onReveal }) {
+  const exhausted = hints.exhausted;
+  const buttonDisabled = disabled || loading || exhausted;
+  const buttonLabel = exhausted
+    ? "No more hints"
+    : loading ? "Loading hint..." : "Reveal a hint";
+
+  return (
+    <section
+      aria-label="Solo career hints"
+      data-testid="career-solo-hints"
+      className="mt-4 rounded-2xl border border-elq-border bg-white p-4 shadow-sm"
+    >
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.18em] text-elq-muted">
+            Solo hints
+          </div>
+          <div className="text-sm font-semibold text-elq-dark">
+            Hints used: {hints.usedCount}
+          </div>
+        </div>
+        <button
+          onClick={onReveal}
+          disabled={buttonDisabled}
+          className="rounded-xl border border-elq-orange/30 px-4 py-2 text-sm font-bold text-elq-orange disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {buttonLabel}
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {hints.nationality && (
+          <HintPill label="Nationality">
+            {hints.countryCode && (
+              <span aria-hidden="true">{countryCodeToFlagEmoji(hints.countryCode)}</span>
+            )}
+            <span>{hints.nationality}</span>
+          </HintPill>
+        )}
+        {hints.position && (
+          <HintPill label="Position">
+            <span>{hints.position}</span>
+          </HintPill>
+        )}
+        {hints.skeleton && <MaskedNameHint hints={hints} />}
+      </div>
+
+      {error && <div className="mt-3 text-sm font-semibold text-red-600">{error}</div>}
+    </section>
+  );
+}
+
+function HintPill({ label, children }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-xl bg-elq-bg px-3 py-2 text-sm">
+      <span className="font-bold text-elq-muted">{label}:</span>
+      <span className="flex items-center gap-1 font-semibold text-elq-dark">{children}</span>
+    </div>
+  );
+}
+
+function MaskedNameHint({ hints }) {
+  const maskedText = maskedNameText(hints);
+  return (
+    <div>
+      <div className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-elq-muted">
+        Name skeleton
+      </div>
+      <div
+        data-testid="career-hint-masked-name"
+        aria-label={maskedText}
+        className="flex flex-wrap gap-1 rounded-xl bg-elq-bg px-3 py-2 font-display text-2xl tracking-[0.18em] text-elq-dark"
+      >
+        {hints.skeleton.map((token) => (
+          <span key={token.index} className={token.kind === "space" ? "w-3" : ""}>
+            {maskedNameToken(token, hints)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function maskedNameText(hints) {
+  return hints.skeleton
+    .map((token) => maskedNameToken(token, hints))
+    .join("");
+}
+
+function maskedNameToken(token, hints) {
+  if (token.kind === "hidden_letter") {
+    return hints.revealedPositions[token.index]?.toUpperCase() || "_";
+  }
+  return token.value || "";
+}
+
+function countryCodeToFlagEmoji(countryCode) {
+  if (!/^[A-Za-z]{2}$/.test(countryCode || "")) return "";
+  return [...countryCode.toUpperCase()]
+    .map((character) => 127397 + character.charCodeAt(0))
+    .map((codePoint) => String.fromCodePoint(codePoint))
+    .join("");
 }
 
 function CareerFeedbackMessage({ message }) {

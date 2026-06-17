@@ -176,6 +176,14 @@ export function revealCareerSoloAnswer(roundToken) {
   });
 }
 
+export function fetchCareerSoloHint(roundToken, progress = {}) {
+  return request("POST", "/quiz/career/solo/hint", {
+    round_token: roundToken,
+    shown_hints: progress.shown_hints || [],
+    revealed_letters: progress.revealed_letters || [],
+  });
+}
+
 export function autocompleteCareerPlayer(q, limit = 15) {
   const params = new URLSearchParams({ q, limit });
   return request("GET", `/quiz/career/players/autocomplete?${params}`);

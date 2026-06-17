@@ -1,6 +1,7 @@
+import unicodedata
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class CareerSoloRoundRequest(BaseModel):
@@ -14,6 +15,36 @@ class CareerSoloGuessRequest(BaseModel):
 
 class CareerSoloRevealRequest(BaseModel):
     round_token: str
+
+
+class CareerSoloHintRequest(BaseModel):
+    round_token: str
+    shown_hints: list[Literal["nationality", "position", "name_skeleton"]] = Field(
+        default_factory=list
+    )
+    revealed_letters: list[str] = Field(default_factory=list)
+
+    @field_validator("revealed_letters")
+    @classmethod
+    def normalize_revealed_letters(cls, values: list[str]) -> list[str]:
+        normalized = []
+        seen = set()
+        for value in values:
+            letter = value.strip()
+            if len(letter) != 1:
+                raise ValueError("revealed_letters must contain single letters")
+            normalized_letters = [
+                character
+                for character in unicodedata.normalize("NFKD", letter.casefold())
+                if character.isalpha()
+            ]
+            if not normalized_letters:
+                raise ValueError("revealed_letters must contain single letters")
+            key = normalized_letters[0]
+            if key not in seen:
+                seen.add(key)
+                normalized.append(key)
+        return normalized
 
 
 class CareerQuizCreateRequest(BaseModel):

@@ -18,6 +18,7 @@ from app.models import (
 )
 from app.services import career_quiz
 from app.services.realtime_adapters import CareerQuizRealtimeAdapter
+from app.services.solo_round_token import create_solo_round_token
 
 
 def test_format_years_uses_wikipedia_calendar_style():
@@ -57,6 +58,162 @@ def test_solo_round_guess_and_reveal():
 
         reveal = career_quiz.reveal_solo_answer(db, round_token=round_data["round_token"])
         assert reveal["answer"]["id"] in {answer.id, other.id}
+    finally:
+        db.close()
+
+
+def test_solo_hints_progress_through_metadata_skeleton_and_letters():
+    db = _session()
+    try:
+        answer = _eligible_player(db, "Nikos", "Zisis")
+        answer.nationality = "Serbia"
+        answer.position = "Guard"
+        _active_revision(db)
+        token = _solo_token(answer)
+
+        nationality = career_quiz.get_solo_hint(
+            db, round_token=token, shown_hints=[], revealed_letters=[]
+        )
+        assert nationality["type"] == "nationality"
+        assert nationality["nationality"] == "Serbia"
+        assert "Nikos" not in repr(nationality)
+        assert "Zisis" not in repr(nationality)
+
+        position = career_quiz.get_solo_hint(
+            db,
+            round_token=token,
+            shown_hints=["nationality"],
+            revealed_letters=[],
+        )
+        assert position == {"type": "position", "position": "Guard"}
+
+        skeleton = career_quiz.get_solo_hint(
+            db,
+            round_token=token,
+            shown_hints=["nationality", "position"],
+            revealed_letters=[],
+        )
+        assert skeleton["type"] == "name_skeleton"
+        assert "Nikos" not in repr(skeleton)
+        assert "Zisis" not in repr(skeleton)
+        assert "first_name" not in skeleton
+        assert "last_name" not in skeleton
+        hidden_tokens = [
+            token for token in skeleton["skeleton"] if token["kind"] == "hidden_letter"
+        ]
+        assert len(hidden_tokens) == len("NikosZisis")
+        assert any(token == {"kind": "space", "index": 5, "value": " "} for token in skeleton["skeleton"])
+
+        reveal = career_quiz.get_solo_hint(
+            db,
+            round_token=token,
+            shown_hints=["nationality", "position", "name_skeleton"],
+            revealed_letters=[],
+        )
+        assert reveal["type"] == "letter_reveal"
+        expected_positions = [
+            index
+            for index, character in enumerate("Nikos Zisis")
+            if character.isalpha() and character.casefold() == reveal["letter"]
+        ]
+        assert reveal["positions"] == expected_positions
+        assert "Nikos Zisis" not in repr(reveal)
+    finally:
+        db.close()
+
+
+def test_solo_letter_hints_always_leave_one_distinct_letter_hidden():
+    db = _session()
+    try:
+        answer = _eligible_player(db, "Aa", "Bb")
+        _active_revision(db)
+        token = _solo_token(answer)
+
+        reveal = career_quiz.get_solo_hint(
+            db,
+            round_token=token,
+            shown_hints=["nationality", "position", "name_skeleton"],
+            revealed_letters=[],
+        )
+
+        assert reveal["type"] == "letter_reveal"
+        assert reveal["letter"] in {"a", "b"}
+        assert reveal["positions"] in ([0, 1], [3, 4])
+
+        distinct_letters = set(career_quiz._solo_letter_positions_by_key(answer))
+        reserved = career_quiz._reserved_solo_hint_letter(answer, distinct_letters)
+        assert reveal["letter"] != reserved
+
+        exhausted = career_quiz.get_solo_hint(
+            db,
+            round_token=token,
+            shown_hints=["nationality", "position", "name_skeleton"],
+            revealed_letters=[reveal["letter"]],
+        )
+        assert exhausted == {"type": "exhausted"}
+    finally:
+        db.close()
+
+
+def test_solo_letter_hints_are_exhausted_for_single_distinct_letter_name():
+    db = _session()
+    try:
+        answer = _eligible_player(db, "Aaa", "Aa")
+        _active_revision(db)
+        token = _solo_token(answer)
+
+        hint = career_quiz.get_solo_hint(
+            db,
+            round_token=token,
+            shown_hints=["nationality", "position", "name_skeleton"],
+            revealed_letters=[],
+        )
+
+        assert hint == {"type": "exhausted"}
+    finally:
+        db.close()
+
+
+def test_solo_letter_hints_never_return_reserved_letter_with_stale_progress():
+    db = _session()
+    try:
+        answer = _eligible_player(db, "Alpha", "Beta")
+        _active_revision(db)
+        token = _solo_token(answer)
+        distinct_letters = set(career_quiz._solo_letter_positions_by_key(answer))
+        reserved = career_quiz._reserved_solo_hint_letter(answer, distinct_letters)
+
+        seen = set()
+        for _ in range(40):
+            hint = career_quiz.get_solo_hint(
+                db,
+                round_token=token,
+                shown_hints=["nationality", "position", "name_skeleton"],
+                revealed_letters=[],
+            )
+            assert hint["type"] == "letter_reveal"
+            assert hint["letter"] != reserved
+            seen.add(hint["letter"])
+
+        assert reserved not in seen
+        assert distinct_letters - seen
+    finally:
+        db.close()
+
+
+def test_solo_name_skeleton_preserves_punctuation_and_folds_accents():
+    db = _session()
+    try:
+        answer = _eligible_player(db, "Ćać", "Melli-Jones")
+
+        skeleton = career_quiz._solo_name_skeleton(answer)
+        positions = career_quiz._solo_letter_positions_by_key(answer)
+
+        assert any(
+            token == {"kind": "punctuation", "index": 9, "value": "-"}
+            for token in skeleton
+        )
+        assert positions["c"] == [0, 2]
     finally:
         db.close()
 
@@ -558,6 +715,13 @@ def _active_revision(db):
     )
     db.add(revision)
     return revision
+
+
+def _solo_token(player):
+    return create_solo_round_token(
+        player_id=player.id,
+        data_revision="test-revision",
+    )
 
 
 def _eligible_player(db, first_name: str, last_name: str):

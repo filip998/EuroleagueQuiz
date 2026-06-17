@@ -13,6 +13,7 @@ import {
   submitHigherLowerAnswer,
   getHigherLowerLeaderboard,
   createCareerGame,
+  fetchCareerSoloHint,
   joinCareerGame,
   offerCareerNoAnswer,
   respondCareerNoAnswer,
@@ -224,6 +225,28 @@ describe("Higher or Lower API", () => {
 });
 
 describe("Career Quiz API", () => {
+  it("fetchCareerSoloHint sends round token and progress", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse({ type: "nationality", nationality: "Serbia" }));
+
+    const result = await fetchCareerSoloHint("round-token", {
+      shown_hints: ["nationality"],
+      revealed_letters: ["a"],
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/solo/hint",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          round_token: "round-token",
+          shown_hints: ["nationality"],
+          revealed_letters: ["a"],
+        }),
+      })
+    );
+    expect(result.nationality).toBe("Serbia");
+  });
+
   it("createCareerGame parses the realtime state envelope", async () => {
     const payload = { target_wins: 3, wrong_guess_visibility: "private" };
     mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 })));
