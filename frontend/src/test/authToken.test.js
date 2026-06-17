@@ -3,6 +3,9 @@ import {
   setAuthTokenProvider,
   clearAuthTokenProvider,
   getAuthToken,
+  getAuthTokenProviderSnapshot,
+  hasAuthTokenProvider,
+  subscribeAuthTokenProvider,
 } from "../authToken";
 
 afterEach(() => {
@@ -45,6 +48,23 @@ describe("authToken", () => {
     setAuthTokenProvider(async () => "token");
     clearAuthTokenProvider();
     expect(await getAuthToken()).toBeNull();
+  });
+
+  it("notifies subscribers when the provider is registered and cleared", () => {
+    const startVersion = getAuthTokenProviderSnapshot();
+    const snapshots = [];
+    const unsubscribe = subscribeAuthTokenProvider(() => {
+      snapshots.push(getAuthTokenProviderSnapshot());
+    });
+
+    const dispose = setAuthTokenProvider(async () => "token");
+    expect(hasAuthTokenProvider()).toBe(true);
+    dispose();
+    expect(hasAuthTokenProvider()).toBe(false);
+    unsubscribe();
+    setAuthTokenProvider(async () => "ignored");
+
+    expect(snapshots).toEqual([startVersion + 1, startVersion + 2]);
   });
 
   it("discards the token if the provider is cleared mid-flight (sign-out race)", async () => {

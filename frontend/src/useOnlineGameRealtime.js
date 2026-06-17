@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 
-import { getAuthToken, hasAuthTokenProvider } from "./authToken";
+import {
+  getAuthToken,
+  getAuthTokenProviderSnapshot,
+  hasAuthTokenProvider,
+  subscribeAuthTokenProvider,
+} from "./authToken";
 import { REALTIME_MESSAGE_TYPES } from "./realtimeSchema";
 
 const DEFAULT_RECONNECT_DELAY_MS = 2000;
@@ -24,6 +29,11 @@ export function useOnlineGameRealtime({
   const realtimeVersionRef = useRef(0);
   const onStateRef = useRef(onState);
   const onErrorRef = useRef(onError);
+  const authTokenProviderVersion = useSyncExternalStore(
+    subscribeAuthTokenProvider,
+    getAuthTokenProviderSnapshot,
+    getAuthTokenProviderSnapshot
+  );
 
   useEffect(() => {
     onStateRef.current = onState;
@@ -120,6 +130,7 @@ export function useOnlineGameRealtime({
     gameId,
     playerNumber,
     reconnectDelayMs,
+    authTokenProviderVersion,
   ]);
 
   useEffect(() => {

@@ -241,6 +241,39 @@ describe("useOnlineGameRealtime", () => {
     expect(connect.mock.calls[0][0].authToken).toBeUndefined();
   });
 
+  it("reconnects with a token when the provider registers after anonymous connect", async () => {
+    const { connect, connections } = renderHarness();
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(connect.mock.calls[0][0].authToken).toBeUndefined();
+
+    act(() => {
+      setAuthTokenProvider(async () => "late-token");
+    });
+    await flushAsyncConnect();
+
+    expect(connections[0].closed).toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(connect.mock.calls[1][0].authToken).toBe("late-token");
+  });
+
+  it("reconnects as guest when the token provider is cleared", async () => {
+    setAuthTokenProvider(async () => "session-token");
+
+    const { connect, connections } = renderHarness();
+    await flushAsyncConnect();
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(connect.mock.calls[0][0].authToken).toBe("session-token");
+
+    await act(async () => {
+      clearAuthTokenProvider();
+      await Promise.resolve();
+    });
+
+    expect(connections[0].closed).toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(connect.mock.calls[1][0].authToken).toBeUndefined();
+  });
+
   it("does not open a stale socket if unmounted while resolving the token", async () => {
     let resolveToken;
     setAuthTokenProvider(
