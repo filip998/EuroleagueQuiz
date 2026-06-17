@@ -92,6 +92,60 @@ def test_find_or_create_pairs_two_tictactoe_requests(session_factory):
         assert second.game.round_number == 1
 
 
+@pytest.mark.parametrize(
+    ("preset", "expected_target_wins", "expected_turn_seconds"),
+    [
+        ("blitz", 3, 15),
+        ("standard", 3, 40),
+        ("long", 5, 40),
+    ],
+)
+def test_tictactoe_matchmaking_presets_map_to_game_settings(
+    session_factory,
+    preset,
+    expected_target_wins,
+    expected_turn_seconds,
+):
+    adapter = TicTacToeMatchmakingAdapter()
+    with session_factory() as db:
+        result = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset=preset,
+                    player_name="Host",
+                    guest_id=f"{preset}-guest",
+                ),
+            )
+        )
+
+        assert result.status == MatchmakingStatus.SEARCHING
+        assert result.game.preset == preset
+        assert result.game.target_wins == expected_target_wins
+        assert result.game.turn_seconds == expected_turn_seconds
+
+
+def test_tictactoe_matchmaking_rejects_unknown_preset(session_factory):
+    adapter = TicTacToeMatchmakingAdapter()
+    with session_factory() as db:
+        with pytest.raises(
+            InvalidGameActionError,
+            match="Unknown TicTacToe matchmaking preset",
+        ):
+            asyncio.run(
+                find_or_create_match(
+                    db,
+                    adapter,
+                    MatchmakingRequest(
+                        preset="arcade",
+                        player_name="Host",
+                        guest_id="host-guest",
+                    ),
+                )
+            )
+
+
 def test_matched_guest_retry_returns_active_game(session_factory):
     adapter = TicTacToeMatchmakingAdapter()
     with session_factory() as db:

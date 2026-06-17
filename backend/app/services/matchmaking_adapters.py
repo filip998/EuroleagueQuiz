@@ -27,12 +27,14 @@ from app.services.matchmaking import (
 
 @dataclass(frozen=True)
 class TicTacToeMatchmakingPreset:
-    target_wins: int = 2
+    target_wins: int = 3
     timer_mode: str = "40s"
 
 
 DEFAULT_TICTACTOE_MATCHMAKING_PRESETS = {
-    "standard": TicTacToeMatchmakingPreset(),
+    "blitz": TicTacToeMatchmakingPreset(target_wins=3, timer_mode="15s"),
+    "standard": TicTacToeMatchmakingPreset(target_wins=3, timer_mode="40s"),
+    "long": TicTacToeMatchmakingPreset(target_wins=5, timer_mode="40s"),
 }
 
 
@@ -44,7 +46,11 @@ class TicTacToeMatchmakingAdapter:
         presets: Mapping[str, TicTacToeMatchmakingPreset] | None = None,
     ):
         source = DEFAULT_TICTACTOE_MATCHMAKING_PRESETS if presets is None else presets
-        self._presets = {clean_preset(key): value for key, value in source.items()}
+        self._presets = {}
+        for key, value in source.items():
+            preset_key = clean_preset(key)
+            self._validate_preset_config(preset_key, value)
+            self._presets[preset_key] = value
 
     def find_existing_game(
         self,
@@ -187,3 +193,17 @@ class TicTacToeMatchmakingAdapter:
             return self._presets[preset]
         except KeyError as exc:
             raise InvalidGameActionError("Unknown TicTacToe matchmaking preset") from exc
+
+    @staticmethod
+    def _validate_preset_config(
+        preset: str,
+        config: TicTacToeMatchmakingPreset,
+    ) -> None:
+        if config.target_wins not in ttt_service.TARGET_WINS_OPTIONS:
+            raise InvalidGameActionError(
+                f"Invalid TicTacToe target_wins for preset '{preset}'"
+            )
+        if config.timer_mode not in ttt_service.TIMER_MODE_TO_SECONDS:
+            raise InvalidGameActionError(
+                f"Invalid TicTacToe timer_mode for preset '{preset}'"
+            )

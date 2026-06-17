@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
@@ -8,7 +9,9 @@ from sqlalchemy.sql.expression import func
 from app.database import get_db
 from app.game_actions import (
     GameActionError,
+    http_exception_for_game_action_error,
     raise_http_game_action_error,
+    websocket_error_payload,
 )
 from app.models import Player, PlayerSeasonTeam, PlayerSeasonStats, Team, Season
 from app.schemas.player import PlayerDetail, SeasonStatsEntry
@@ -17,7 +20,10 @@ from app.schemas.quiz_ttt import (
     TicTacToeMoveRequest,
     TicTacToeDrawResponseRequest,
     TicTacToeJoinGameRequest,
+    TicTacToeQuickMatchCancelRequest,
+    TicTacToeQuickMatchRequest,
 )
+from app.schemas.realtime import state_message
 from app.services.tictactoe import (
     autocomplete_players,
     get_game_or_404,
@@ -27,11 +33,21 @@ from app.services.game_action_orchestration import (
     GameActionName,
     HttpGameActionRejected,
 )
+from app.services.matchmaking import (
+    MatchmakingCancelRequest,
+    MatchmakingRequest,
+    MatchmakingStatus,
+    cancel_search,
+    find_or_create_match,
+)
+from app.services.matchmaking_adapters import TicTacToeMatchmakingAdapter
 from app.services.realtime import OnlineGameRealtimeModule
 from app.services.realtime_adapters import TicTacToeRealtimeAdapter
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 tictactoe_realtime = OnlineGameRealtimeModule(TicTacToeRealtimeAdapter())
+tictactoe_matchmaking = TicTacToeMatchmakingAdapter()
 
 
 async def _tictactoe_http_action(
@@ -52,6 +68,57 @@ async def _tictactoe_http_action(
         )
     except HttpGameActionRejected as exc:
         return JSONResponse(status_code=exc.status_code, content=exc.envelope)
+
+
+def _game_action_error_response(exc: GameActionError) -> JSONResponse:
+    http_exc = http_exception_for_game_action_error(exc)
+    return JSONResponse(
+        status_code=http_exc.status_code,
+        content=websocket_error_payload(exc),
+    )
+
+
+async def _apply_quick_match_pair_effects(
+    result,
+    game_state: dict,
+) -> None:
+    if result.status != MatchmakingStatus.MATCHED or result.starting_player is None:
+        return
+
+    try:
+        tictactoe_realtime.start_timer_from_state(game_state)
+    except Exception:
+        logger.exception("Post-commit quick-match side effect failed: start timer")
+
+    try:
+        await tictactoe_realtime.broadcast_state(game_state["id"], game_state)
+    except Exception:
+        logger.exception("Post-commit quick-match side effect failed: broadcast state")
+
+
+def _cancelled_quick_match_state(result) -> dict:
+    game = result.game
+    return {
+        "id": game.id,
+        "mode": "online_friend",
+        "resolved_mode": "online_friend",
+        "status": "cancelled",
+        "join_code": None,
+        "is_public": True,
+        "preset": result.preset,
+        "target_wins": game.target_wins,
+        "turn_seconds": game.turn_seconds,
+        "turn_deadline_utc": None,
+        "player1_name": game.player1_name or "Player 1",
+        "player2_name": game.player2_name or "Player 2",
+        "player1_score": game.player1_score,
+        "player2_score": game.player2_score,
+        "current_player": game.current_player,
+        "round_number": game.round_number,
+        "winner_player": game.winner_player,
+        "pending_draw": None,
+        "round": None,
+    }
 
 
 @router.get("/random-player")
@@ -226,6 +293,48 @@ async def create_tictactoe_game(
         GameActionName.CREATE,
         payload=payload,
     )
+
+
+@router.post("/tictactoe/quick-match")
+async def quick_match_tictactoe_game(
+    payload: TicTacToeQuickMatchRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        result = await find_or_create_match(
+            db,
+            tictactoe_matchmaking,
+            MatchmakingRequest(
+                preset=payload.preset,
+                player_name=payload.player_name,
+                guest_id=payload.guest_id,
+            ),
+        )
+        game_state = serialize_game_state(db, result.game)
+        await _apply_quick_match_pair_effects(result, game_state)
+        return state_message(game_state)
+    except GameActionError as exc:
+        return _game_action_error_response(exc)
+
+
+@router.post("/tictactoe/quick-match/cancel")
+async def cancel_quick_match_tictactoe_game(
+    payload: TicTacToeQuickMatchCancelRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        result = await cancel_search(
+            db,
+            tictactoe_matchmaking,
+            MatchmakingCancelRequest(
+                preset=payload.preset,
+                game_id=payload.game_id,
+                guest_id=payload.guest_id,
+            ),
+        )
+        return state_message(_cancelled_quick_match_state(result))
+    except GameActionError as exc:
+        return _game_action_error_response(exc)
 
 
 @router.get("/tictactoe/games/{game_id}")
