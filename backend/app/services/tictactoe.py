@@ -37,6 +37,16 @@ TicTacToeNotFoundError = NotFoundGameActionError
 TicTacToeConflictError = ConflictGameActionError
 TicTacToeNotImplementedError = UnsupportedGameActionError
 
+GUEST_ID_MAX_LENGTH = 64
+
+
+def _clean_guest_id(guest_id: Optional[str]) -> Optional[str]:
+    """Normalize an opaque, untrusted client guest id (None when blank)."""
+    if not guest_id:
+        return None
+    cleaned = guest_id.strip()[:GUEST_ID_MAX_LENGTH]
+    return cleaned or None
+
 
 # ---------------------------------------------------------------------------
 # Axis registry — extensible axis types for board generation
@@ -479,6 +489,7 @@ def create_game(
     timer_mode: str,
     player1_name: Optional[str] = None,
     player2_name: Optional[str] = None,
+    guest_id: Optional[str] = None,
 ) -> QuizTicTacToeGame:
     if mode not in SUPPORTED_MODES:
         raise TicTacToeError(
@@ -500,6 +511,7 @@ def create_game(
         turn_seconds=TIMER_MODE_TO_SECONDS[timer_mode],
         player1_name=player1_name,
         player2_name=player2_name,
+        player1_guest_id=_clean_guest_id(guest_id),
         current_player=1,
         player1_score=0,
         player2_score=0,
@@ -531,6 +543,7 @@ def join_game(
     db: Session,
     join_code: str,
     player2_name: Optional[str] = None,
+    guest_id: Optional[str] = None,
 ) -> QuizTicTacToeGame:
     game = (
         db.query(QuizTicTacToeGame)
@@ -543,6 +556,7 @@ def join_game(
         raise TicTacToeConflictError("Game is no longer accepting players")
 
     game.player2_name = player2_name or game.player2_name
+    game.player2_guest_id = _clean_guest_id(guest_id) or game.player2_guest_id
     game.status = "active"
     now = datetime.utcnow()
     game.turn_started_at = now

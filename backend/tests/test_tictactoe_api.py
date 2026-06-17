@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, get_db
 from app.main import app
 from app.models import Player, PlayerSeasonTeam, Season, Team
+from app.models.tictactoe import QuizTicTacToeGame
 
 
 @pytest.fixture(autouse=True)
@@ -144,6 +145,7 @@ def client(tmp_path: Path):
     app.dependency_overrides[get_db] = override_get_db
 
     with TestClient(app) as test_client:
+        test_client.session_local = TestingSessionLocal
         yield test_client
 
     if previous_override is None:
@@ -378,6 +380,7 @@ def test_online_game_create_and_join(client: TestClient):
     assert response3.json()["type"] == "error"
 
 
+
 def test_online_resign_finishes_game_for_opponent_even_off_turn(client: TestClient):
     create = client.post(
         "/quiz/tictactoe/games",
@@ -407,3 +410,85 @@ def test_online_resign_finishes_game_for_opponent_even_off_turn(client: TestClie
     assert payload["game"]["status"] == "finished"
     assert payload["game"]["winner_player"] == 1
     assert payload["game"]["pending_draw"] is None
+
+
+def test_online_game_persists_guest_id(client: TestClient):
+    create = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "online_friend",
+            "target_wins": 2,
+            "timer_mode": "40s",
+            "player1_name": "Host",
+            "guest_id": "host-guest-123",
+        },
+    )
+    assert create.status_code == 200
+    data = _action_payload(create)["game"]
+    game_id = data["id"]
+    # guest_id is an opaque server-side token; never leak it into game state.
+    assert "guest_id" not in data
+    assert "player1_guest_id" not in data
+
+    join = client.post(
+        "/quiz/tictactoe/games/join",
+        json={
+            "join_code": data["join_code"],
+            "player_name": "Joiner",
+            "guest_id": "joiner-guest-456",
+        },
+    )
+    assert join.status_code == 200
+
+    with client.session_local() as db:
+        game = db.get(QuizTicTacToeGame, game_id)
+        assert game.player1_guest_id == "host-guest-123"
+        assert game.player2_guest_id == "joiner-guest-456"
+
+
+def test_online_game_without_guest_id_still_works(client: TestClient):
+    create = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "online_friend",
+            "target_wins": 2,
+            "timer_mode": "40s",
+            "player1_name": "Host",
+        },
+    )
+    assert create.status_code == 200
+    data = _action_payload(create)["game"]
+    game_id = data["id"]
+
+    join = client.post(
+        "/quiz/tictactoe/games/join",
+        json={"join_code": data["join_code"], "player_name": "Joiner"},
+    )
+    assert join.status_code == 200
+    assert _action_payload(join)["game"]["status"] == "active"
+
+    with client.session_local() as db:
+        game = db.get(QuizTicTacToeGame, game_id)
+        assert game.player1_guest_id is None
+        assert game.player2_guest_id is None
+
+
+def test_online_game_oversized_guest_id_is_clamped_not_rejected(client: TestClient):
+    oversized = "g" * 200
+    create = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "online_friend",
+            "target_wins": 2,
+            "timer_mode": "40s",
+            "player1_name": "Host",
+            "guest_id": oversized,
+        },
+    )
+    # An oversized/corrupted client id must never 422 and break play.
+    assert create.status_code == 200
+    game_id = _action_payload(create)["game"]["id"]
+
+    with client.session_local() as db:
+        game = db.get(QuizTicTacToeGame, game_id)
+        assert game.player1_guest_id == "g" * 64

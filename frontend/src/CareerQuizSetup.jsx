@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createCareerGame, createCareerSoloRound, joinCareerGame } from "./api";
+import { getNickname, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
 import GameSetupShell from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 
@@ -12,7 +13,7 @@ const HEADER_ICON = (
 export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack }) {
   const [mode, setMode] = useState("solo");
   const [sub, setSub] = useState("create");
-  const [playerName, setPlayerName] = useState("");
+  const [playerName, setPlayerName] = useState(() => getNickname());
   const [joinCode, setJoinCode] = useState("");
   const [targetWins, setTargetWins] = useState(3);
   const [wrongGuessVisibility, setWrongGuessVisibility] = useState("private");
@@ -21,6 +22,13 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
 
   const isOnline = mode === "online";
   const isJoin = isOnline && sub === "join";
+
+  // The name field only renders for online play, where it is the shared
+  // nickname, so persist every edit.
+  function handlePlayerNameChange(value) {
+    setPlayerName(value);
+    setNickname(value);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -96,8 +104,9 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
                   <label className="block text-sm text-elq-text mb-1.5">Your Name</label>
                   <input
                     value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
+                    onChange={(e) => handlePlayerNameChange(e.target.value)}
                     placeholder="Your name"
+                    maxLength={NICKNAME_MAX_LENGTH}
                     className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
                   />
                 </div>
@@ -108,8 +117,9 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
                   <label className="block text-sm text-elq-text mb-1.5">Your Name</label>
                   <input
                     value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
+                    onChange={(e) => handlePlayerNameChange(e.target.value)}
                     placeholder="Your name"
+                    maxLength={NICKNAME_MAX_LENGTH}
                     className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
                   />
                 </div>

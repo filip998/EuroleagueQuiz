@@ -11,6 +11,7 @@ class RosterGuessCreateRequest(BaseModel):
     player2_name: Optional[str] = None
     season_range_start: int = Field(ge=2000, le=2030)
     season_range_end: int = Field(ge=2000, le=2030)
+    guest_id: Optional[str] = None
 
 
 class RosterGuessGuessRequest(BaseModel):
@@ -24,3 +25,4 @@ class RosterGuessEndResponseRequest(BaseModel):
 class RosterGuessJoinRequest(BaseModel):
     join_code: str = Field(min_length=6, max_length=6)
     player_name: Optional[str] = None
+    guest_id: Optional[str] = None

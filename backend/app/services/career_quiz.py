@@ -29,6 +29,15 @@ from app.services.solo_round_token import (
 VALID_TARGET_WINS = {1, 3, 5, 7}
 VALID_WRONG_GUESS_VISIBILITY = {"private", "shared"}
 CAREER_REVEAL_COUNTDOWN_SECONDS = 3
+GUEST_ID_MAX_LENGTH = 64
+
+
+def _clean_guest_id(guest_id: str | None) -> str | None:
+    """Normalize an opaque, untrusted client guest id (None when blank)."""
+    if not guest_id:
+        return None
+    cleaned = guest_id.strip()[:GUEST_ID_MAX_LENGTH]
+    return cleaned or None
 
 
 def create_solo_round(
@@ -90,6 +99,7 @@ def create_game(
     target_wins: int = 3,
     wrong_guess_visibility: str = "private",
     player1_name: str | None = None,
+    guest_id: str | None = None,
 ) -> CareerQuizGame:
     _active_revision(db)
     if target_wins not in VALID_TARGET_WINS:
@@ -103,6 +113,7 @@ def create_game(
         target_wins=target_wins,
         wrong_guess_visibility=wrong_guess_visibility,
         player1_name=player1_name or "Player 1",
+        player1_guest_id=_clean_guest_id(guest_id),
         player1_score=0,
         player2_score=0,
         round_number=1,
@@ -117,6 +128,7 @@ def join_game(
     join_code: str,
     *,
     player_name: str | None = None,
+    guest_id: str | None = None,
 ) -> CareerQuizGame:
     game = (
         db.query(CareerQuizGame)
@@ -128,6 +140,7 @@ def join_game(
     if game.status != "waiting_for_opponent":
         raise ConflictGameActionError("Game is not waiting for an opponent")
     game.player2_name = player_name or "Player 2"
+    game.player2_guest_id = _clean_guest_id(guest_id) or game.player2_guest_id
     game.status = "active"
     _create_next_round(db, game)
     return game

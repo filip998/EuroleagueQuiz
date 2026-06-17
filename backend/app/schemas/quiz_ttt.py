@@ -9,6 +9,7 @@ class TicTacToeCreateGameRequest(BaseModel):
     timer_mode: Literal["15s", "40s", "unlimited"] = "40s"
     player1_name: Optional[str] = None
     player2_name: Optional[str] = None
+    guest_id: Optional[str] = None
 
 
 class TicTacToeMoveRequest(BaseModel):
@@ -24,3 +25,4 @@ class TicTacToeDrawResponseRequest(BaseModel):
 class TicTacToeJoinGameRequest(BaseModel):
     join_code: str = Field(min_length=6, max_length=6)
     player_name: Optional[str] = None
+    guest_id: Optional[str] = None
