@@ -16,14 +16,31 @@ class UserProvisioningError(ValueError):
 
 
 def get_or_create_user_for_claims(db: Session, claims: Mapping[str, Any]) -> User:
-    clerk_user_id = claims.get("sub")
-    if not isinstance(clerk_user_id, str) or not clerk_user_id or len(clerk_user_id) > 255:
-        raise UserProvisioningError("Invalid Clerk user id")
-
+    clerk_user_id = _validated_clerk_user_id(claims)
     existing = _find_by_clerk_user_id(db, clerk_user_id)
     if existing is not None:
         return existing
 
+    return _create_user_from_claims(db, clerk_user_id, claims)
+
+
+def upsert_user_for_claims(db: Session, claims: Mapping[str, Any]) -> User:
+    clerk_user_id = _validated_clerk_user_id(claims)
+    existing = _find_by_clerk_user_id(db, clerk_user_id)
+    if existing is None:
+        return _create_user_from_claims(db, clerk_user_id, claims)
+
+    return _update_user_from_claims(db, existing, claims)
+
+
+def _validated_clerk_user_id(claims: Mapping[str, Any]) -> str:
+    clerk_user_id = claims.get("sub")
+    if not isinstance(clerk_user_id, str) or not clerk_user_id or len(clerk_user_id) > 255:
+        raise UserProvisioningError("Invalid Clerk user id")
+    return clerk_user_id
+
+
+def _create_user_from_claims(db: Session, clerk_user_id: str, claims: Mapping[str, Any]) -> User:
     username = _claimed_username(claims)
     if username is None or _is_reserved_fallback_username(username):
         username = _fallback_username(clerk_user_id)
@@ -38,6 +55,68 @@ def get_or_create_user_for_claims(db: Session, claims: Mapping[str, Any]) -> Use
         display_name=_claimed_display_name(claims),
         avatar_url=_claimed_avatar_url(claims),
     )
+
+
+def _update_user_from_claims(db: Session, user: User, claims: Mapping[str, Any]) -> User:
+    clerk_user_id = user.clerk_user_id
+    _assign_update_profile(db, user, claims)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        refreshed = _find_by_clerk_user_id(db, clerk_user_id)
+        if refreshed is None:
+            return _create_user_from_claims(db, clerk_user_id, claims)
+        fallback_username = _next_available_fallback_username(
+            db,
+            refreshed.clerk_user_id,
+            exclude_user_id=refreshed.id,
+        )
+        if fallback_username is None:
+            raise UserProvisioningError("Could not provision Clerk user") from exc
+        _assign_update_profile(db, refreshed, claims, username=fallback_username)
+        try:
+            db.commit()
+        except IntegrityError as retry_exc:
+            db.rollback()
+            raise UserProvisioningError("Could not provision Clerk user") from retry_exc
+        db.refresh(refreshed)
+        return refreshed
+    db.refresh(user)
+    return user
+
+
+def _assign_update_profile(
+    db: Session,
+    user: User,
+    claims: Mapping[str, Any],
+    *,
+    username: str | None = None,
+) -> None:
+    user.username = username or _updated_username(db, user, claims)
+    user.email = _claimed_email(claims) or user.email
+    user.display_name = _claimed_display_name(claims)
+    user.avatar_url = _claimed_avatar_url(claims)
+
+
+def _updated_username(db: Session, user: User, claims: Mapping[str, Any]) -> str:
+    username = _claimed_username(claims)
+    if username is None:
+        return user.username
+    if _is_reserved_fallback_username(username) or _username_is_taken(
+        db,
+        username,
+        exclude_user_id=user.id,
+    ):
+        fallback_username = _next_available_fallback_username(
+            db,
+            user.clerk_user_id,
+            exclude_user_id=user.id,
+        )
+        if fallback_username is None:
+            raise UserProvisioningError("Could not provision Clerk user")
+        return fallback_username
+    return username
 
 
 def _insert_user(
@@ -83,8 +162,11 @@ def _find_by_clerk_user_id(db: Session, clerk_user_id: str) -> User | None:
     return db.execute(select(User).where(User.clerk_user_id == clerk_user_id)).scalar_one_or_none()
 
 
-def _username_is_taken(db: Session, username: str) -> bool:
-    return db.execute(select(User.id).where(User.username == username)).first() is not None
+def _username_is_taken(db: Session, username: str, *, exclude_user_id: str | None = None) -> bool:
+    statement = select(User.id).where(User.username == username)
+    if exclude_user_id is not None:
+        statement = statement.where(User.id != exclude_user_id)
+    return db.execute(statement).first() is not None
 
 
 def _claimed_username(claims: Mapping[str, Any]) -> str | None:
@@ -96,11 +178,18 @@ def _claimed_username(claims: Mapping[str, Any]) -> str | None:
 
 
 def _claimed_email(claims: Mapping[str, Any]) -> str | None:
+    email_addresses = claims.get("email_addresses")
+    primary_email_address_id = claims.get("primary_email_address_id")
+    if isinstance(email_addresses, list) and isinstance(primary_email_address_id, str):
+        for item in email_addresses:
+            if isinstance(item, Mapping) and item.get("id") == primary_email_address_id:
+                value = _clean_email(item.get("email_address") or item.get("email"))
+                if value is not None:
+                    return value
     for key in ("email", "email_address", "primary_email_address"):
         value = _clean_email(claims.get(key))
         if value is not None:
             return value
-    email_addresses = claims.get("email_addresses")
     if isinstance(email_addresses, list):
         for item in email_addresses:
             if isinstance(item, Mapping):
@@ -164,14 +253,19 @@ def _fallback_username_with_suffix(clerk_user_id: str, suffix: int) -> str:
     return f"{base}_{suffix}"[:64]
 
 
-def _next_available_fallback_username(db: Session, clerk_user_id: str) -> str | None:
+def _next_available_fallback_username(
+    db: Session,
+    clerk_user_id: str,
+    *,
+    exclude_user_id: str | None = None,
+) -> str | None:
     for suffix in range(0, 100):
         username = (
             _fallback_username(clerk_user_id)
             if suffix == 0
             else _fallback_username_with_suffix(clerk_user_id, suffix)
         )
-        if not _username_is_taken(db, username):
+        if not _username_is_taken(db, username, exclude_user_id=exclude_user_id):
             return username
     return None
 
