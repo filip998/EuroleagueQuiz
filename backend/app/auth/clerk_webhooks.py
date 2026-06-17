@@ -131,11 +131,11 @@ def _claim_mutation_state(
             clerk_user_key=clerk_user_key,
             last_event_at=event_time,
         )
-        db.add(state)
         try:
-            db.flush()
+            with db.begin_nested():
+                db.add(state)
+                db.flush()
         except IntegrityError:
-            db.rollback()
             return _claim_mutation_state(db, clerk_user_id, event_time)
         return True
     return False
@@ -168,11 +168,11 @@ def _record_delete_state(
             clerk_user_key=clerk_user_sync_key(clerk_user_id),
             last_event_at=event_time,
         )
-        db.add(state)
         try:
-            db.flush()
+            with db.begin_nested():
+                db.add(state)
+                db.flush()
         except IntegrityError:
-            db.rollback()
             _record_delete_state(db, clerk_user_id, event_time)
         else:
             state.deleted_at = event_time
@@ -212,4 +212,7 @@ def _timestamp_from_number(value: float) -> datetime | None:
     if value <= 0:
         return None
     seconds = value / 1000 if value > 10_000_000_000 else value
-    return datetime.fromtimestamp(seconds, timezone.utc)
+    try:
+        return datetime.fromtimestamp(seconds, timezone.utc)
+    except (OSError, OverflowError, ValueError):
+        return None

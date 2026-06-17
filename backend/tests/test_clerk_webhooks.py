@@ -155,6 +155,27 @@ def test_clerk_user_updated_updates_existing_idempotently(auth_client, auth_sess
         assert user.avatar_url == "https://example.com/updated.png"
 
 
+def test_clerk_user_updated_clears_removed_email_to_fallback(auth_client, auth_session_factory):
+    assert (
+        _post_signed(auth_client, _user_event("user.created", event_timestamp=1_700_000_001_000)).status_code
+        == 200
+    )
+    updated = _user_event(
+        "user.updated",
+        event_timestamp=1_700_000_002_000,
+        primary_email_address_id=None,
+        email_addresses=[],
+    )
+
+    response = _post_signed(auth_client, updated)
+
+    assert response.status_code == 200
+    with auth_session_factory() as db:
+        user = db.execute(select(User).where(User.clerk_user_id == "user_clerk_123")).scalar_one()
+        assert user.email != "filip@example.com"
+        assert user.email.endswith("@clerk.invalid")
+
+
 def test_clerk_user_updated_before_created_creates_user(auth_client, auth_session_factory):
     response = _post_signed(
         auth_client,
@@ -351,6 +372,18 @@ def test_clerk_webhook_maps_provisioning_errors_to_retryable_status(auth_client,
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Could not sync Clerk user"}
+
+
+def test_clerk_webhook_handles_extreme_signed_payload_timestamp(auth_client, auth_session_factory):
+    response = _post_signed(
+        auth_client,
+        _user_event("user.created", event_timestamp=10**21),
+    )
+
+    assert response.status_code == 200
+    with auth_session_factory() as db:
+        user = db.execute(select(User).where(User.clerk_user_id == "user_clerk_123")).scalar_one()
+        assert user.email == "filip@example.com"
 
 
 def test_clerk_webhook_ignores_unsupported_events(auth_client, auth_session_factory):

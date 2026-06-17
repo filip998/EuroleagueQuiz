@@ -154,7 +154,7 @@ def _assign_update_profile(
     username: str | None = None,
 ) -> None:
     user.username = username or _updated_username(db, user, claims)
-    user.email = _claimed_email(claims) or user.email
+    user.email = _claimed_email(claims) or _fallback_email(user.clerk_user_id)
     user.display_name = _claimed_display_name(claims)
     user.avatar_url = _claimed_avatar_url(claims)
 
