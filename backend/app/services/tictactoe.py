@@ -544,7 +544,11 @@ def join_game(
     join_code: str,
     player2_name: Optional[str] = None,
     guest_id: Optional[str] = None,
+    *,
+    started_by_player: int = 1,
 ) -> QuizTicTacToeGame:
+    if started_by_player not in (1, 2):
+        raise TicTacToeError("started_by_player must be 1 or 2")
     game = (
         db.query(QuizTicTacToeGame)
         .filter(QuizTicTacToeGame.join_code == join_code.upper())
@@ -562,7 +566,7 @@ def join_game(
     game.turn_started_at = now
     game.updated_at = now
 
-    create_next_round(db, game, started_by_player=1)
+    create_next_round(db, game, started_by_player=started_by_player)
     db.flush()
     return game
 
