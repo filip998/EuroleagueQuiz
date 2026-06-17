@@ -118,6 +118,8 @@ class CareerQuizGame(Base):
     wrong_guess_visibility = Column(String, nullable=False, default="private")
     player1_name = Column(String, nullable=True)
     player2_name = Column(String, nullable=True)
+    player1_guest_id = Column(String(64), nullable=True)
+    player2_guest_id = Column(String(64), nullable=True)
     player1_score = Column(Integer, nullable=False, default=0)
     player2_score = Column(Integer, nullable=False, default=0)
     round_number = Column(Integer, nullable=False, default=1)

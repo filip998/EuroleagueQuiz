@@ -36,6 +36,16 @@ RosterGuessError = InvalidGameActionError
 RosterGuessNotFoundError = NotFoundGameActionError
 RosterGuessConflictError = ConflictGameActionError
 
+GUEST_ID_MAX_LENGTH = 64
+
+
+def _clean_guest_id(guest_id: Optional[str]) -> Optional[str]:
+    """Normalize an opaque, untrusted client guest id (None when blank)."""
+    if not guest_id:
+        return None
+    cleaned = guest_id.strip()[:GUEST_ID_MAX_LENGTH]
+    return cleaned or None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -79,6 +89,7 @@ def create_game(
     player2_name: Optional[str] = None,
     season_range_start: int,
     season_range_end: int,
+    guest_id: Optional[str] = None,
 ) -> RosterGuessGame:
     if mode not in SUPPORTED_MODES:
         raise RosterGuessError(
@@ -102,6 +113,7 @@ def create_game(
         turn_seconds=TIMER_MODE_TO_SECONDS[timer_mode],
         player1_name=player1_name,
         player2_name=player2_name,
+        player1_guest_id=_clean_guest_id(guest_id),
         current_player=1,
         player1_score=0,
         player2_score=0,
@@ -135,6 +147,7 @@ def join_game(
     db: Session,
     join_code: str,
     player2_name: Optional[str] = None,
+    guest_id: Optional[str] = None,
 ) -> RosterGuessGame:
     game = (
         db.query(RosterGuessGame)
@@ -147,6 +160,7 @@ def join_game(
         raise RosterGuessConflictError("Game is no longer accepting players")
 
     game.player2_name = player2_name or game.player2_name
+    game.player2_guest_id = _clean_guest_id(guest_id) or game.player2_guest_id
     game.status = "active"
     now = datetime.utcnow()
     game.turn_started_at = now

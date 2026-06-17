@@ -6,6 +6,7 @@ import {
   submitMove,
   autocompletePlayer,
   createRosterGame,
+  joinRosterGame,
   submitRosterGuess,
   autocompleteRosterPlayer,
   createHigherLowerGame,
@@ -18,6 +19,11 @@ import {
   submitCareerGuess,
   connectCareerRealtime,
 } from "../api";
+
+// Identity is mocked so request bodies carry a deterministic guest_id.
+vi.mock("../identity", () => ({
+  getGuestId: () => "test-guest-id",
+}));
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -58,7 +64,7 @@ describe("TicTacToe API", () => {
       "http://localhost:8000/quiz/tictactoe/games",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, guest_id: "test-guest-id" }),
       })
     );
     expect(result.state.id).toBe(1);
@@ -83,7 +89,11 @@ describe("TicTacToe API", () => {
       "http://localhost:8000/quiz/tictactoe/games/join",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ join_code: "ABC123", player_name: "TestPlayer" }),
+        body: JSON.stringify({
+          join_code: "ABC123",
+          player_name: "TestPlayer",
+          guest_id: "test-guest-id",
+        }),
       })
     );
     expect(result.state.id).toBe(5);
@@ -125,9 +135,30 @@ describe("Roster Guess API", () => {
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/roster-guess/games",
-      expect.objectContaining({ method: "POST", body: JSON.stringify(payload) })
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ...payload, guest_id: "test-guest-id" }),
+      })
     );
     expect(result.state.id).toBe(10);
+  });
+
+  it("joinRosterGame sends join_code, player_name and guest_id", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 11 })));
+    const result = await joinRosterGame("XYZ789", "Guesser");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/games/join",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          join_code: "XYZ789",
+          player_name: "Guesser",
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+    expect(result.state.id).toBe(11);
   });
 
   it("submitRosterGuess sends player_id", async () => {
@@ -203,7 +234,7 @@ describe("Career Quiz API", () => {
       "http://localhost:8000/quiz/career/games",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, guest_id: "test-guest-id" }),
       })
     );
     expect(result.state.id).toBe(7);
@@ -218,7 +249,11 @@ describe("Career Quiz API", () => {
       "http://localhost:8000/quiz/career/games/join",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ join_code: "ABC123", player_name: "Player 2" }),
+        body: JSON.stringify({
+          join_code: "ABC123",
+          player_name: "Player 2",
+          guest_id: "test-guest-id",
+        }),
       })
     );
     expect(result.state.id).toBe(8);

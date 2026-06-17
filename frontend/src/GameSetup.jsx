@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createGame, joinGame } from "./api";
+import { getNickname, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
 import GameSetupShell from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 
@@ -20,7 +21,7 @@ export default function GameSetup({ onGameCreated, onBack }) {
   const [sub, setSub] = useState("create");
   const [targetWins, setTargetWins] = useState(3);
   const [timerMode, setTimerMode] = useState("40s");
-  const [player1Name, setPlayer1Name] = useState("");
+  const [player1Name, setPlayer1Name] = useState(() => getNickname());
   const [player2Name, setPlayer2Name] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState(null);
@@ -30,6 +31,13 @@ export default function GameSetup({ onGameCreated, onBack }) {
   const isJoin = isOnline && sub === "join";
   const isLocal = mode === "local";
   const showMatchSettings = isLocal || (isOnline && sub === "create");
+
+  // The name field doubles as the shared nickname in solo/online, but as the
+  // local "Player 1" label in local 1v1 — only persist the former.
+  function handlePlayer1NameChange(value) {
+    setPlayer1Name(value);
+    if (!isLocal) setNickname(value);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -103,8 +111,9 @@ export default function GameSetup({ onGameCreated, onBack }) {
               <label className="block text-sm text-elq-text mb-1.5">Your Name</label>
               <input
                 value={player1Name}
-                onChange={(e) => setPlayer1Name(e.target.value)}
+                onChange={(e) => handlePlayer1NameChange(e.target.value)}
                 placeholder="Your name"
+                maxLength={NICKNAME_MAX_LENGTH}
                 className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
               />
             </div>
@@ -152,8 +161,9 @@ export default function GameSetup({ onGameCreated, onBack }) {
                 </label>
                 <input
                   value={player1Name}
-                  onChange={(e) => setPlayer1Name(e.target.value)}
+                  onChange={(e) => handlePlayer1NameChange(e.target.value)}
                   placeholder={isLocal ? "Player 1" : "Your name"}
+                  maxLength={NICKNAME_MAX_LENGTH}
                   className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
                 />
               </div>

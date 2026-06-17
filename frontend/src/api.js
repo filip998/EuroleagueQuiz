@@ -1,4 +1,5 @@
 import { parseRealtimeMessage } from "./realtimeSchema";
+import { getGuestId } from "./identity";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
@@ -26,7 +27,7 @@ async function actionRequest(method, path, body = null) {
 }
 
 export function createGame(payload) {
-  return actionRequest("POST", "/quiz/tictactoe/games", payload);
+  return actionRequest("POST", "/quiz/tictactoe/games", { ...payload, guest_id: getGuestId() });
 }
 
 export function getGame(gameId) {
@@ -37,6 +38,7 @@ export function joinGame(joinCode, playerName) {
   return actionRequest("POST", "/quiz/tictactoe/games/join", {
     join_code: joinCode,
     player_name: playerName,
+    guest_id: getGuestId(),
   });
 }
 
@@ -88,7 +90,7 @@ export function connectTicTacToeRealtime({ gameId, playerNumber, onMessage, onCl
 // ---------------------------------------------------------------------------
 
 export function createRosterGame(payload) {
-  return actionRequest("POST", "/quiz/roster-guess/games", payload);
+  return actionRequest("POST", "/quiz/roster-guess/games", { ...payload, guest_id: getGuestId() });
 }
 
 export function getRosterGame(gameId) {
@@ -99,6 +101,7 @@ export function joinRosterGame(joinCode, playerName) {
   return actionRequest("POST", "/quiz/roster-guess/games/join", {
     join_code: joinCode,
     player_name: playerName,
+    guest_id: getGuestId(),
   });
 }
 
@@ -179,7 +182,7 @@ export function autocompleteCareerPlayer(q, limit = 15) {
 }
 
 export function createCareerGame(payload) {
-  return actionRequest("POST", "/quiz/career/games", payload);
+  return actionRequest("POST", "/quiz/career/games", { ...payload, guest_id: getGuestId() });
 }
 
 export function getCareerGame(gameId) {
@@ -190,6 +193,7 @@ export function joinCareerGame(joinCode, playerName) {
   return actionRequest("POST", "/quiz/career/games/join", {
     join_code: joinCode,
     player_name: playerName,
+    guest_id: getGuestId(),
   });
 }
 

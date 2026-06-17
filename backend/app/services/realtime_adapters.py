@@ -114,6 +114,7 @@ class TicTacToeRealtimeAdapter:
                 timer_mode=data.get("timer_mode", "40s"),
                 player1_name=data.get("player1_name"),
                 player2_name=data.get("player2_name"),
+                guest_id=data.get("guest_id"),
             )
             return RealtimeActionOutcome(game=game, broadcast=False)
 
@@ -122,6 +123,7 @@ class TicTacToeRealtimeAdapter:
                 db,
                 _required_str(data, "join_code").upper(),
                 data.get("player_name"),
+                guest_id=data.get("guest_id"),
             )
             return RealtimeActionOutcome(game=game, broadcast=True, schedule_timer=True)
 
@@ -313,6 +315,7 @@ class RosterGuessRealtimeAdapter:
                 player2_name=data.get("player2_name"),
                 season_range_start=data.get("season_range_start"),
                 season_range_end=data.get("season_range_end"),
+                guest_id=data.get("guest_id"),
             )
             return RealtimeActionOutcome(game=game, broadcast=False)
 
@@ -321,6 +324,7 @@ class RosterGuessRealtimeAdapter:
                 db,
                 _required_str(data, "join_code").upper(),
                 data.get("player_name"),
+                guest_id=data.get("guest_id"),
             )
             return RealtimeActionOutcome(game=game, broadcast=True, schedule_timer=True)
 
@@ -483,6 +487,7 @@ class CareerQuizRealtimeAdapter:
                 target_wins=data.get("target_wins", 3),
                 wrong_guess_visibility=data.get("wrong_guess_visibility", "private"),
                 player1_name=data.get("player1_name"),
+                guest_id=data.get("guest_id"),
             )
             return RealtimeActionOutcome(game=game, broadcast=False)
 
@@ -491,6 +496,7 @@ class CareerQuizRealtimeAdapter:
                 db,
                 _required_str(data, "join_code").upper(),
                 player_name=data.get("player_name"),
+                guest_id=data.get("guest_id"),
             )
             return RealtimeActionOutcome(game=game, broadcast=True)
 

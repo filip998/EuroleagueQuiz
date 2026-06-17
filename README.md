@@ -115,6 +115,13 @@ and Game action errors return `{ "type": "error", "payload": { "code": ..., "mes
 with the corresponding HTTP status. Read-only `GET /games/{id}` endpoints still
 return plain game state for polling and refresh hydration.
 
+Online `create`/`join` requests for TicTacToe, Roster Guess, and Career Quiz accept an
+optional `guest_id`. The backend treats it as an opaque, untrusted token: services clamp it
+to 64 characters (`None` when blank) and persist it on the player slot
+(`player1_guest_id` / `player2_guest_id`) without ever serializing it into shared game
+state. The field is never required, so anonymous play keeps working when no `guest_id` is
+sent.
+
 ## Frontend
 
 ### Setup
@@ -149,6 +156,25 @@ Every game's pre-game screen is built from three shared building blocks in `fron
 `GameSetup.jsx` (TicTacToe), `RosterGuessSetup.jsx`, `CareerQuizSetup.jsx`, and
 `HigherLowerSetup.jsx` compose these, mapping the canonical UI keys (`solo` / `local` /
 `online`, sub `create` / `join`) onto their own backend modes.
+
+### Guest Identity
+
+`frontend/src/identity.js` is the single source of a lightweight, persistent guest
+identity used by online matchmaking:
+
+- `getGuestId()` returns a stable opaque id generated once via `crypto.randomUUID()`
+  (with a fallback) and cached in `localStorage` under `elq_guest_id`. A blank or
+  oversized stored value is regenerated. All storage access is `try/catch`-safe, so
+  identity degrades to anonymous play when storage is unavailable.
+- `getNickname()` / `setNickname()` persist the shared display name under `elq_nickname`
+  (clamped to `NICKNAME_MAX_LENGTH = 30`, the Higher or Lower backend limit), migrating
+  the legacy `hol_nickname` key on first read.
+
+Every setup screen prefills its name field from `getNickname()` and persists edits via
+`setNickname()`; the shared nickname is not overwritten while a screen is in Local 1v1
+mode (where "Player 1" is a placeholder rather than the user's name). `frontend/src/api.js`
+attaches `guest_id` to TicTacToe, Roster Guess, and Career Quiz online `create`/`join`
+requests; the nickname rides the existing `player1_name` / `player_name` field.
 
 
 ## Testing

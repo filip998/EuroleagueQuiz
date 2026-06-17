@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, get_db
 from app.main import app
 from app.models import Player, PlayerSeasonTeam, Season, Team
+from app.models.roster_guess import RosterGuessGame
 
 
 @pytest.fixture(autouse=True)
@@ -73,6 +74,7 @@ def client(tmp_path: Path):
     app.dependency_overrides[get_db] = override_get_db
 
     with TestClient(app) as test_client:
+        test_client.session_local = TestingSessionLocal
         yield test_client
 
     if previous_override is None:
@@ -156,6 +158,12 @@ def test_online_roster_guess_join_and_missing_player_error_envelope(client: Test
     assert joined["status"] == "active"
     assert joined["round"] is not None
 
+    # Anonymous play persists no guest identity.
+    with client.session_local() as db:
+        stored = db.get(RosterGuessGame, game["id"])
+        assert stored.player1_guest_id is None
+        assert stored.player2_guest_id is None
+
     guess = client.post(
         f"/quiz/roster-guess/games/{joined['id']}/guess",
         json={"player_id": 1},
@@ -168,3 +176,37 @@ def test_online_roster_guess_join_and_missing_player_error_envelope(client: Test
             "message": "Online game actions require player identity",
         },
     }
+
+
+def test_online_roster_guess_persists_guest_id(client: TestClient):
+    create = client.post(
+        "/quiz/roster-guess/games",
+        json={
+            "mode": "online_friend",
+            "target_wins": 2,
+            "timer_mode": "40s",
+            "player1_name": "Host",
+            "season_range_start": 2024,
+            "season_range_end": 2024,
+            "guest_id": "host-guest-abc",
+        },
+    )
+    assert create.status_code == 200
+    game = _action_payload(create)["game"]
+    assert "guest_id" not in game
+    assert "player1_guest_id" not in game
+
+    join = client.post(
+        "/quiz/roster-guess/games/join",
+        json={
+            "join_code": game["join_code"],
+            "player_name": "Joiner",
+            "guest_id": "joiner-guest-def",
+        },
+    )
+    assert join.status_code == 200
+
+    with client.session_local() as db:
+        stored = db.get(RosterGuessGame, game["id"])
+        assert stored.player1_guest_id == "host-guest-abc"
+        assert stored.player2_guest_id == "joiner-guest-def"

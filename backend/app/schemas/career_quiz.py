@@ -20,11 +20,13 @@ class CareerQuizCreateRequest(BaseModel):
     target_wins: Literal[1, 3, 5, 7] = 3
     wrong_guess_visibility: Literal["private", "shared"] = "private"
     player1_name: str | None = None
+    guest_id: str | None = None
 
 
 class CareerQuizJoinRequest(BaseModel):
     join_code: str = Field(min_length=6, max_length=6)
     player_name: str | None = None
+    guest_id: str | None = None
 
 
 class CareerQuizGuessRequest(BaseModel):

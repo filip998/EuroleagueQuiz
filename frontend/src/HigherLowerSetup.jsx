@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { createHigherLowerGame, getHigherLowerLeaderboard } from "./api";
+import { getNickname, setNickname as saveNickname } from "./identity";
 import GameSetupShell from "./GameSetupShell";
 
 const HEADER_ICON = (
@@ -41,7 +42,7 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
   const [tier, setTier] = useState("easy");
   const [seasonStart, setSeasonStart] = useState(2007);
   const [seasonEnd, setSeasonEnd] = useState(2025);
-  const [nickname, setNickname] = useState(() => localStorage.getItem("hol_nickname") || "");
+  const [nickname, setNickname] = useState(() => getNickname());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
@@ -61,7 +62,7 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
     setError(null);
     setLoading(true);
     try {
-      localStorage.setItem("hol_nickname", nickname.trim());
+      saveNickname(nickname);
       const resp = await createHigherLowerGame({
         tier,
         season_range_start: seasonStart,
@@ -200,7 +201,10 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
         <div className="mb-6">
           <input
             value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
+            onChange={(e) => {
+              setNickname(e.target.value);
+              saveNickname(e.target.value);
+            }}
             placeholder="Your nickname"
             maxLength={30}
             required

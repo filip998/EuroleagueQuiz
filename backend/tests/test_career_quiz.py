@@ -1,13 +1,17 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.database import Base
+from app.database import Base, get_db
 from app.game_actions import ConflictGameActionError
+from app.main import app
 from app.models import (
     CareerDataRevision,
+    CareerQuizGame,
     Player,
     PlayerCareerSourceMapping,
     PlayerCareerStint,
@@ -622,3 +626,89 @@ def _assert_next_round_starts_at(resolved_at_value, next_round_starts_at_value):
     assert next_round_starts_at - resolved_at == timedelta(
         seconds=career_quiz.CAREER_REVEAL_COUNTDOWN_SECONDS
     )
+
+
+@pytest.fixture()
+def career_client(tmp_path: Path):
+    db_path = tmp_path / "career_api_test.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    session = TestingSessionLocal()
+    try:
+        _active_revision(session)
+        for index in range(5):
+            _eligible_player(session, f"First{index}", f"Last{index}")
+        session.commit()
+    finally:
+        session.close()
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    previous_override = app.dependency_overrides.get(get_db)
+    app.dependency_overrides[get_db] = override_get_db
+
+    with TestClient(app) as test_client:
+        test_client.session_local = TestingSessionLocal
+        yield test_client
+
+    if previous_override is None:
+        app.dependency_overrides.pop(get_db, None)
+    else:
+        app.dependency_overrides[get_db] = previous_override
+    engine.dispose()
+
+
+def test_career_http_create_and_join_persists_guest_id(career_client: TestClient):
+    create = career_client.post(
+        "/quiz/career/games",
+        json={"target_wins": 1, "player1_name": "Host", "guest_id": "host-guest-xyz"},
+    )
+    assert create.status_code == 200
+    game = create.json()["payload"]["game"]
+    assert game["status"] == "waiting_for_opponent"
+    # Opaque guest token must never be serialized into shared game state.
+    assert "guest_id" not in game
+    assert "player1_guest_id" not in game
+
+    join = career_client.post(
+        "/quiz/career/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner", "guest_id": "joiner-guest-xyz"},
+    )
+    assert join.status_code == 200
+    assert join.json()["payload"]["game"]["status"] == "active"
+
+    with career_client.session_local() as db:
+        stored = db.get(CareerQuizGame, game["id"])
+        assert stored.player1_guest_id == "host-guest-xyz"
+        assert stored.player2_guest_id == "joiner-guest-xyz"
+
+
+def test_career_http_create_and_join_without_guest_id(career_client: TestClient):
+    create = career_client.post(
+        "/quiz/career/games",
+        json={"target_wins": 1, "player1_name": "Host"},
+    )
+    assert create.status_code == 200
+    game = create.json()["payload"]["game"]
+
+    join = career_client.post(
+        "/quiz/career/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner"},
+    )
+    assert join.status_code == 200
+    assert join.json()["payload"]["game"]["status"] == "active"
+
+    with career_client.session_local() as db:
+        stored = db.get(CareerQuizGame, game["id"])
+        assert stored.player1_guest_id is None
+        assert stored.player2_guest_id is None
