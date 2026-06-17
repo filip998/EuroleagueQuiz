@@ -121,3 +121,11 @@ CI runs on pull requests to `main`: backend pytest, frontend Vitest, frontend bu
 - Frontend unit tests mock network calls at the API layer (`global.fetch` in `src/test/api.test.js`); Playwright tests exercise the real FastAPI backend and Vite dev server.
 - Backend API and Higher or Lower tests use the real SQLite database at `backend/data/euroleague.db`. TicTacToe and Roster Guess API tests build isolated temporary SQLite databases; Career Quiz, Photo Quiz, and Wikipedia ingestion tests use isolated in-memory SQLite databases with seeded fixtures.
 - For significant features, API changes, game mode changes, architecture changes, or workflow changes, update both `README.md` and this instructions file.
+
+## Creating GitHub issues
+
+Write every issue so the orchestrator (and humans) can pick it up and implement it without follow-up questions. **Follow [`docs/github-issues.md`](../docs/github-issues.md)** for the full structure, templates, and label taxonomy. Essentials:
+
+- Choose the right shape: **epic** (`## Problem / Vision` + a `## Sub-issues (dependency order)` checklist), **sub-issue** (a `Parent: #<epic> · Depends on #<a>, #<b>` line as the very first line), or **standalone task** (`## Summary`, no parent). The `Parent:`/`Depends on` line and the dependency-ordered sub-issue list are orchestrator-critical — keep them exact.
+- Make it self-contained: state the problem, the agreed design/approach, explicit in/out scope, and **verifiable `- [ ]` acceptance criteria** (the definition of done), plus a `## References` / `## Touch points` section naming the concrete files to touch.
+- Always set labels: a type (`bug` / `enhancement` / `documentation` / `type:refactor`), exactly one `game:*` (or `game:general`), one or more `area:*`, and `mode:multiplayer` when online play is involved. Confirm with `gh label list`.
