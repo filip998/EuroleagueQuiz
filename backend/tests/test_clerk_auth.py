@@ -18,7 +18,13 @@ from sqlalchemy.orm import sessionmaker
 import app.auth.clerk as clerk_module
 import app.auth.dependencies as auth_dependencies
 import app.auth.users as users_module
-from app.auth.clerk import ClerkAuthConfigurationError, ClerkJWTVerifier, ClerkTokenError, JWKSCache
+from app.auth.clerk import (
+    ClerkAuthConfigurationError,
+    ClerkJWKSUnavailableError,
+    ClerkJWTVerifier,
+    ClerkTokenError,
+    JWKSCache,
+)
 from app.auth.users import get_or_create_user_for_claims
 from app.auth_database import Base, get_auth_db, sqlite_connect_args
 from app.main import app
@@ -91,7 +97,7 @@ def test_verifier_rejects_alg_confusion_tokens(signing_key):
         verifier.verify(none_token)
 
 
-def test_verifier_wraps_malformed_jwks_key_errors(signing_key):
+def test_verifier_surfaces_malformed_jwks_key_as_service_error(signing_key):
     malformed_jwk = {
         "kty": "RSA",
         "use": "sig",
@@ -100,7 +106,7 @@ def test_verifier_wraps_malformed_jwks_key_errors(signing_key):
     }
     verifier = _verifier(malformed_jwk)
 
-    with pytest.raises(ClerkTokenError):
+    with pytest.raises(ClerkJWKSUnavailableError):
         verifier.verify(_make_token(signing_key))
 
 
@@ -232,7 +238,7 @@ def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
         fetches.append(url)
         if len(fetches) == 1:
             return {"keys": [signing_key.jwk]}
-        raise ClerkTokenError("JWKS unavailable")
+        raise ClerkJWKSUnavailableError("JWKS unavailable")
 
     def clock() -> float:
         return now
@@ -240,7 +246,7 @@ def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
     verifier = _verifier(signing_key.jwk, fetcher=fetcher, clock=clock)
 
     verifier.verify(_make_token(signing_key))
-    with pytest.raises(ClerkTokenError):
+    with pytest.raises(ClerkJWKSUnavailableError):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
@@ -251,7 +257,7 @@ def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
     assert fetches == [JWKS_URL, JWKS_URL]
 
     now += 1.1
-    with pytest.raises(ClerkTokenError):
+    with pytest.raises(ClerkJWKSUnavailableError):
         verifier.verify(_make_token(signing_key, kid="unknown-two"))
 
     assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL]
@@ -367,6 +373,30 @@ def test_auth_dependencies_do_not_treat_provisioning_errors_as_invalid_tokens(
 
         with pytest.raises(auth_dependencies.UserProvisioningError):
             auth_dependencies.get_optional_user(authorization=authorization, db=db)
+
+
+def test_auth_dependencies_surface_jwks_service_errors(
+    monkeypatch,
+    auth_session_factory,
+    signing_key,
+):
+    def fetcher(url: str) -> Mapping[str, Any]:
+        raise ClerkJWKSUnavailableError("JWKS unavailable")
+
+    verifier = _verifier(signing_key.jwk, fetcher=fetcher)
+    monkeypatch.setattr(auth_dependencies, "get_clerk_jwt_verifier", lambda: verifier)
+
+    with auth_session_factory() as db:
+        authorization = f"Bearer {_make_token(signing_key)}"
+        with pytest.raises(HTTPException) as current_exc:
+            auth_dependencies.get_current_user(authorization=authorization, db=db)
+        assert current_exc.value.status_code == 503
+        assert current_exc.value.headers is None
+
+        with pytest.raises(HTTPException) as optional_exc:
+            auth_dependencies.get_optional_user(authorization=authorization, db=db)
+        assert optional_exc.value.status_code == 503
+        assert optional_exc.value.headers is None
 
 
 def test_get_optional_user_returns_none_for_missing_and_invalid_tokens(

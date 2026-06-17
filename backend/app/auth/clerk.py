@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import binascii
 from dataclasses import dataclass
 import json
 import threading
@@ -23,6 +24,14 @@ class ClerkAuthError(ValueError):
 
 
 class ClerkTokenError(ClerkAuthError):
+    pass
+
+
+class ClerkAuthServiceError(RuntimeError):
+    pass
+
+
+class ClerkJWKSUnavailableError(ClerkAuthServiceError):
     pass
 
 
@@ -54,9 +63,9 @@ def _default_fetch_jwks(url: str) -> Mapping[str, Any]:
         response.raise_for_status()
         payload = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        raise ClerkTokenError("Unable to fetch Clerk JWKS") from exc
+        raise ClerkJWKSUnavailableError("Unable to fetch Clerk JWKS") from exc
     if not isinstance(payload, Mapping):
-        raise ClerkTokenError("Invalid Clerk JWKS response")
+        raise ClerkJWKSUnavailableError("Invalid Clerk JWKS response")
     return payload
 
 
@@ -179,7 +188,7 @@ class JWKSCache:
         if in_flight.error is not None:
             raise in_flight.error
         if in_flight.result is None:
-            raise ClerkTokenError("Unable to fetch Clerk JWKS")
+            raise ClerkJWKSUnavailableError("Unable to fetch Clerk JWKS")
         return in_flight.result
 
     def _reserve_unknown_kid_refresh(self, jwks_url: str, kid: str, now: float) -> bool:
@@ -205,7 +214,7 @@ class JWKSCache:
 def _keys_by_kid(jwks: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
     raw_keys = jwks.get("keys")
     if not isinstance(raw_keys, list):
-        raise ClerkTokenError("Invalid Clerk JWKS keys")
+        raise ClerkJWKSUnavailableError("Invalid Clerk JWKS keys")
 
     keys: dict[str, Mapping[str, Any]] = {}
     for key in raw_keys:
@@ -282,6 +291,10 @@ class ClerkJWTVerifier:
         jwk = self._jwks_cache.get_key(self._jwks_url, kid)
         try:
             public_key = RSAAlgorithm.from_jwk(json.dumps(jwk))
+        except (binascii.Error, PyJWTError, TypeError, ValueError) as exc:
+            raise ClerkJWKSUnavailableError("Invalid Clerk JWKS key") from exc
+
+        try:
             claims = jwt.decode(
                 token,
                 public_key,
@@ -293,7 +306,7 @@ class ClerkJWTVerifier:
                     "verify_aud": False,
                 },
             )
-        except (PyJWTError, TypeError, ValueError) as exc:
+        except PyJWTError as exc:
             raise ClerkTokenError("Invalid Clerk token") from exc
 
         if not isinstance(claims, Mapping):
