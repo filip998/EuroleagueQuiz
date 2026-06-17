@@ -257,3 +257,121 @@ describe("GameBoard online resign", () => {
     expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
   });
 });
+
+describe("GameBoard victory modal", () => {
+  it("reveals the modal and clears the waiting indicator when the opponent resigns", async () => {
+    // Player 2 is the viewer and it is player 1's turn, so the stale-prone
+    // "Waiting for opponent..." indicator is on screen before the match ends.
+    render(
+      <GameBoard
+        initialState={activeGame({ current_player: 1 })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 2 }}
+      />
+    );
+
+    expect(screen.getByText("Waiting for opponent...")).toBeInTheDocument();
+
+    // Player 1 resigns remotely; player 2 wins. The result must surface in the
+    // over-the-board modal and the waiting indicator must vanish once the game
+    // is no longer active.
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ status: "finished", winner_player: 2, current_player: 1 }),
+        result: "resigned",
+      });
+    });
+
+    expect(await screen.findByText("Your opponent resigned.")).toBeInTheDocument();
+    expect(screen.getByText(/WINS!/)).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for opponent...")).not.toBeInTheDocument();
+  });
+
+  it("shows the modal only after the round transition for a normal final-round win", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <GameBoard
+          initialState={activeGame()}
+          onNewGame={() => {}}
+          onHome={() => {}}
+          onlineInfo={{ isOnline: true, playerNumber: 1 }}
+        />
+      );
+
+      // A match-winning move flows through the shared 3s round transition, during
+      // which the victory modal stays hidden (no flicker of the final reveal).
+      act(() => {
+        realtimeHolder.opts.onState({
+          state: activeGame({ status: "finished", winner_player: 1 }),
+          result: "match_won",
+          completedRound: {
+            columns: [axis("A"), axis("B"), axis("C")],
+            rows: [axis("1"), axis("2"), axis("3")],
+            cells: [],
+          },
+        });
+      });
+
+      expect(screen.queryByText(/WINS!/)).not.toBeInTheDocument();
+
+      // The countdown reschedules a fresh 1s timeout after each React flush, so
+      // advance it one second at a time until the transition clears.
+      for (let i = 0; i < 4; i++) {
+        act(() => {
+          vi.advanceTimersByTime(1000);
+        });
+      }
+
+      // After the transition the modal appears with the generic, perspective-aware
+      // win line (no forfeit reason for a normal win).
+      expect(screen.getByText(/WINS!/)).toBeInTheDocument();
+      expect(screen.getByText("You won the match!")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("is dismissible and reopens from the View result pill", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 2 }}
+      />
+    );
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ status: "finished", winner_player: 2 }),
+        result: "resigned",
+      });
+    });
+
+    expect(await screen.findByText("Your opponent resigned.")).toBeInTheDocument();
+
+    // Dismiss via the close button to inspect the final board...
+    fireEvent.click(screen.getByLabelText("Close"));
+    expect(screen.queryByText("Your opponent resigned.")).not.toBeInTheDocument();
+
+    // ...the result stays reachable through the View result pill.
+    fireEvent.click(screen.getByText("View result"));
+    expect(screen.getByText("Your opponent resigned.")).toBeInTheDocument();
+  });
+
+  it("does not render the victory modal for a finished solo game", () => {
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "single_player", status: "finished", winner_player: 1 })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    expect(screen.queryByText(/WINS!/)).not.toBeInTheDocument();
+    expect(screen.queryByText("View result")).not.toBeInTheDocument();
+  });
+});
