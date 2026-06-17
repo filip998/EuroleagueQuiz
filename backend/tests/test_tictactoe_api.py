@@ -229,6 +229,108 @@ def test_quick_match_first_request_waits_with_public_preset(client: TestClient):
     assert "player1_guest_id" not in game
 
 
+def test_quick_match_pools_endpoint_returns_empty_registered_presets(client: TestClient):
+    response = client.get("/quiz/tictactoe/quick-match/pools")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "pools": {
+            "blitz": {"searching": 0, "in_progress": 0},
+            "standard": {"searching": 0, "in_progress": 0},
+            "long": {"searching": 0, "in_progress": 0},
+        },
+        "poll_interval_seconds": 5,
+    }
+
+
+def test_quick_match_pools_endpoint_tracks_waiting_active_cancel_and_finish(
+    client: TestClient,
+    quick_match_effects,
+):
+    first = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+    assert first.status_code == 200
+    standard_game = _action_payload(first)["game"]
+
+    waiting_counts = client.get("/quiz/tictactoe/quick-match/pools")
+    assert waiting_counts.status_code == 200
+    assert waiting_counts.json()["pools"]["standard"] == {
+        "searching": 1,
+        "in_progress": 0,
+    }
+
+    second = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Joiner",
+            "guest_id": "joiner-guest",
+        },
+    )
+    assert second.status_code == 200
+
+    active_counts = client.get("/quiz/tictactoe/quick-match/pools")
+    assert active_counts.status_code == 200
+    assert active_counts.json()["pools"]["standard"] == {
+        "searching": 0,
+        "in_progress": 1,
+    }
+
+    long_search = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "long",
+            "player_name": "Long Host",
+            "guest_id": "long-host-guest",
+        },
+    )
+    assert long_search.status_code == 200
+    long_game = _action_payload(long_search)["game"]
+
+    mixed_counts = client.get("/quiz/tictactoe/quick-match/pools")
+    assert mixed_counts.status_code == 200
+    assert mixed_counts.json()["pools"]["standard"] == {
+        "searching": 0,
+        "in_progress": 1,
+    }
+    assert mixed_counts.json()["pools"]["long"] == {
+        "searching": 1,
+        "in_progress": 0,
+    }
+
+    cancel = client.post(
+        "/quiz/tictactoe/quick-match/cancel",
+        json={
+            "preset": "long",
+            "game_id": long_game["id"],
+            "guest_id": "long-host-guest",
+        },
+    )
+    assert cancel.status_code == 200
+
+    with client.session_local() as db:
+        game = db.get(QuizTicTacToeGame, standard_game["id"])
+        game.status = "finished"
+        db.commit()
+
+    final_counts = client.get("/quiz/tictactoe/quick-match/pools")
+    assert final_counts.status_code == 200
+    assert final_counts.json()["pools"]["standard"] == {
+        "searching": 0,
+        "in_progress": 0,
+    }
+    assert final_counts.json()["pools"]["long"] == {
+        "searching": 0,
+        "in_progress": 0,
+    }
+
+
 def test_quick_match_pairs_second_guest_and_only_fresh_pair_starts_effects(
     client: TestClient,
     quick_match_effects,

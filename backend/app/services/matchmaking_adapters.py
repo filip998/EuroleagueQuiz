@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Mapping
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.game_actions import (
@@ -31,6 +31,14 @@ class TicTacToeMatchmakingPreset:
     timer_mode: str = "40s"
 
 
+@dataclass(frozen=True)
+class TicTacToeQuickMatchPoolCounts:
+    searching: int = 0
+    in_progress: int = 0
+
+
+TICTACTOE_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS = 5
+
 DEFAULT_TICTACTOE_MATCHMAKING_PRESETS = {
     "blitz": TicTacToeMatchmakingPreset(target_wins=3, timer_mode="15s"),
     "standard": TicTacToeMatchmakingPreset(target_wins=3, timer_mode="40s"),
@@ -51,6 +59,51 @@ class TicTacToeMatchmakingAdapter:
             preset_key = clean_preset(key)
             self._validate_preset_config(preset_key, value)
             self._presets[preset_key] = value
+
+    def preset_keys(self) -> tuple[str, ...]:
+        return tuple(self._presets.keys())
+
+    def pool_presence_counts(
+        self,
+        db: Session,
+    ) -> dict[str, TicTacToeQuickMatchPoolCounts]:
+        counts = {
+            preset: TicTacToeQuickMatchPoolCounts() for preset in self.preset_keys()
+        }
+        if not counts:
+            return counts
+
+        rows = (
+            db.query(
+                QuizTicTacToeGame.preset,
+                QuizTicTacToeGame.status,
+                func.count(QuizTicTacToeGame.id),
+            )
+            .filter(
+                QuizTicTacToeGame.mode == "online_friend",
+                QuizTicTacToeGame.is_public.is_(True),
+                QuizTicTacToeGame.preset.in_(tuple(counts)),
+                QuizTicTacToeGame.status.in_(("waiting_for_opponent", "active")),
+            )
+            .group_by(QuizTicTacToeGame.preset, QuizTicTacToeGame.status)
+            .all()
+        )
+
+        for preset, status, total in rows:
+            current = counts[preset]
+            total_count = int(total or 0)
+            if status == "waiting_for_opponent":
+                counts[preset] = TicTacToeQuickMatchPoolCounts(
+                    searching=total_count,
+                    in_progress=current.in_progress,
+                )
+            elif status == "active":
+                counts[preset] = TicTacToeQuickMatchPoolCounts(
+                    searching=current.searching,
+                    in_progress=total_count,
+                )
+
+        return counts
 
     def find_existing_game(
         self,

@@ -20,6 +20,8 @@ from app.schemas.quiz_ttt import (
     TicTacToeMoveRequest,
     TicTacToeDrawResponseRequest,
     TicTacToeJoinGameRequest,
+    TicTacToeQuickMatchPoolCounts,
+    TicTacToeQuickMatchPoolsResponse,
     TicTacToeQuickMatchCancelRequest,
     TicTacToeQuickMatchRequest,
 )
@@ -40,7 +42,10 @@ from app.services.matchmaking import (
     cancel_search,
     find_or_create_match,
 )
-from app.services.matchmaking_adapters import TicTacToeMatchmakingAdapter
+from app.services.matchmaking_adapters import (
+    TICTACTOE_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS,
+    TicTacToeMatchmakingAdapter,
+)
 from app.services.realtime import OnlineGameRealtimeModule
 from app.services.realtime_adapters import TicTacToeRealtimeAdapter
 
@@ -335,6 +340,24 @@ async def cancel_quick_match_tictactoe_game(
         return state_message(_cancelled_quick_match_state(result))
     except GameActionError as exc:
         return _game_action_error_response(exc)
+
+
+@router.get(
+    "/tictactoe/quick-match/pools",
+    response_model=TicTacToeQuickMatchPoolsResponse,
+)
+def get_tictactoe_quick_match_pools(db: Session = Depends(get_db)):
+    counts = tictactoe_matchmaking.pool_presence_counts(db)
+    return TicTacToeQuickMatchPoolsResponse(
+        pools={
+            preset: TicTacToeQuickMatchPoolCounts(
+                searching=count.searching,
+                in_progress=count.in_progress,
+            )
+            for preset, count in counts.items()
+        },
+        poll_interval_seconds=TICTACTOE_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS,
+    )
 
 
 @router.get("/tictactoe/games/{game_id}")
