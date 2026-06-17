@@ -19,11 +19,27 @@ test.describe("Home Page", () => {
     await expect(page.getByText("Start Game")).toBeVisible();
   });
 
-  test("reveals the join-code form via Online then Join", async ({ page }) => {
+  test("shows the Quick Match preset picker by default under Online", async ({ page }) => {
     await page.goto("/");
     await page.getByText("TICTACTOE").click();
 
     await page.getByRole("button", { name: "Online" }).click();
+
+    // Online now defaults to the Quick Match sub-mode: a preset picker + the
+    // Find Match action, rather than the old direct Create/Join toggle.
+    await expect(page.getByText("Pick a pool")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Blitz" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Standard" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Long" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Find Match" })).toBeVisible();
+  });
+
+  test("reveals the join-code form via Online then Play a Friend then Join", async ({ page }) => {
+    await page.goto("/");
+    await page.getByText("TICTACTOE").click();
+
+    await page.getByRole("button", { name: "Online" }).click();
+    await page.getByRole("button", { name: "Play a Friend" }).click();
     await page.getByRole("button", { name: "Join", exact: true }).click();
 
     await expect(page.getByPlaceholder("ABC123")).toBeVisible();

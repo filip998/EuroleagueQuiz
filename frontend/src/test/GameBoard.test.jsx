@@ -203,15 +203,17 @@ describe("GameBoard online resign", () => {
       />
     );
 
+    // The grace timer only fires once the opponent is already disconnected, so
+    // the terminal `opponent_left` broadcast only ever reaches the still-connected
+    // winner. Here player 2 wins because player 1 left.
     act(() => {
       realtimeHolder.opts.onState({
-        state: activeGame({ status: "finished", winner_player: 1 }),
+        state: activeGame({ status: "finished", winner_player: 2 }),
         result: "opponent_left",
       });
     });
 
-    // Player 2 lost the disconnect race here.
-    expect(await screen.findByText("You left the game.")).toBeInTheDocument();
+    expect(await screen.findByText("Your opponent left the game.")).toBeInTheDocument();
     // The terminal banner is suppressed in favour of the finished-screen subtitle.
     expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
   });
