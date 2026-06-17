@@ -34,7 +34,7 @@ describe("QuickMatchPanel", () => {
     expect(onPick).toHaveBeenCalledWith("blitz");
   });
 
-  it("badges and highlights the default preset", () => {
+  it("badges the default preset as Recommended without pre-selecting any card", () => {
     render(
       <QuickMatchPanel
         presets={PRESETS}
@@ -44,10 +44,39 @@ describe("QuickMatchPanel", () => {
       />
     );
 
-    expect(screen.getByText("Default")).toBeInTheDocument();
+    // The default earns a quiet recommendation hint, not the old "Default" badge.
+    expect(screen.getByText("Recommended")).toBeInTheDocument();
+    expect(screen.queryByText("Default")).not.toBeInTheDocument();
+
+    // No card looks pre-selected at rest: every card shares the same base styling.
+    const def = screen.getByTestId("quick-pick-standard");
+    const other = screen.getByTestId("quick-pick-blitz");
+    expect(def.className).toBe(other.className);
   });
 
-  it("disables every card and shows Searching… on the pending preset", () => {
+  it("reveals a Play affordance on each interactive card (hover + keyboard focus parity)", () => {
+    render(
+      <QuickMatchPanel
+        presets={PRESETS}
+        pools={POOLS}
+        onPick={vi.fn()}
+        defaultPreset="standard"
+      />
+    );
+
+    const play = screen.getByTestId("play-standard");
+    expect(play).toBeInTheDocument();
+    expect(play).toHaveTextContent("Play");
+    // jsdom can't apply hover/focus CSS, so lock the reveal contract: the pill is
+    // revealed on hover AND keyboard focus-visible (not hover-only).
+    expect(play.className).toContain("group-hover:opacity-100");
+    expect(play.className).toContain("group-focus-visible:opacity-100");
+
+    expect(screen.getByTestId("play-blitz")).toBeInTheDocument();
+    expect(screen.getByTestId("play-long")).toBeInTheDocument();
+  });
+
+  it("disables every card, shows Searching…, and hides Play while a pick is pending", () => {
     render(
       <QuickMatchPanel
         presets={PRESETS}
@@ -62,6 +91,15 @@ describe("QuickMatchPanel", () => {
     expect(screen.getByTestId("quick-pick-standard")).toBeDisabled();
     expect(screen.getByTestId("quick-pick-long")).toBeDisabled();
     expect(screen.getByTestId("presence-standard")).toHaveTextContent("Searching…");
+    expect(screen.getByTestId("quick-pick-standard")).toHaveAttribute(
+      "aria-busy",
+      "true"
+    );
+
+    // The Play affordance never shows while the panel is busy.
+    expect(screen.queryByTestId("play-standard")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("play-blitz")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("play-long")).not.toBeInTheDocument();
   });
 
   it("does not fire onPick when disabled", () => {
