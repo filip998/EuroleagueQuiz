@@ -1,7 +1,7 @@
 """add photo quiz tables
 
 Revision ID: 6e3b6c9a0d12
-Revises: 5f4a3b2c1d0e
+Revises: b99776a43365
 Create Date: 2026-06-17 14:32:06.137000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "6e3b6c9a0d12"
-down_revision: Union[str, Sequence[str], None] = "5f4a3b2c1d0e"
+down_revision: Union[str, Sequence[str], None] = "b99776a43365"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
