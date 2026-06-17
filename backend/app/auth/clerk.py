@@ -80,15 +80,18 @@ class JWKSCache:
         fetcher: JWKSFetcher = _default_fetch_jwks,
         ttl_seconds: float = 300.0,
         refresh_cooldown_seconds: float = 30.0,
+        unknown_kid_min_refresh_interval_seconds: float = 1.0,
         clock: Clock = time.monotonic,
     ) -> None:
         self._fetcher = fetcher
-        self._ttl_seconds = ttl_seconds
-        self._refresh_cooldown_seconds = refresh_cooldown_seconds
+        self._ttl_seconds = max(0.0, ttl_seconds)
+        self._refresh_cooldown_seconds = max(0.0, refresh_cooldown_seconds)
+        self._unknown_kid_min_refresh_interval_seconds = max(0.0, unknown_kid_min_refresh_interval_seconds)
         self._clock = clock
         self._cache: dict[str, _CachedJWKS] = {}
         self._in_flight_fetches: dict[str, _InFlightJWKSFetch] = {}
         self._unknown_kid_refreshes: dict[str, dict[str, float]] = {}
+        self._unknown_kid_last_refresh_at: dict[str, float] = {}
         self._lock = threading.RLock()
 
     def get_key(self, jwks_url: str, kid: str) -> Mapping[str, Any]:
@@ -188,10 +191,14 @@ class JWKSCache:
         self._unknown_kid_refreshes[jwks_url] = refreshes
         if kid in refreshes:
             return False
-        # Rate-limit only repeated misses for the same kid. A global miss budget lets forged
-        # kids starve a real Clerk key rotation, because random and rotated kids look identical
-        # until the JWKS is refreshed.
+        last_refresh_at = self._unknown_kid_last_refresh_at.get(jwks_url)
+        if (
+            last_refresh_at is not None
+            and now - last_refresh_at < self._unknown_kid_min_refresh_interval_seconds
+        ):
+            return False
         refreshes[kid] = now
+        self._unknown_kid_last_refresh_at[jwks_url] = now
         return True
 
 
@@ -236,6 +243,9 @@ class ClerkJWTVerifier:
         self._jwks_cache = jwks_cache or JWKSCache(
             ttl_seconds=settings.clerk_jwks_cache_ttl_seconds,
             refresh_cooldown_seconds=settings.clerk_jwks_refresh_cooldown_seconds,
+            unknown_kid_min_refresh_interval_seconds=(
+                settings.clerk_jwks_unknown_kid_min_refresh_interval_seconds
+            ),
         )
 
     @classmethod
@@ -250,6 +260,9 @@ class ClerkJWTVerifier:
             jwks_cache=JWKSCache(
                 ttl_seconds=settings.clerk_jwks_cache_ttl_seconds,
                 refresh_cooldown_seconds=settings.clerk_jwks_refresh_cooldown_seconds,
+                unknown_kid_min_refresh_interval_seconds=(
+                    settings.clerk_jwks_unknown_kid_min_refresh_interval_seconds
+                ),
             ),
         )
 

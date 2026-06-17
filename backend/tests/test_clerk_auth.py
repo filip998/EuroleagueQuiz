@@ -172,36 +172,52 @@ def test_jwks_cache_allows_rotated_kid_after_multiple_unknown_kids():
     responses: list[Mapping[str, Any]] = [
         {"keys": [old_key.jwk]},
         {"keys": [old_key.jwk]},
-        {"keys": [old_key.jwk]},
         {"keys": [old_key.jwk, new_key.jwk]},
     ]
     fetches: list[str] = []
+    now = 0.0
 
     def fetcher(url: str) -> Mapping[str, Any]:
         fetches.append(url)
         return responses[min(len(fetches) - 1, len(responses) - 1)]
 
-    verifier = _verifier(old_key.jwk, fetcher=fetcher)
+    def clock() -> float:
+        return now
+
+    verifier = _verifier(old_key.jwk, fetcher=fetcher, clock=clock)
 
     verifier.verify(_make_token(old_key))
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(old_key, kid="random-unknown-one"))
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(old_key, kid="random-unknown-two"))
+    now += 1.1
     verifier.verify(_make_token(new_key))
 
-    assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL, JWKS_URL]
+    assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL]
 
 
 def test_jwks_cache_rate_limits_unknown_kid_refreshes(signing_key):
     fetches: list[str] = []
-    verifier = _verifier(signing_key.jwk, fetches=fetches)
+    now = 0.0
+
+    def clock() -> float:
+        return now
+
+    verifier = _verifier(signing_key.jwk, fetches=fetches, clock=clock)
 
     verifier.verify(_make_token(signing_key))
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
+    for suffix in range(2, 10):
+        with pytest.raises(ClerkTokenError):
+            verifier.verify(_make_token(signing_key, kid=f"unknown-{suffix}"))
+
+    assert fetches == [JWKS_URL, JWKS_URL]
+
+    now += 1.1
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-two"))
 
@@ -210,6 +226,7 @@ def test_jwks_cache_rate_limits_unknown_kid_refreshes(signing_key):
 
 def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
     fetches: list[str] = []
+    now = 0.0
 
     def fetcher(url: str) -> Mapping[str, Any]:
         fetches.append(url)
@@ -217,13 +234,23 @@ def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
             return {"keys": [signing_key.jwk]}
         raise ClerkTokenError("JWKS unavailable")
 
-    verifier = _verifier(signing_key.jwk, fetcher=fetcher)
+    def clock() -> float:
+        return now
+
+    verifier = _verifier(signing_key.jwk, fetcher=fetcher, clock=clock)
 
     verifier.verify(_make_token(signing_key))
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
+    for suffix in range(2, 10):
+        with pytest.raises(ClerkTokenError):
+            verifier.verify(_make_token(signing_key, kid=f"unknown-{suffix}"))
+
+    assert fetches == [JWKS_URL, JWKS_URL]
+
+    now += 1.1
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-two"))
 
@@ -518,6 +545,8 @@ def _verifier(
     fetches: list[str] | None = None,
     fetcher=None,
     authorized_parties: tuple[str, ...] = (),
+    clock=None,
+    unknown_kid_min_refresh_interval_seconds: float = 1.0,
 ) -> ClerkJWTVerifier:
     if fetcher is None:
 
@@ -531,7 +560,13 @@ def _verifier(
         jwks_url=JWKS_URL,
         authorized_parties=authorized_parties,
         leeway_seconds=0,
-        jwks_cache=JWKSCache(fetcher=fetcher, ttl_seconds=300.0, refresh_cooldown_seconds=30.0),
+        jwks_cache=JWKSCache(
+            fetcher=fetcher,
+            ttl_seconds=300.0,
+            refresh_cooldown_seconds=30.0,
+            unknown_kid_min_refresh_interval_seconds=unknown_kid_min_refresh_interval_seconds,
+            **({"clock": clock} if clock is not None else {}),
+        ),
     )
 
 

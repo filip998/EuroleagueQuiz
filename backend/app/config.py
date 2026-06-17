@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     clerk_jwt_leeway_seconds: int = 60
     clerk_jwks_cache_ttl_seconds: float = 300.0
     clerk_jwks_refresh_cooldown_seconds: float = 30.0
+    clerk_jwks_unknown_kid_min_refresh_interval_seconds: float = 1.0
     api_rate_limit_seconds: float = 1.0
     online_disconnect_grace_seconds: float = 30.0
     wikipedia_user_agent: str = "EuroleagueQuiz/0.1 (https://github.com/filip998/EuroleagueQuiz)"

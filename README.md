@@ -56,9 +56,12 @@ Clerk-backed account auth is configured with `ELQ_CLERK_ISSUER` and
 `ELQ_CLERK_JWKS_URL` so the backend can verify `Authorization: Bearer <token>`
 session JWTs against Clerk's cached JWKS. `ELQ_CLERK_SECRET_KEY` is reserved for
 Clerk Backend API operations, and `ELQ_CLERK_AUTHORIZED_PARTIES` can restrict
-accepted token `azp` values. `GET /auth/me` requires a valid token and
-JIT-provisions a local user in the auth datastore; existing gameplay endpoints
-remain open to anonymous callers.
+accepted token `azp` values. Unknown JWT `kid` refreshes are per-key cached and
+globally throttled by `ELQ_CLERK_JWKS_UNKNOWN_KID_MIN_REFRESH_INTERVAL_SECONDS`
+to avoid JWKS fetch amplification while still recovering from Clerk key
+rotation. `GET /auth/me` requires a valid token and JIT-provisions a local user
+in the auth datastore; existing gameplay endpoints remain open to anonymous
+callers.
 
 ### Run API Server
 
