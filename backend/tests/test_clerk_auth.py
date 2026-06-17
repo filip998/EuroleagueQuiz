@@ -26,7 +26,7 @@ from app.auth.clerk import (
     ClerkTokenError,
     JWKSCache,
 )
-from app.auth.users import DeletedClerkUserError, get_or_create_user_for_claims
+from app.auth.users import DeletedClerkUserError, get_or_create_user_for_claims, upsert_user_for_claims
 from app.auth_database import Base, get_auth_db, sqlite_connect_args
 from app.main import app
 from app.models.user import ClerkUserSyncState, User, UserGuestId, utc_now
@@ -547,6 +547,51 @@ def test_jit_provisioning_returns_existing_user_after_clerk_id_race(
 
         assert user.id == existing.id
         assert count == 1
+
+
+def test_webhook_upsert_updates_existing_user_after_clerk_id_race(
+    monkeypatch,
+    auth_session_factory,
+):
+    with auth_session_factory() as db:
+        existing = User(
+            clerk_user_id="user_race",
+            username="user_fallback",
+            email="fallback@clerk.invalid",
+        )
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+
+        original_find = users_module._find_by_clerk_user_id
+        first_lookup = True
+
+        def simulate_concurrent_insert(db_arg, clerk_user_id):
+            nonlocal first_lookup
+            if first_lookup:
+                first_lookup = False
+                return None
+            return original_find(db_arg, clerk_user_id)
+
+        monkeypatch.setattr(users_module, "_find_by_clerk_user_id", simulate_concurrent_insert)
+
+        user = upsert_user_for_claims(
+            db,
+            {
+                "sub": "user_race",
+                "username": "filip",
+                "email": "filip@example.com",
+                "name": "Filip Tanic",
+                "image_url": "https://example.com/avatar.png",
+            },
+        )
+
+        assert user.id == existing.id
+        assert user.username == "filip"
+        assert user.email == "filip@example.com"
+        assert user.display_name == "Filip Tanic"
+        assert user.avatar_url == "https://example.com/avatar.png"
+        assert db.scalar(select(func.count()).select_from(User)) == 1
 
 
 def test_jit_provisioning_handles_username_collision(auth_session_factory):

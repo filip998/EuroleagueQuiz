@@ -43,7 +43,13 @@ def upsert_user_for_claims(
     _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
     existing = _find_by_clerk_user_id(db, clerk_user_id)
     if existing is None:
-        user = _create_user_from_claims(db, clerk_user_id, claims, commit=commit)
+        user = _create_user_from_claims(
+            db,
+            clerk_user_id,
+            claims,
+            commit=commit,
+            update_existing_on_conflict=True,
+        )
         if commit:
             _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
         return user
@@ -83,6 +89,7 @@ def _create_user_from_claims(
     claims: Mapping[str, Any],
     *,
     commit: bool = True,
+    update_existing_on_conflict: bool = False,
 ) -> User:
     username = _claimed_username(claims)
     if username is None or _is_reserved_fallback_username(username):
@@ -98,6 +105,7 @@ def _create_user_from_claims(
         display_name=_claimed_display_name(claims),
         avatar_url=_claimed_avatar_url(claims),
         commit=commit,
+        claims_for_existing_update=claims if update_existing_on_conflict else None,
     )
 
 
@@ -180,6 +188,7 @@ def _insert_user(
     display_name: str | None,
     avatar_url: str | None,
     commit: bool = True,
+    claims_for_existing_update: Mapping[str, Any] | None = None,
 ) -> User:
     user = User(
         clerk_user_id=clerk_user_id,
@@ -195,6 +204,13 @@ def _insert_user(
         db.rollback()
         existing = _find_by_clerk_user_id(db, clerk_user_id)
         if existing is not None:
+            if claims_for_existing_update is not None:
+                return _update_user_from_claims(
+                    db,
+                    existing,
+                    claims_for_existing_update,
+                    commit=commit,
+                )
             return existing
         fallback_username = _next_available_fallback_username(db, clerk_user_id)
         if username != fallback_username and fallback_username is not None:
@@ -206,6 +222,7 @@ def _insert_user(
                 display_name=display_name,
                 avatar_url=avatar_url,
                 commit=commit,
+                claims_for_existing_update=claims_for_existing_update,
             )
         raise UserProvisioningError("Could not provision Clerk user") from exc
     if commit:

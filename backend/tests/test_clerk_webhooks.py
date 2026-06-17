@@ -255,6 +255,53 @@ def test_clerk_user_deleted_removes_user_and_guest_ids(auth_client, auth_session
         assert db.scalar(select(func.count()).select_from(UserGuestId)) == 0
 
 
+def test_clerk_user_deleted_handles_sync_state_insert_race(
+    auth_client,
+    auth_session_factory,
+    monkeypatch,
+):
+    with auth_session_factory() as db:
+        user = User(
+            clerk_user_id="user_clerk_123",
+            username="raced",
+            email="raced@example.com",
+        )
+        db.add_all(
+            [
+                user,
+                ClerkUserSyncState(
+                    clerk_user_key=clerk_user_sync_key("user_clerk_123"),
+                    last_event_at=clerk_webhooks._timestamp_from_number(1_700_000_001_000),
+                ),
+            ]
+        )
+        db.commit()
+
+    original_find_sync_state = clerk_webhooks._find_sync_state
+    first_lookup = True
+
+    def miss_existing_state_once(db, clerk_user_id):
+        nonlocal first_lookup
+        if first_lookup:
+            first_lookup = False
+            return None
+        return original_find_sync_state(db, clerk_user_id)
+
+    monkeypatch.setattr(clerk_webhooks, "_find_sync_state", miss_existing_state_once)
+
+    response = _post_signed(
+        auth_client,
+        _user_event("user.deleted", event_timestamp=1_700_000_003_000),
+    )
+
+    assert response.status_code == 200
+    with auth_session_factory() as db:
+        state = db.get(ClerkUserSyncState, clerk_user_sync_key("user_clerk_123"))
+        assert state is not None
+        assert state.deleted_at is not None
+        assert db.scalar(select(func.count()).select_from(User)) == 0
+
+
 def test_clerk_stale_update_after_delete_does_not_recreate_user(auth_client, auth_session_factory):
     created = _user_event("user.created", event_timestamp=1_700_000_001_000)
     deleted = _user_event("user.deleted", event_timestamp=1_700_000_003_000)

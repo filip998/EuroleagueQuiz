@@ -169,9 +169,17 @@ def _record_delete_state(
             last_event_at=event_time,
         )
         db.add(state)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            _record_delete_state(db, clerk_user_id, event_time)
+        else:
+            state.deleted_at = event_time
+        return
     else:
         state.last_event_at = max(state.last_event_at, event_time)
-    state.deleted_at = event_time
+        state.deleted_at = event_time
 
 
 def _event_time_for_ordering(event_at: datetime | None) -> datetime:
