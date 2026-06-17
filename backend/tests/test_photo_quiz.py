@@ -36,6 +36,14 @@ def test_eligible_pool_requires_wikipedia_page_and_any_usable_image():
             wikipedia_url="https://wiki/wiki",
             wikipedia_image_url="https://wiki/wiki.png",
         )
+        both = _player(
+            db,
+            "Both",
+            "Eligible",
+            wikipedia_url="https://wiki/both",
+            euroleague_image_url="https://cdn/both.png",
+            wikipedia_image_url="https://wiki/both.png",
+        )
         _player(db, "NoWiki", "Image", euroleague_image_url="https://cdn/no-wiki.png")
         _player(db, "NoImage", "Wiki", wikipedia_url="https://wiki/no-image")
         _player(
@@ -47,7 +55,7 @@ def test_eligible_pool_requires_wikipedia_page_and_any_usable_image():
         )
         db.commit()
 
-        assert set(photo_quiz._eligible_player_ids(db)) == {cdn.id, wiki.id}
+        assert set(photo_quiz._eligible_player_ids(db)) == {cdn.id, wiki.id, both.id}
     finally:
         db.close()
 
@@ -319,6 +327,65 @@ def test_multiplayer_first_correct_answer_wins_match_when_target_is_one():
         assert game.status == "finished"
         assert game.winner_player == 1
         assert photo_quiz.serialize_completed_round(db, game.id, 1)["answer"]["id"] == current.answer_player_id
+    finally:
+        db.close()
+
+
+def test_multiplayer_first_to_three_requires_three_round_wins(monkeypatch):
+    db = _session()
+    try:
+        players = [
+            _player(
+                db,
+                "Race",
+                f"Answer{index}",
+                wikipedia_url=f"https://wiki/race-answer-{index}",
+                euroleague_image_url=f"https://cdn/race-answer-{index}.png",
+            )
+            for index in range(4)
+        ]
+        db.commit()
+        answer_ids = [player.id for player in players[:3]]
+
+        game = photo_quiz.create_game(db, target_wins=3, player1_name="A")
+        monkeypatch.setattr(photo_quiz.random, "choice", lambda _ids: answer_ids.pop(0))
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+
+        for expected_score in (1, 2):
+            current = photo_quiz._current_round(game)
+            assert (
+                photo_quiz.submit_guess(
+                    db,
+                    game=game,
+                    player_id=current.answer_player_id,
+                    acting_player=1,
+                    round_number=current.round_number,
+                )
+                == "round_won"
+            )
+            assert game.status == "active"
+            assert game.winner_player is None
+            assert game.player1_score == expected_score
+            assert game.player2_score == 0
+            current.completed_at = datetime.utcnow() - timedelta(
+                seconds=photo_quiz.PHOTO_REVEAL_COUNTDOWN_SECONDS + 1
+            )
+
+        current = photo_quiz._current_round(game)
+        result = photo_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=current.answer_player_id,
+            acting_player=1,
+            round_number=current.round_number,
+        )
+
+        assert result == "match_won"
+        assert game.status == "finished"
+        assert game.winner_player == 1
+        assert game.player1_score == 3
+        assert game.player2_score == 0
+        assert len(game.rounds) == 3
     finally:
         db.close()
 
