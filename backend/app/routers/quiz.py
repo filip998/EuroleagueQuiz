@@ -284,11 +284,16 @@ async def respond_tictactoe_draw(
 
 
 @router.post("/tictactoe/games/{game_id}/give-up")
-async def give_up_tictactoe_game(game_id: int, db: Session = Depends(get_db)):
+async def give_up_tictactoe_game(
+    game_id: int,
+    player: int | None = Query(None),
+    db: Session = Depends(get_db),
+):
     return await _tictactoe_http_action(
         db,
         GameActionName.GIVE_UP,
         game_id=game_id,
+        player=player,
     )
 
 

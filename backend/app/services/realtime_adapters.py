@@ -57,6 +57,7 @@ def _online_actor(game: Any, player: int | None) -> int | None:
 
 
 class TicTacToeRealtimeAdapter:
+    disconnect_forfeit_enabled = True
     http_actions = {
         GameActionName.CREATE.value,
         GameActionName.JOIN.value,
@@ -69,6 +70,7 @@ class TicTacToeRealtimeAdapter:
         RealtimeClientAction.MOVE.value,
         RealtimeClientAction.OFFER_DRAW.value,
         RealtimeClientAction.RESPOND_DRAW.value,
+        RealtimeClientAction.GIVE_UP.value,
     }
     client_actions = websocket_actions
 
@@ -186,6 +188,18 @@ class TicTacToeRealtimeAdapter:
             )
 
         if action == GameActionName.GIVE_UP:
+            if game.mode == "online_friend":
+                acting_player = _online_actor(game, player)
+                ttt_service.forfeit_online_game(
+                    db,
+                    game,
+                    forfeiting_player=acting_player,
+                )
+                return RealtimeActionOutcome(
+                    game=game,
+                    result=RealtimeResult.RESIGNED,
+                    cancel_timer=True,
+                )
             given_up_round = ttt_service.give_up_round(db, game)
             return RealtimeActionOutcome(
                 game=game,
@@ -218,8 +232,24 @@ class TicTacToeRealtimeAdapter:
         )
         return game
 
+    def handle_player_forfeit(
+        self,
+        db: Session,
+        game: Any,
+        *,
+        forfeiting_player: int,
+        result: RealtimeResult,
+    ) -> Any:
+        ttt_service.forfeit_online_game(
+            db,
+            game,
+            forfeiting_player=forfeiting_player,
+        )
+        return game
+
 
 class RosterGuessRealtimeAdapter:
+    disconnect_forfeit_enabled = False
     http_actions = {
         GameActionName.CREATE.value,
         GameActionName.JOIN.value,
@@ -382,8 +412,19 @@ class RosterGuessRealtimeAdapter:
         )
         return game
 
+    def handle_player_forfeit(
+        self,
+        _db: Session,
+        _game: Any,
+        *,
+        forfeiting_player: int,
+        result: RealtimeResult,
+    ) -> Any:
+        return GAME_ACTION_NOOP
+
 
 class CareerQuizRealtimeAdapter:
+    disconnect_forfeit_enabled = False
     http_actions = {
         GameActionName.CREATE.value,
         GameActionName.JOIN.value,
@@ -525,5 +566,15 @@ class CareerQuizRealtimeAdapter:
         *,
         expected_player: int,
         expected_round: int,
+    ) -> Any:
+        return GAME_ACTION_NOOP
+
+    def handle_player_forfeit(
+        self,
+        _db: Session,
+        _game: Any,
+        *,
+        forfeiting_player: int,
+        result: RealtimeResult,
     ) -> Any:
         return GAME_ACTION_NOOP

@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import SessionLocal
 from app.game_actions import (
     GAME_ACTION_NOOP,
@@ -19,6 +20,7 @@ from app.schemas.realtime import (
     RealtimeClientAction,
     RealtimeResult,
     error_message,
+    is_terminal_result,
     state_message,
 )
 from app.services.game_action_orchestration import (
@@ -31,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 class OnlineGameAdapter(Protocol):
     client_actions: set[str]
+    disconnect_forfeit_enabled: bool
 
     def get_game(self, db: Session, game_id: int) -> Any: ...
 
@@ -59,6 +62,15 @@ class OnlineGameAdapter(Protocol):
         expected_round: int,
     ) -> Any | GameActionNoop: ...
 
+    def handle_player_forfeit(
+        self,
+        db: Session,
+        game: Any,
+        *,
+        forfeiting_player: int,
+        result: RealtimeResult,
+    ) -> Any | GameActionNoop: ...
+
 
 class ConnectionManager:
     def __init__(self):
@@ -74,15 +86,21 @@ class ConnectionManager:
 
     def disconnect(
         self, game_id: int, player: int, websocket: WebSocket | None = None
-    ) -> None:
+    ) -> bool:
         players = self.connections.get(game_id)
         if not players:
-            return
+            return False
         if websocket is not None and players.get(player) is not websocket:
-            return
+            return False
+        if player not in players:
+            return False
         players.pop(player, None)
         if not players:
             self.connections.pop(game_id, None)
+        return True
+
+    def has_player(self, game_id: int, player: int) -> bool:
+        return player in self.connections.get(game_id, {})
 
     async def broadcast(
         self,
@@ -159,6 +177,55 @@ class TurnTimerManager:
         return bool(task and not task.done())
 
 
+class DisconnectGraceTimerManager:
+    def __init__(
+        self,
+        on_expire: Callable[[int, int], Awaitable[None]],
+        *,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ):
+        self._on_expire = on_expire
+        self._sleep = sleep
+        self._timers: dict[tuple[int, int], asyncio.Task] = {}
+
+    def start(self, game_id: int, player: int, grace_seconds: float) -> None:
+        key = (game_id, player)
+        self.cancel(game_id, player)
+
+        async def _run() -> None:
+            await self._sleep(max(grace_seconds, 0.0))
+            if self._timers.get(key) is asyncio.current_task():
+                self._timers.pop(key, None)
+            await self._on_expire(game_id, player)
+
+        loop = asyncio.get_running_loop()
+        self._timers[key] = loop.create_task(_run())
+
+    def cancel(self, game_id: int, player: int) -> None:
+        task = self._timers.pop((game_id, player), None)
+        if task and not task.done():
+            task.cancel()
+
+    def cancel_game(self, game_id: int) -> None:
+        current_task = asyncio.current_task()
+        for key, task in list(self._timers.items()):
+            if key[0] != game_id or task is current_task:
+                continue
+            self._timers.pop(key, None)
+            if not task.done():
+                task.cancel()
+
+    def has_timer(self, game_id: int, player: int) -> bool:
+        task = self._timers.get((game_id, player))
+        return bool(task and not task.done())
+
+    def has_game_timer(self, game_id: int) -> bool:
+        return any(
+            key_game_id == game_id and not task.done()
+            for (key_game_id, _), task in self._timers.items()
+        )
+
+
 class OnlineGameRealtimeModule:
     def __init__(
         self,
@@ -167,11 +234,22 @@ class OnlineGameRealtimeModule:
         session_factory: Callable[[], Session] = SessionLocal,
         connections: ConnectionManager | None = None,
         timer: TurnTimerManager | None = None,
+        disconnect_grace_timer: DisconnectGraceTimerManager | None = None,
+        disconnect_grace_seconds: float | None = None,
     ):
         self.adapter = adapter
         self.session_factory = session_factory
         self.connections = connections or ConnectionManager()
         self.timer = timer or TurnTimerManager(self._expire_turn)
+        self.disconnect_grace_timer = (
+            disconnect_grace_timer
+            or DisconnectGraceTimerManager(self._expire_disconnect_grace)
+        )
+        self.disconnect_grace_seconds = (
+            settings.online_disconnect_grace_seconds
+            if disconnect_grace_seconds is None
+            else disconnect_grace_seconds
+        )
         self.game_actions = GameActionOrchestrator(adapter, self, log=logger)
 
     async def connect(self, websocket: WebSocket, game_id: int, player: int) -> None:
@@ -215,6 +293,7 @@ class OnlineGameRealtimeModule:
             db.close()
 
         await self.connections.connect(game_id, player, websocket)
+        self.disconnect_grace_timer.cancel(game_id, player)
         await websocket.send_json(state_message(state))
 
     async def handle_client_message(
@@ -269,6 +348,9 @@ class OnlineGameRealtimeModule:
         completed_round: dict[str, Any] | None = None,
         only_player: int | None = None,
     ) -> int:
+        if is_terminal_result(result, game_state):
+            self.cancel_timer(game_id)
+            self.disconnect_grace_timer.cancel_game(game_id)
         return await self.connections.broadcast(
             game_id,
             state_message(game_state, result=result, completed_round=completed_round),
@@ -278,7 +360,9 @@ class OnlineGameRealtimeModule:
     def disconnect(
         self, game_id: int, player: int, websocket: WebSocket | None = None
     ) -> None:
-        self.connections.disconnect(game_id, player, websocket)
+        removed = self.connections.disconnect(game_id, player, websocket)
+        if removed:
+            self._start_disconnect_grace(game_id, player)
 
     def start_timer_from_game(self, game: Any) -> None:
         self.timer.start(
@@ -298,6 +382,85 @@ class OnlineGameRealtimeModule:
 
     def cancel_timer(self, game_id: int) -> None:
         self.timer.cancel(game_id)
+
+    def _start_disconnect_grace(self, game_id: int, player: int) -> None:
+        if self.connections.has_player(game_id, player):
+            return
+        if not getattr(self.adapter, "disconnect_forfeit_enabled", False):
+            return
+
+        db = self.session_factory()
+        try:
+            game = self.adapter.get_game(db, game_id)
+            if (
+                getattr(game, "mode", None) != "online_friend"
+                or getattr(game, "status", None) != "active"
+            ):
+                return
+        except GameActionError:
+            logger.info(
+                "Skipping disconnect grace for missing game %s player %s",
+                game_id,
+                player,
+            )
+            return
+        finally:
+            db.close()
+
+        self.disconnect_grace_timer.start(
+            game_id,
+            player,
+            self.disconnect_grace_seconds,
+        )
+
+    async def _expire_disconnect_grace(self, game_id: int, player: int) -> None:
+        if self.connections.has_player(game_id, player):
+            return
+
+        db = self.session_factory()
+        try:
+            def action():
+                if self.connections.has_player(game_id, player):
+                    return GAME_ACTION_NOOP
+                try:
+                    game = self.adapter.get_game(db, game_id)
+                except GameActionError:
+                    return GAME_ACTION_NOOP
+                if (
+                    getattr(game, "mode", None) != "online_friend"
+                    or getattr(game, "status", None) != "active"
+                ):
+                    return GAME_ACTION_NOOP
+                return self.adapter.handle_player_forfeit(
+                    db,
+                    game,
+                    forfeiting_player=player,
+                    result=RealtimeResult.OPPONENT_LEFT,
+                )
+
+            game = run_game_action(db, action)
+            if game is GAME_ACTION_NOOP:
+                return
+
+            db.refresh(game)
+            state = self.adapter.serialize_state(db, game)
+        except Exception:
+            logger.exception(
+                "Error in realtime disconnect grace timer for game %s player %s",
+                game_id,
+                player,
+            )
+            return
+        finally:
+            db.close()
+
+        self.cancel_timer(game_id)
+        self.disconnect_grace_timer.cancel_game(game_id)
+        await self.broadcast_state(
+            game_id,
+            state,
+            result=RealtimeResult.OPPONENT_LEFT,
+        )
 
     async def _expire_turn(
         self, game_id: int, expected_player: int, expected_round: int

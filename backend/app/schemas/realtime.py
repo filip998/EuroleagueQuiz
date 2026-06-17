@@ -16,6 +16,7 @@ class RealtimeClientAction(StrEnum):
     MOVE = "move"
     OFFER_DRAW = "offer_draw"
     RESPOND_DRAW = "respond_draw"
+    GIVE_UP = "give_up"
     GUESS = "guess"
     OFFER_END = "offer_end"
     RESPOND_END = "respond_end"
@@ -44,9 +45,13 @@ class RealtimeResult(StrEnum):
     TIME_EXPIRED = "time_expired"
     GAVE_UP = "gave_up"
     GIVEN_UP = "given_up"
+    RESIGNED = "resigned"
+    OPPONENT_LEFT = "opponent_left"
 
 
-TERMINAL_RESULTS = frozenset({RealtimeResult.MATCH_WON})
+TERMINAL_RESULTS = frozenset(
+    {RealtimeResult.MATCH_WON, RealtimeResult.RESIGNED, RealtimeResult.OPPONENT_LEFT}
+)
 
 
 class RealtimeStatePayload(BaseModel):
