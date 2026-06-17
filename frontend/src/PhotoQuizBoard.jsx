@@ -92,7 +92,9 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
   const offerVersion = game?.pending_no_answer_offer_version;
   // Public Quick Match games disable the cooperative no-answer flow (the backend
   // rejects offers/responses); their rounds auto-resolve on the server timer.
-  const isPublicQuickMatch = isOnline && Boolean(game?.is_public) && Boolean(game?.preset);
+  // Derive this from the game state (not transport): the no-answer UI must stay
+  // hidden for any public game even if onlineInfo hasn't been recovered yet.
+  const isPublicQuickMatch = !solo && Boolean(game?.is_public) && Boolean(game?.preset);
   const canRespondNoAnswer = (
     !solo
     && !isPublicQuickMatch

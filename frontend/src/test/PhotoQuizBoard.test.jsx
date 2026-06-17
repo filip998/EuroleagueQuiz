@@ -781,6 +781,20 @@ describe("PhotoQuizBoard Quick Match", () => {
     expect(screen.queryByTestId("photo-round-timer")).not.toBeInTheDocument();
     expect(screen.getByText("Nobody knows")).toBeInTheDocument();
   });
+
+  it("hides the no-answer flow for a public game even before onlineInfo is recovered", () => {
+    // A public game opened/recovered without onlineInfo must still hide the
+    // no-answer UI: the backend rejects offers/responses for any public game, so
+    // the gating derives from game state rather than transport.
+    render(
+      <PhotoQuizBoard
+        initialState={publicQuickMatchGame()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+    expect(screen.queryByText("Nobody knows")).not.toBeInTheDocument();
+  });
 });
 
 function activePhotoGame(overrides = {}) {
