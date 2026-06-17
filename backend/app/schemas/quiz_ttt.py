@@ -26,3 +26,15 @@ class TicTacToeJoinGameRequest(BaseModel):
     join_code: str = Field(min_length=6, max_length=6)
     player_name: Optional[str] = None
     guest_id: Optional[str] = None
+
+
+class TicTacToeQuickMatchRequest(BaseModel):
+    preset: str
+    player_name: Optional[str] = None
+    guest_id: Optional[str] = None
+
+
+class TicTacToeQuickMatchCancelRequest(BaseModel):
+    preset: str
+    game_id: int
+    guest_id: Optional[str] = None

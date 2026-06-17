@@ -921,6 +921,8 @@ def serialize_game_state(
         "resolved_mode": game.mode if game.mode == "single_player" else ("local_two_player" if game.mode in LOCAL_PLAY_MODES else game.mode),
         "status": game.status,
         "join_code": game.join_code,
+        "is_public": bool(game.is_public),
+        "preset": game.preset,
         "target_wins": game.target_wins,
         "turn_seconds": game.turn_seconds,
         "turn_deadline_utc": turn_deadline,
