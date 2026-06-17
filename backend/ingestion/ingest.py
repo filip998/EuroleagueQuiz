@@ -1,6 +1,7 @@
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -11,6 +12,13 @@ from ingestion.fetch_boxscores import fetch_boxscores
 from ingestion.fetch_rosters import fetch_rosters
 from ingestion.fetch_seasons import fetch_season_data
 from ingestion.utils import RateLimiter
+from ingestion.wikipedia_images import (
+    DEFAULT_THUMBNAIL_WIDTH,
+    HttpWikipediaImageAdapter,
+    ImageIngestionOptions,
+    ingest_wikipedia_images,
+    write_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +29,37 @@ def main():
     parser.add_argument("--end-season", type=int, default=2025)
     parser.add_argument(
         "--step",
-        choices=["all", "seasons", "rosters", "boxscores", "aggregate"],
+        choices=["all", "seasons", "rosters", "boxscores", "aggregate", "wikipedia-images"],
         default="all",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Limit players inspected by the wikipedia-images step",
+    )
+    parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Re-check already inspected players for the wikipedia-images step",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=50,
+        help="Rows to commit between batches for the wikipedia-images step",
+    )
+    parser.add_argument(
+        "--thumbnail-width",
+        type=int,
+        default=DEFAULT_THUMBNAIL_WIDTH,
+        help="Requested Wikimedia thumbnail width for the wikipedia-images step",
+    )
+    parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Optional JSON report path for the wikipedia-images step",
     )
     parser.add_argument(
         "--skip-boxscores",
@@ -53,6 +90,38 @@ def main():
     )
     SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     rate_limiter = RateLimiter(settings.api_rate_limit_seconds)
+
+    if args.step == "wikipedia-images":
+        session = SessionFactory()
+        try:
+            report = ingest_wikipedia_images(
+                session,
+                HttpWikipediaImageAdapter(rate_limiter=rate_limiter),
+                ImageIngestionOptions(
+                    limit=args.limit,
+                    force_refresh=args.force_refresh,
+                    thumbnail_width=args.thumbnail_width,
+                    commit_interval=args.batch_size,
+                ),
+            )
+            session.commit()
+            if args.report is not None:
+                write_report(report, args.report)
+            logger.info(
+                "Wikipedia image enrichment complete: checked=%s found=%s missing=%s skipped=%s errors=%s",
+                report.checked,
+                report.found,
+                report.missing,
+                report.skipped,
+                report.errors,
+            )
+        except Exception:
+            session.rollback()
+            logger.exception("Error processing Wikipedia image enrichment")
+            raise
+        finally:
+            session.close()
+        return
 
     for year in range(args.start_season, args.end_season + 1):
         logger.info(f"Processing season {year}-{year + 1}")
