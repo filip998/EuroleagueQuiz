@@ -116,18 +116,19 @@ class JWKSCache:
 
     def _refresh_for_unknown_kid(self, jwks_url: str, kid: str) -> _CachedJWKS:
         now = self._clock()
+        wait_for: _InFlightJWKSFetch | None = None
         with self._lock:
             cached = self._cache.get(jwks_url)
             if cached is not None and kid in cached.keys_by_kid:
                 return cached
             if cached is not None:
-                if now - cached.last_unknown_kid_refresh_at < self._refresh_cooldown_seconds:
+                in_flight = self._in_flight_fetches.get(jwks_url)
+                if in_flight is not None:
+                    wait_for = in_flight
+                elif now - cached.last_unknown_kid_refresh_at < self._refresh_cooldown_seconds:
                     return cached
-                self._cache[jwks_url] = _CachedJWKS(
-                    keys_by_kid=cached.keys_by_kid,
-                    fetched_at=cached.fetched_at,
-                    last_unknown_kid_refresh_at=now,
-                )
+        if wait_for is not None:
+            return self._wait_for_fetch(wait_for)
         return self._fetch_and_store(
             jwks_url,
             now=now,
@@ -148,6 +149,12 @@ class JWKSCache:
                 return cached
             in_flight = self._in_flight_fetches.get(jwks_url)
             if in_flight is None:
+                if last_unknown_kid_refresh_at is not None and cached is not None:
+                    self._cache[jwks_url] = _CachedJWKS(
+                        keys_by_kid=cached.keys_by_kid,
+                        fetched_at=cached.fetched_at,
+                        last_unknown_kid_refresh_at=last_unknown_kid_refresh_at,
+                    )
                 in_flight = _InFlightJWKSFetch(event=threading.Event())
                 self._in_flight_fetches[jwks_url] = in_flight
                 owns_fetch = True
@@ -155,12 +162,7 @@ class JWKSCache:
                 owns_fetch = False
 
         if not owns_fetch:
-            in_flight.event.wait()
-            if in_flight.error is not None:
-                raise in_flight.error
-            if in_flight.result is None:
-                raise ClerkTokenError("Unable to fetch Clerk JWKS")
-            return in_flight.result
+            return self._wait_for_fetch(in_flight)
 
         try:
             jwks = self._fetcher(jwks_url)
@@ -186,6 +188,14 @@ class JWKSCache:
             with self._lock:
                 self._in_flight_fetches.pop(jwks_url, None)
                 in_flight.event.set()
+
+    def _wait_for_fetch(self, in_flight: _InFlightJWKSFetch) -> _CachedJWKS:
+        in_flight.event.wait()
+        if in_flight.error is not None:
+            raise in_flight.error
+        if in_flight.result is None:
+            raise ClerkTokenError("Unable to fetch Clerk JWKS")
+        return in_flight.result
 
 
 def _keys_by_kid(jwks: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:

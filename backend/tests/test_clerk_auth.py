@@ -121,6 +121,36 @@ def test_jwks_cache_refreshes_once_for_rotated_key():
     assert fetches == [JWKS_URL, JWKS_URL]
 
 
+def test_jwks_cache_waits_for_in_flight_rotation_refresh():
+    old_key = _new_signing_key("old-key")
+    new_key = _new_signing_key("new-key")
+    fetches: list[str] = []
+    refresh_started = threading.Event()
+    release_refresh = threading.Event()
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        fetches.append(url)
+        if len(fetches) == 1:
+            return {"keys": [old_key.jwk]}
+        refresh_started.set()
+        assert release_refresh.wait(timeout=2.0)
+        return {"keys": [old_key.jwk, new_key.jwk]}
+
+    verifier = _verifier(old_key.jwk, fetcher=fetcher)
+    verifier.verify(_make_token(old_key))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(verifier.verify, _make_token(new_key))
+        assert refresh_started.wait(timeout=2.0)
+        second = executor.submit(verifier.verify, _make_token(new_key))
+        release_refresh.set()
+
+        assert first.result(timeout=2.0)["sub"] == "user_clerk_123"
+        assert second.result(timeout=2.0)["sub"] == "user_clerk_123"
+
+    assert fetches == [JWKS_URL, JWKS_URL]
+
+
 def test_jwks_cache_rate_limits_unknown_kid_refreshes(signing_key):
     fetches: list[str] = []
     verifier = _verifier(signing_key.jwk, fetches=fetches)
