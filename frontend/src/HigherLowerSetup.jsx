@@ -63,7 +63,6 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
     setError(null);
     setLoading(true);
     try {
-      saveNickname(nickname);
       const resp = await createHigherLowerGame({
         tier,
         season_range_start: seasonStart,
