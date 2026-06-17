@@ -47,9 +47,12 @@ The orchestrator relies on these — keep them exact:
 Apply, at minimum:
 
 - **Type:** `bug`, `enhancement`, `documentation`, or `type:refactor`.
-- **Game scope — exactly one:** `game:tic-tac-toe`, `game:roster-guess`,
+- **Game scope — at least one:** `game:tic-tac-toe`, `game:roster-guess`,
   `game:higher-lower`, `game:career-quiz`, `game:photo-quiz`, or `game:general`
-  (cross-cutting / shared / infra).
+  (cross-cutting / shared / infra). Use `game:general` for shared/infra work;
+  add one or more specific `game:*` labels when particular games are directly
+  affected (a cross-game epic may carry both, e.g. `game:general` +
+  `game:photo-quiz`).
 - **Area — one or more:** `area:frontend`, `area:backend`, `area:realtime`,
   `area:testing`, `area:auth`.
 - **`mode:multiplayer`** when it touches online play.
