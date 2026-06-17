@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import asyncio
 import pytest
 import random
 from fastapi.testclient import TestClient
@@ -11,6 +12,11 @@ from app.main import app
 from app.models import Player, PlayerSeasonTeam, Season, Team
 from app.models.tictactoe import QuizTicTacToeGame
 from app.routers import quiz as quiz_router
+from app.schemas.realtime import RealtimeServerMessageAdapter
+from app.services import matchmaking, tictactoe as ttt_service
+from app.services.realtime import DisconnectGraceTimerManager, OnlineGameRealtimeModule
+from app.services.realtime_adapters import TicTacToeRealtimeAdapter
+from tests.realtime_helpers import FakeWebSocket, SleepController, drain_tasks
 
 
 @pytest.fixture(autouse=True)
@@ -334,7 +340,10 @@ def test_quick_match_pools_endpoint_tracks_waiting_active_cancel_and_finish(
 def test_quick_match_pairs_second_guest_and_only_fresh_pair_starts_effects(
     client: TestClient,
     quick_match_effects,
+    monkeypatch,
 ):
+    monkeypatch.setattr(matchmaking, "random_starting_player", lambda: 2)
+
     first = client.post(
         "/quiz/tictactoe/quick-match",
         json={
@@ -361,16 +370,24 @@ def test_quick_match_pairs_second_guest_and_only_fresh_pair_starts_effects(
     assert matched_game["status"] == "active"
     assert matched_game["player1_name"] == "Host"
     assert matched_game["player2_name"] == "Joiner"
-    assert matched_game["current_player"] in (1, 2)
+    assert matched_game["current_player"] == 2
     assert matched_game["round"] is not None
     assert matched_game["is_public"] is True
     assert matched_game["preset"] == "standard"
     assert matched_game["target_wins"] == 3
     assert matched_game["turn_seconds"] == 40
+    assert "guest_id" not in matched_game
+    assert "player1_guest_id" not in matched_game
+    assert "player2_guest_id" not in matched_game
     assert quick_match_effects["started"] == [matched_game["id"]]
     assert [item[0] for item in quick_match_effects["broadcasts"]] == [
         matched_game["id"]
     ]
+
+    with client.session_local() as db:
+        db_game = db.get(QuizTicTacToeGame, matched_game["id"])
+        assert db_game.player1_guest_id == "host-guest"
+        assert db_game.player2_guest_id == "joiner-guest"
 
     retry = client.post(
         "/quiz/tictactoe/quick-match",
@@ -387,6 +404,109 @@ def test_quick_match_pairs_second_guest_and_only_fresh_pair_starts_effects(
     assert retry_game["status"] == "active"
     assert quick_match_effects["started"] == [matched_game["id"]]
     assert len(quick_match_effects["broadcasts"]) == 1
+
+
+def test_quick_match_randomized_starting_player_can_choose_either_player(
+    client: TestClient,
+    quick_match_effects,
+    monkeypatch,
+):
+    starting_players = iter([1, 2, 1, 2])
+    monkeypatch.setattr(
+        matchmaking,
+        "random_starting_player",
+        lambda: next(starting_players),
+    )
+    observed = []
+
+    for index in range(4):
+        first = client.post(
+            "/quiz/tictactoe/quick-match",
+            json={
+                "preset": "standard",
+                "player_name": f"Host {index}",
+                "guest_id": f"host-guest-{index}",
+            },
+        )
+        assert first.status_code == 200
+        waiting_game = _action_payload(first)["game"]
+        assert waiting_game["status"] == "waiting_for_opponent"
+
+        second = client.post(
+            "/quiz/tictactoe/quick-match",
+            json={
+                "preset": "standard",
+                "player_name": f"Joiner {index}",
+                "guest_id": f"joiner-guest-{index}",
+            },
+        )
+        assert second.status_code == 200
+        matched_game = _action_payload(second)["game"]
+        assert matched_game["id"] == waiting_game["id"]
+        assert matched_game["status"] == "active"
+        observed.append(matched_game["current_player"])
+
+    assert observed == [1, 2, 1, 2]
+    assert len(quick_match_effects["started"]) == 4
+    assert len(quick_match_effects["broadcasts"]) == 4
+
+
+@pytest.mark.asyncio
+async def test_tictactoe_disconnect_grace_forfeits_real_quick_match_game(
+    client: TestClient,
+):
+    with client.session_local() as db:
+        game = ttt_service.create_game(
+            db,
+            mode="online_friend",
+            target_wins=3,
+            timer_mode="40s",
+            player1_name="Host",
+            guest_id="host-guest",
+        )
+        game.is_public = True
+        game.preset = "standard"
+        ttt_service.join_game(
+            db,
+            game.join_code,
+            "Joiner",
+            guest_id="joiner-guest",
+            started_by_player=1,
+        )
+        game_id = game.id
+        db.commit()
+
+    grace_sleep = SleepController()
+    module = OnlineGameRealtimeModule(
+        TicTacToeRealtimeAdapter(),
+        session_factory=client.session_local,
+        disconnect_grace_seconds=3,
+    )
+    module.disconnect_grace_timer = DisconnectGraceTimerManager(
+        module._expire_disconnect_grace,
+        sleep=grace_sleep,
+    )
+    leaving = FakeWebSocket()
+    opponent = FakeWebSocket()
+    await module.connections.connect(game_id, 1, leaving)
+    await module.connections.connect(game_id, 2, opponent)
+
+    module.disconnect(game_id, 1, leaving)
+    await grace_sleep.wait_for_call()
+    grace_sleep.release()
+    await drain_tasks(5)
+
+    with client.session_local() as db:
+        finished_game = db.get(QuizTicTacToeGame, game_id)
+        assert finished_game.status == "finished"
+        assert finished_game.winner_player == 2
+
+    assert not module.disconnect_grace_timer.has_game_timer(game_id)
+    message = opponent.sent[-1]
+    RealtimeServerMessageAdapter.validate_python(message)
+    assert message["payload"]["result"] == "opponent_left"
+    assert message["payload"]["terminal"] is True
+    assert message["payload"]["game"]["winner_player"] == 2
 
 
 def test_quick_match_cancel_removes_waiting_game_and_frees_pool(client: TestClient):

@@ -1,4 +1,5 @@
 import asyncio
+import random
 from pathlib import Path
 
 import pytest
@@ -340,6 +341,17 @@ def test_tictactoe_matchmaking_randomizes_first_move(session_factory, monkeypatc
         assert second.starting_player == 2
         assert second.game.current_player == 2
         assert round_obj.started_by_player == 2
+
+
+def test_random_starting_player_samples_both_players_with_seed():
+    state = random.getstate()
+    try:
+        random.seed(0)
+        observed = {matchmaking.random_starting_player() for _ in range(20)}
+    finally:
+        random.setstate(state)
+
+    assert observed == {1, 2}
 
 
 def test_cancel_search_removes_waiting_public_game_and_frees_pool(session_factory):
