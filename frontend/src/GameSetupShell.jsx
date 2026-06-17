@@ -7,6 +7,7 @@ const ACCENTS = {
   player2: { badge: "bg-elq-player2/10", icon: "text-elq-player2" },
   emerald: { badge: "bg-emerald-100", icon: "text-emerald-600" },
   amber: { badge: "bg-amber-100", icon: "text-amber-600" },
+  violet: { badge: "bg-violet-100", icon: "text-violet-600" },
 };
 
 const CARD_CLASS =

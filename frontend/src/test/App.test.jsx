@@ -44,6 +44,16 @@ vi.mock("../CareerQuizSetup", () => ({
 vi.mock("../CareerQuizBoard", () => ({
   default: () => <div data-testid="career-board" />,
 }));
+vi.mock("../PhotoQuizSetup", () => ({
+  default: ({ onBack }) => (
+    <div data-testid="photo-setup">
+      <button onClick={onBack}>Back</button>
+    </div>
+  ),
+}));
+vi.mock("../PhotoQuizBoard", () => ({
+  default: () => <div data-testid="photo-board" />,
+}));
 
 describe("App", () => {
   it("renders the game selection screen with all game modes", () => {
@@ -52,6 +62,7 @@ describe("App", () => {
     expect(screen.getByText("ROSTER GUESS")).toBeInTheDocument();
     expect(screen.getByText("HIGHER OR LOWER")).toBeInTheDocument();
     expect(screen.getByText("CAREER QUIZ")).toBeInTheDocument();
+    expect(screen.getByText("PHOTO QUIZ")).toBeInTheDocument();
     expect(screen.getByText("Choose your game")).toBeInTheDocument();
   });
 
@@ -77,6 +88,12 @@ describe("App", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     fireEvent.click(screen.getByText("CAREER QUIZ"));
     expect(screen.getByTestId("career-setup")).toBeInTheDocument();
+  });
+
+  it("navigates to Photo Quiz setup when clicking the card", () => {
+    render(<MemoryRouter><App /></MemoryRouter>);
+    fireEvent.click(screen.getByText("PHOTO QUIZ"));
+    expect(screen.getByTestId("photo-setup")).toBeInTheDocument();
   });
 
   it("navigates back to selection when onBack is called", () => {
