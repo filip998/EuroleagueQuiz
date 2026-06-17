@@ -12,6 +12,8 @@
 // as "no token" so a token hiccup never breaks a REST call.
 
 let tokenProvider = null;
+let tokenProviderVersion = 0;
+const tokenProviderListeners = new Set();
 
 // Cap how long a token fetch may delay a request before falling back to
 // anonymous, so a slow Clerk refresh can't hang public gameplay calls.
@@ -23,13 +25,32 @@ const TOKEN_TIMEOUT_MS = 5000;
 export function setAuthTokenProvider(provider) {
   const fn = typeof provider === "function" ? provider : null;
   tokenProvider = fn;
+  notifyTokenProviderListeners();
   return () => {
-    if (tokenProvider === fn) tokenProvider = null;
+    if (tokenProvider === fn) {
+      tokenProvider = null;
+      notifyTokenProviderListeners();
+    }
   };
 }
 
 export function clearAuthTokenProvider() {
+  if (tokenProvider === null) return;
   tokenProvider = null;
+  notifyTokenProviderListeners();
+}
+
+export function hasAuthTokenProvider() {
+  return tokenProvider !== null;
+}
+
+export function getAuthTokenProviderSnapshot() {
+  return tokenProviderVersion;
+}
+
+export function subscribeAuthTokenProvider(listener) {
+  tokenProviderListeners.add(listener);
+  return () => tokenProviderListeners.delete(listener);
 }
 
 // Resolve the current Bearer token, or `null` when signed out / unavailable.
@@ -49,5 +70,12 @@ export async function getAuthToken() {
     return token || null;
   } catch {
     return null;
+  }
+}
+
+function notifyTokenProviderListeners() {
+  tokenProviderVersion += 1;
+  for (const listener of tokenProviderListeners) {
+    listener();
   }
 }

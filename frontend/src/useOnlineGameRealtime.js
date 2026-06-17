@@ -1,5 +1,11 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 
+import {
+  getAuthToken,
+  getAuthTokenProviderSnapshot,
+  hasAuthTokenProvider,
+  subscribeAuthTokenProvider,
+} from "./authToken";
 import { REALTIME_MESSAGE_TYPES } from "./realtimeSchema";
 
 const DEFAULT_RECONNECT_DELAY_MS = 2000;
@@ -23,6 +29,11 @@ export function useOnlineGameRealtime({
   const realtimeVersionRef = useRef(0);
   const onStateRef = useRef(onState);
   const onErrorRef = useRef(onError);
+  const authTokenProviderVersion = useSyncExternalStore(
+    subscribeAuthTokenProvider,
+    getAuthTokenProviderSnapshot,
+    getAuthTokenProviderSnapshot
+  );
 
   useEffect(() => {
     onStateRef.current = onState;
@@ -77,18 +88,34 @@ export function useOnlineGameRealtime({
       }
     }
 
+    function openConnection(version, authToken = null) {
+      if (closed || version !== activeVersion) return;
+      const options = {
+        gameId,
+        playerNumber,
+        onMessage: (message) => handleMessage(message, version),
+        onClose: () => scheduleReconnect(version),
+      };
+      if (authToken) options.authToken = authToken;
+      activeConnection = connect(options);
+      connectionRef.current = activeConnection;
+    }
+
+    async function connectWithAuthToken(version) {
+      const authToken = await getAuthToken();
+      openConnection(version, authToken);
+    }
+
     function connectNow() {
       if (closed) return;
       closeActiveConnection();
       const version = activeVersion + 1;
       activeVersion = version;
-      activeConnection = connect({
-        gameId,
-        playerNumber,
-        onMessage: (message) => handleMessage(message, version),
-        onClose: () => scheduleReconnect(version),
-      });
-      connectionRef.current = activeConnection;
+      if (!hasAuthTokenProvider()) {
+        openConnection(version);
+        return;
+      }
+      void connectWithAuthToken(version);
     }
 
     connectNow();
@@ -103,6 +130,7 @@ export function useOnlineGameRealtime({
     gameId,
     playerNumber,
     reconnectDelayMs,
+    authTokenProviderVersion,
   ]);
 
   useEffect(() => {

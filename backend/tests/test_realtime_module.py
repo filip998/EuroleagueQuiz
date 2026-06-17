@@ -7,11 +7,14 @@ from typing import Any
 import pytest
 from fastapi import WebSocketDisconnect
 
+from app.auth.clerk import ClerkTokenError
 from app.game_actions import GAME_ACTION_NOOP, ConflictGameActionError
 from app.schemas.realtime import RealtimeServerMessageAdapter
+from app.services import realtime as realtime_service
 from app.services.realtime import (
     DisconnectGraceTimerManager,
     OnlineGameRealtimeModule,
+    RealtimeConnectionContext,
     RealtimeActionOutcome,
     TurnTimerManager,
 )
@@ -27,6 +30,12 @@ class FakeGame:
     round_number: int = 1
     turn_seconds: int | None = 5
     winner_player: int | None = None
+
+
+@dataclass
+class FakeRealtimeUser:
+    id: str = "user_1"
+    clerk_user_id: str = "clerk_user_1"
 
 
 class FakeSession:
@@ -175,8 +184,13 @@ class DisconnectingWebSocket(FakeWebSocket):
 
 
 class ReceivingWebSocket(FakeWebSocket):
-    def __init__(self, messages: list[Any]):
-        super().__init__()
+    def __init__(
+        self,
+        messages: list[Any],
+        *,
+        query_params: dict[str, Any] | None = None,
+    ):
+        super().__init__(query_params=query_params)
         self._messages = list(messages)
 
     async def receive_json(self):
@@ -201,12 +215,17 @@ def make_module(
     *,
     disconnect_forfeit_enabled: bool = False,
     disconnect_grace_sleep: SleepController | None = None,
+    auth_session_factory=None,
 ):
     store = FakeStore(game)
+    kwargs = {}
+    if auth_session_factory is not None:
+        kwargs["auth_session_factory"] = auth_session_factory
     module = OnlineGameRealtimeModule(
         FakeAdapter(disconnect_forfeit_enabled=disconnect_forfeit_enabled),
         session_factory=store.session_factory,
         disconnect_grace_seconds=3,
+        **kwargs,
     )
     if disconnect_grace_sleep is not None:
         module.disconnect_grace_timer = DisconnectGraceTimerManager(
@@ -214,6 +233,117 @@ def make_module(
             sleep=disconnect_grace_sleep,
         )
     return module, store
+
+
+@pytest.mark.asyncio
+async def test_connect_without_token_stores_guest_context(monkeypatch):
+    def fail_verifier():
+        raise AssertionError("Verifier should not run for anonymous websockets")
+
+    monkeypatch.setattr(realtime_service, "get_clerk_jwt_verifier", fail_verifier)
+    module, _store = make_module()
+    websocket = FakeWebSocket()
+
+    await module._send_initial_state(websocket, 1, 1)
+
+    assert websocket.accepted is True
+    assert websocket.sent[0]["type"] == "state"
+    assert module.connections.get_context(1, 1).user is None
+
+
+@pytest.mark.asyncio
+async def test_connect_with_invalid_token_falls_back_to_guest(monkeypatch):
+    class RejectingVerifier:
+        def verify(self, token: str):
+            assert token == "expired-token"
+            raise ClerkTokenError("expired")
+
+    def fail_auth_session_factory():
+        raise AssertionError("Auth DB should not open for invalid tokens")
+
+    monkeypatch.setattr(
+        realtime_service, "get_clerk_jwt_verifier", lambda: RejectingVerifier()
+    )
+    module, _store = make_module(auth_session_factory=fail_auth_session_factory)
+    websocket = FakeWebSocket(query_params={"token": "expired-token"})
+
+    await module._send_initial_state(websocket, 1, 1)
+
+    assert websocket.accepted is True
+    assert websocket.sent[0]["type"] == "state"
+    assert module.connections.get_context(1, 1).user is None
+
+
+@pytest.mark.asyncio
+async def test_connect_with_valid_token_stores_user_context(monkeypatch):
+    class AcceptingVerifier:
+        def verify(self, token: str):
+            assert token == "valid-token"
+            return {"sub": "clerk_user_1", "username": "tester"}
+
+    class FakeAuthSession:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    auth_sessions: list[FakeAuthSession] = []
+    user = FakeRealtimeUser()
+
+    def auth_session_factory():
+        session = FakeAuthSession()
+        auth_sessions.append(session)
+        return session
+
+    def fake_get_or_create_user_for_claims(db, claims):
+        assert db is auth_sessions[0]
+        assert claims["sub"] == "clerk_user_1"
+        return user
+
+    monkeypatch.setattr(
+        realtime_service, "get_clerk_jwt_verifier", lambda: AcceptingVerifier()
+    )
+    monkeypatch.setattr(
+        realtime_service,
+        "get_or_create_user_for_claims",
+        fake_get_or_create_user_for_claims,
+    )
+    module, _store = make_module(auth_session_factory=auth_session_factory)
+    websocket = FakeWebSocket(query_params={"token": "valid-token"})
+
+    await module._send_initial_state(websocket, 1, 1)
+
+    assert websocket.accepted is True
+    assert websocket.sent[0]["type"] == "state"
+    assert module.connections.get_context(1, 1).user is user
+    assert auth_sessions[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_reconnect_replaces_stale_user_context_atomically():
+    module, _store = make_module()
+    user = FakeRealtimeUser()
+    old_socket = FakeWebSocket()
+    new_socket = FakeWebSocket()
+    await module.connections.connect(
+        1,
+        1,
+        old_socket,
+        context=RealtimeConnectionContext(user=user),
+    )
+
+    await module.connections.connect(
+        1,
+        1,
+        new_socket,
+        context=RealtimeConnectionContext(),
+    )
+    module.connections.disconnect(1, 1, old_socket)
+
+    assert old_socket.closed is True
+    assert module.connections.connections[1][1] is new_socket
+    assert module.connections.get_context(1, 1).user is None
 
 
 @pytest.mark.asyncio

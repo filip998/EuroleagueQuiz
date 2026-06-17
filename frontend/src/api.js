@@ -115,8 +115,11 @@ export function autocompletePlayer(q, teamCode1, teamCode2, limit = 15) {
   return request("GET", `/quiz/tictactoe/players/autocomplete?${params}`);
 }
 
-function connectRealtimeWebSocket(path, { onMessage, onClose, WebSocketImpl = WebSocket }) {
-  const ws = new WebSocketImpl(`${WS_BASE}${path}`);
+function connectRealtimeWebSocket(path, { onMessage, onClose, WebSocketImpl = WebSocket, authToken }) {
+  const tokenQuery = authToken
+    ? `${path.includes("?") ? "&" : "?"}${new URLSearchParams({ token: authToken })}`
+    : "";
+  const ws = new WebSocketImpl(`${WS_BASE}${path}${tokenQuery}`);
   ws.onmessage = (event) => onMessage(parseRealtimeMessage(event.data));
   ws.onclose = () => onClose?.();
   return {
@@ -126,10 +129,17 @@ function connectRealtimeWebSocket(path, { onMessage, onClose, WebSocketImpl = We
   };
 }
 
-export function connectTicTacToeRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+export function connectTicTacToeRealtime({
+  gameId,
+  playerNumber,
+  onMessage,
+  onClose,
+  WebSocketImpl,
+  authToken,
+}) {
   return connectRealtimeWebSocket(
     `/quiz/tictactoe/ws/${gameId}?player=${playerNumber}`,
-    { onMessage, onClose, WebSocketImpl }
+    { onMessage, onClose, WebSocketImpl, authToken }
   );
 }
 
@@ -178,10 +188,17 @@ export function autocompleteRosterPlayer(q, limit = 15) {
   return request("GET", `/quiz/roster-guess/players/autocomplete?${params}`);
 }
 
-export function connectRosterGuessRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+export function connectRosterGuessRealtime({
+  gameId,
+  playerNumber,
+  onMessage,
+  onClose,
+  WebSocketImpl,
+  authToken,
+}) {
   return connectRealtimeWebSocket(
     `/quiz/roster-guess/ws/${gameId}?player=${playerNumber}`,
-    { onMessage, onClose, WebSocketImpl }
+    { onMessage, onClose, WebSocketImpl, authToken }
   );
 }
 
@@ -273,10 +290,17 @@ export function respondCareerNoAnswer(gameId, playerNumber, accept, roundNumber)
   });
 }
 
-export function connectCareerRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+export function connectCareerRealtime({
+  gameId,
+  playerNumber,
+  onMessage,
+  onClose,
+  WebSocketImpl,
+  authToken,
+}) {
   return connectRealtimeWebSocket(
     `/quiz/career/ws/${gameId}?player=${playerNumber}`,
-    { onMessage, onClose, WebSocketImpl }
+    { onMessage, onClose, WebSocketImpl, authToken }
   );
 }
 
@@ -363,9 +387,16 @@ export function getPhotoQuickMatchPools() {
   return request("GET", "/quiz/photo/quick-match/pools");
 }
 
-export function connectPhotoRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+export function connectPhotoRealtime({
+  gameId,
+  playerNumber,
+  onMessage,
+  onClose,
+  WebSocketImpl,
+  authToken,
+}) {
   return connectRealtimeWebSocket(
     `/quiz/photo/ws/${gameId}?player=${playerNumber}`,
-    { onMessage, onClose, WebSocketImpl }
+    { onMessage, onClose, WebSocketImpl, authToken }
   );
 }
