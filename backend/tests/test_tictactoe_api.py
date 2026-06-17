@@ -10,6 +10,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import Player, PlayerSeasonTeam, Season, Team
 from app.models.tictactoe import QuizTicTacToeGame
+from app.routers import quiz as quiz_router
 
 
 @pytest.fixture(autouse=True)
@@ -170,13 +171,406 @@ def _create_ttt_game(client: TestClient, target_wins: int = 2) -> dict:
     return _action_payload(response)["game"]
 
 
+@pytest.fixture()
+def quick_match_effects(monkeypatch):
+    effects = {"started": [], "broadcasts": []}
+
+    def fake_start_timer(game_state: dict) -> None:
+        effects["started"].append(game_state["id"])
+
+    async def fake_broadcast_state(game_id: int, game_state: dict, **kwargs):
+        effects["broadcasts"].append((game_id, game_state, kwargs))
+        return 0
+
+    monkeypatch.setattr(
+        quiz_router.tictactoe_realtime,
+        "start_timer_from_state",
+        fake_start_timer,
+    )
+    monkeypatch.setattr(
+        quiz_router.tictactoe_realtime,
+        "broadcast_state",
+        fake_broadcast_state,
+    )
+    return effects
+
+
 def test_create_tictactoe_game_has_board(client: TestClient):
     payload = _create_ttt_game(client)
     assert payload["mode"] == "local_two_player"
+    assert payload["is_public"] is False
+    assert payload["preset"] is None
     assert payload["round"]["status"] == "active"
     assert len(payload["round"]["rows"]) == 3
     assert len(payload["round"]["columns"]) == 3
     assert len(payload["round"]["cells"]) == 9
+
+
+def test_quick_match_first_request_waits_with_public_preset(client: TestClient):
+    response = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "blitz",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+
+    assert response.status_code == 200
+    game = _action_payload(response)["game"]
+    assert game["status"] == "waiting_for_opponent"
+    assert game["mode"] == "online_friend"
+    assert game["is_public"] is True
+    assert game["preset"] == "blitz"
+    assert game["target_wins"] == 3
+    assert game["turn_seconds"] == 15
+    assert game["round"] is None
+    assert "guest_id" not in game
+    assert "player1_guest_id" not in game
+
+
+def test_quick_match_pools_endpoint_returns_empty_registered_presets(client: TestClient):
+    response = client.get("/quiz/tictactoe/quick-match/pools")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "pools": {
+            "blitz": {"searching": 0, "in_progress": 0},
+            "standard": {"searching": 0, "in_progress": 0},
+            "long": {"searching": 0, "in_progress": 0},
+        },
+        "poll_interval_seconds": 5,
+    }
+
+
+def test_quick_match_pools_endpoint_tracks_waiting_active_cancel_and_finish(
+    client: TestClient,
+    quick_match_effects,
+):
+    first = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+    assert first.status_code == 200
+    standard_game = _action_payload(first)["game"]
+
+    waiting_counts = client.get("/quiz/tictactoe/quick-match/pools")
+    assert waiting_counts.status_code == 200
+    assert waiting_counts.json()["pools"]["standard"] == {
+        "searching": 1,
+        "in_progress": 0,
+    }
+
+    second = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Joiner",
+            "guest_id": "joiner-guest",
+        },
+    )
+    assert second.status_code == 200
+
+    active_counts = client.get("/quiz/tictactoe/quick-match/pools")
+    assert active_counts.status_code == 200
+    assert active_counts.json()["pools"]["standard"] == {
+        "searching": 0,
+        "in_progress": 1,
+    }
+
+    long_search = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "long",
+            "player_name": "Long Host",
+            "guest_id": "long-host-guest",
+        },
+    )
+    assert long_search.status_code == 200
+    long_game = _action_payload(long_search)["game"]
+
+    mixed_counts = client.get("/quiz/tictactoe/quick-match/pools")
+    assert mixed_counts.status_code == 200
+    assert mixed_counts.json()["pools"]["standard"] == {
+        "searching": 0,
+        "in_progress": 1,
+    }
+    assert mixed_counts.json()["pools"]["long"] == {
+        "searching": 1,
+        "in_progress": 0,
+    }
+
+    cancel = client.post(
+        "/quiz/tictactoe/quick-match/cancel",
+        json={
+            "preset": "long",
+            "game_id": long_game["id"],
+            "guest_id": "long-host-guest",
+        },
+    )
+    assert cancel.status_code == 200
+
+    with client.session_local() as db:
+        game = db.get(QuizTicTacToeGame, standard_game["id"])
+        game.status = "finished"
+        db.commit()
+
+    final_counts = client.get("/quiz/tictactoe/quick-match/pools")
+    assert final_counts.status_code == 200
+    assert final_counts.json()["pools"]["standard"] == {
+        "searching": 0,
+        "in_progress": 0,
+    }
+    assert final_counts.json()["pools"]["long"] == {
+        "searching": 0,
+        "in_progress": 0,
+    }
+
+
+def test_quick_match_pairs_second_guest_and_only_fresh_pair_starts_effects(
+    client: TestClient,
+    quick_match_effects,
+):
+    first = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+    assert first.status_code == 200
+    waiting_game = _action_payload(first)["game"]
+
+    second = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Joiner",
+            "guest_id": "joiner-guest",
+        },
+    )
+
+    assert second.status_code == 200
+    matched_game = _action_payload(second)["game"]
+    assert matched_game["id"] == waiting_game["id"]
+    assert matched_game["status"] == "active"
+    assert matched_game["player1_name"] == "Host"
+    assert matched_game["player2_name"] == "Joiner"
+    assert matched_game["current_player"] in (1, 2)
+    assert matched_game["round"] is not None
+    assert matched_game["is_public"] is True
+    assert matched_game["preset"] == "standard"
+    assert matched_game["target_wins"] == 3
+    assert matched_game["turn_seconds"] == 40
+    assert quick_match_effects["started"] == [matched_game["id"]]
+    assert [item[0] for item in quick_match_effects["broadcasts"]] == [
+        matched_game["id"]
+    ]
+
+    retry = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Host Again",
+            "guest_id": "host-guest",
+        },
+    )
+
+    assert retry.status_code == 200
+    retry_game = _action_payload(retry)["game"]
+    assert retry_game["id"] == matched_game["id"]
+    assert retry_game["status"] == "active"
+    assert quick_match_effects["started"] == [matched_game["id"]]
+    assert len(quick_match_effects["broadcasts"]) == 1
+
+
+def test_quick_match_cancel_removes_waiting_game_and_frees_pool(client: TestClient):
+    search = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "long",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+    assert search.status_code == 200
+    game = _action_payload(search)["game"]
+
+    cancel = client.post(
+        "/quiz/tictactoe/quick-match/cancel",
+        json={
+            "preset": "long",
+            "game_id": game["id"],
+            "guest_id": "host-guest",
+        },
+    )
+
+    assert cancel.status_code == 200
+    cancelled_game = _action_payload(cancel)["game"]
+    assert cancelled_game["id"] == game["id"]
+    assert cancelled_game["status"] == "cancelled"
+    assert cancelled_game["preset"] == "long"
+    assert cancelled_game["is_public"] is True
+
+    with client.session_local() as db:
+        assert db.get(QuizTicTacToeGame, game["id"]) is None
+
+    next_search = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "long",
+            "player_name": "Next",
+            "guest_id": "next-guest",
+        },
+    )
+    assert next_search.status_code == 200
+    assert _action_payload(next_search)["game"]["status"] == "waiting_for_opponent"
+
+
+def test_quick_match_rejects_unknown_preset_with_error_envelope(client: TestClient):
+    response = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "arcade",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "type": "error",
+        "payload": {
+            "code": "invalid_input",
+            "message": "Unknown TicTacToe matchmaking preset",
+        },
+    }
+
+
+def test_quick_match_same_guest_does_not_self_match(
+    client: TestClient,
+    quick_match_effects,
+):
+    first = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "First",
+            "guest_id": "same-guest",
+        },
+    )
+    assert first.status_code == 200
+    first_game = _action_payload(first)["game"]
+
+    second = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Second",
+            "guest_id": "same-guest",
+        },
+    )
+    assert second.status_code == 200
+    second_game = _action_payload(second)["game"]
+    assert second_game["id"] == first_game["id"]
+    assert second_game["status"] == "waiting_for_opponent"
+    assert quick_match_effects["started"] == []
+    assert quick_match_effects["broadcasts"] == []
+
+    third = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Third",
+            "guest_id": "other-guest",
+        },
+    )
+    assert third.status_code == 200
+    third_game = _action_payload(third)["game"]
+    assert third_game["id"] == first_game["id"]
+    assert third_game["status"] == "active"
+
+
+def test_quick_match_cancel_after_match_returns_error_envelope(
+    client: TestClient,
+    quick_match_effects,
+):
+    first = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+    assert first.status_code == 200
+    game = _action_payload(first)["game"]
+
+    second = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Joiner",
+            "guest_id": "joiner-guest",
+        },
+    )
+    assert second.status_code == 200
+
+    cancel = client.post(
+        "/quiz/tictactoe/quick-match/cancel",
+        json={
+            "preset": "standard",
+            "game_id": game["id"],
+            "guest_id": "host-guest",
+        },
+    )
+
+    assert cancel.status_code == 404
+    assert cancel.json() == {
+        "type": "error",
+        "payload": {
+            "code": "not_found",
+            "message": "Matchmaking search not found",
+        },
+    }
+
+
+def test_friend_online_games_are_not_public_or_quick_match_candidates(
+    client: TestClient,
+):
+    friend = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "online_friend",
+            "target_wins": 3,
+            "timer_mode": "40s",
+            "player1_name": "Friend Host",
+            "guest_id": "friend-guest",
+        },
+    )
+    assert friend.status_code == 200
+    friend_game = _action_payload(friend)["game"]
+    assert friend_game["is_public"] is False
+    assert friend_game["preset"] is None
+
+    search = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Quick Host",
+            "guest_id": "quick-guest",
+        },
+    )
+    assert search.status_code == 200
+    quick_game = _action_payload(search)["game"]
+    assert quick_game["id"] != friend_game["id"]
+    assert quick_game["status"] == "waiting_for_opponent"
+    assert quick_game["is_public"] is True
 
 
 def test_submit_correct_and_incorrect_moves_switch_turn(client: TestClient):

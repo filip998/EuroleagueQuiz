@@ -92,6 +92,60 @@ def test_find_or_create_pairs_two_tictactoe_requests(session_factory):
         assert second.game.round_number == 1
 
 
+@pytest.mark.parametrize(
+    ("preset", "expected_target_wins", "expected_turn_seconds"),
+    [
+        ("blitz", 3, 15),
+        ("standard", 3, 40),
+        ("long", 5, 40),
+    ],
+)
+def test_tictactoe_matchmaking_presets_map_to_game_settings(
+    session_factory,
+    preset,
+    expected_target_wins,
+    expected_turn_seconds,
+):
+    adapter = TicTacToeMatchmakingAdapter()
+    with session_factory() as db:
+        result = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset=preset,
+                    player_name="Host",
+                    guest_id=f"{preset}-guest",
+                ),
+            )
+        )
+
+        assert result.status == MatchmakingStatus.SEARCHING
+        assert result.game.preset == preset
+        assert result.game.target_wins == expected_target_wins
+        assert result.game.turn_seconds == expected_turn_seconds
+
+
+def test_tictactoe_matchmaking_rejects_unknown_preset(session_factory):
+    adapter = TicTacToeMatchmakingAdapter()
+    with session_factory() as db:
+        with pytest.raises(
+            InvalidGameActionError,
+            match="Unknown TicTacToe matchmaking preset",
+        ):
+            asyncio.run(
+                find_or_create_match(
+                    db,
+                    adapter,
+                    MatchmakingRequest(
+                        preset="arcade",
+                        player_name="Host",
+                        guest_id="host-guest",
+                    ),
+                )
+            )
+
+
 def test_matched_guest_retry_returns_active_game(session_factory):
     adapter = TicTacToeMatchmakingAdapter()
     with session_factory() as db:
@@ -362,6 +416,174 @@ def test_cancel_search_requires_guest_id(session_factory):
                     ),
                 )
             )
+
+
+def test_tictactoe_pool_presence_counts_follow_matchmaking_transitions(session_factory):
+    adapter = TicTacToeMatchmakingAdapter()
+    with session_factory() as db:
+        empty_counts = adapter.pool_presence_counts(db)
+        assert empty_counts["standard"].searching == 0
+        assert empty_counts["standard"].in_progress == 0
+
+        search = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="standard",
+                    player_name="Host",
+                    guest_id="host-guest",
+                ),
+            )
+        )
+        searching_counts = adapter.pool_presence_counts(db)
+        assert searching_counts["standard"].searching == 1
+        assert searching_counts["standard"].in_progress == 0
+
+        matched = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="standard",
+                    player_name="Joiner",
+                    guest_id="joiner-guest",
+                ),
+            )
+        )
+        matched_counts = adapter.pool_presence_counts(db)
+        assert matched.game.id == search.game.id
+        assert matched_counts["standard"].searching == 0
+        assert matched_counts["standard"].in_progress == 1
+
+        tictactoe.forfeit_online_game(db, matched.game, forfeiting_player=2)
+        db.commit()
+        finished_counts = adapter.pool_presence_counts(db)
+        assert finished_counts["standard"].searching == 0
+        assert finished_counts["standard"].in_progress == 0
+
+        cancel_search_result = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="long",
+                    player_name="Long Host",
+                    guest_id="long-host-guest",
+                ),
+            )
+        )
+        before_cancel_counts = adapter.pool_presence_counts(db)
+        assert before_cancel_counts["long"].searching == 1
+
+        asyncio.run(
+            cancel_search(
+                db,
+                adapter,
+                MatchmakingCancelRequest(
+                    preset="long",
+                    game_id=cancel_search_result.game.id,
+                    guest_id="long-host-guest",
+                ),
+            )
+        )
+        after_cancel_counts = adapter.pool_presence_counts(db)
+        assert after_cancel_counts["long"].searching == 0
+        assert after_cancel_counts["long"].in_progress == 0
+
+
+def test_tictactoe_pool_presence_counts_group_public_registered_presets_only(
+    session_factory,
+):
+    adapter = TicTacToeMatchmakingAdapter()
+    with session_factory() as db:
+        friend_waiting = tictactoe.create_game(
+            db,
+            mode="online_friend",
+            target_wins=3,
+            timer_mode="40s",
+            player1_name="Friend Waiting",
+            guest_id="friend-waiting-guest",
+        )
+        friend_waiting.preset = "standard"
+
+        friend_active = tictactoe.create_game(
+            db,
+            mode="online_friend",
+            target_wins=3,
+            timer_mode="40s",
+            player1_name="Friend Active",
+            guest_id="friend-active-host",
+        )
+        friend_active.preset = "standard"
+        tictactoe.join_game(
+            db,
+            friend_active.join_code,
+            player2_name="Friend Joiner",
+            guest_id="friend-active-joiner",
+        )
+
+        for index in range(2):
+            standard_waiting = tictactoe.create_game(
+                db,
+                mode="online_friend",
+                target_wins=3,
+                timer_mode="40s",
+                player1_name=f"Standard Waiting {index}",
+                guest_id=f"standard-waiting-{index}",
+            )
+            standard_waiting.is_public = True
+            standard_waiting.preset = "standard"
+
+        standard_active = tictactoe.create_game(
+            db,
+            mode="online_friend",
+            target_wins=3,
+            timer_mode="40s",
+            player1_name="Standard Active",
+            guest_id="standard-active-host",
+        )
+        standard_active.is_public = True
+        standard_active.preset = "standard"
+        tictactoe.join_game(
+            db,
+            standard_active.join_code,
+            player2_name="Standard Joiner",
+            guest_id="standard-active-joiner",
+        )
+
+        blitz_waiting = tictactoe.create_game(
+            db,
+            mode="online_friend",
+            target_wins=3,
+            timer_mode="15s",
+            player1_name="Blitz Waiting",
+            guest_id="blitz-waiting-guest",
+        )
+        blitz_waiting.is_public = True
+        blitz_waiting.preset = "blitz"
+
+        unknown_waiting = tictactoe.create_game(
+            db,
+            mode="online_friend",
+            target_wins=3,
+            timer_mode="40s",
+            player1_name="Unknown Waiting",
+            guest_id="unknown-waiting-guest",
+        )
+        unknown_waiting.is_public = True
+        unknown_waiting.preset = "arcade"
+
+        db.commit()
+
+        counts = adapter.pool_presence_counts(db)
+        assert set(counts) == {"blitz", "standard", "long"}
+        assert counts["standard"].searching == 2
+        assert counts["standard"].in_progress == 1
+        assert counts["blitz"].searching == 1
+        assert counts["blitz"].in_progress == 0
+        assert counts["long"].searching == 0
+        assert counts["long"].in_progress == 0
 
 
 def test_two_simultaneous_requests_to_empty_pool_create_exactly_one_match(

@@ -121,6 +121,9 @@ refresh and fallback-sync Interface.
 The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
 `frontend/src/useOnlineGameRealtime.js`, so reconnect, background state sync,
 waiting-for-opponent polling, cleanup, and action dispatch stay out of the game boards.
+TicTacToe Quick Match setup screens can poll
+`GET /quiz/tictactoe/quick-match/pools` every 5 seconds for per-preset
+`searching` and `in_progress` presence counts derived from public pool rows.
 
 Mutating TicTacToe, Roster Guess, and Career Quiz HTTP endpoints now use the same realtime
 message envelopes as WebSocket broadcasts: successful actions return
