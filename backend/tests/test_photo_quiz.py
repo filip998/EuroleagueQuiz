@@ -90,8 +90,11 @@ def test_solo_round_uses_wikipedia_image_fallback_without_revealing_answer():
         assert round_data["image_url"] == "https://wiki/clue.png"
         assert round_data["data_revision"] == photo_quiz.PHOTO_QUIZ_DATA_REVISION
         assert "answer" not in round_data
-        assert player.first_name not in repr(round_data)
-        assert player.last_name not in repr(round_data)
+        public_clue_payload = {
+            key: value for key, value in round_data.items() if key != "round_token"
+        }
+        assert player.first_name not in repr(public_clue_payload)
+        assert player.last_name not in repr(public_clue_payload)
         token_payload = validate_solo_round_token(
             round_data["round_token"],
             current_data_revision=photo_quiz.PHOTO_QUIZ_DATA_REVISION,
@@ -939,6 +942,82 @@ def test_multiplayer_stale_no_answer_accept_after_correct_guess_is_rejected(tmp_
         assert stored.pending_no_answer_from is None
         assert stored.pending_no_answer_to is None
         assert stored.round_number == 2
+    finally:
+        verify.close()
+
+
+def test_multiplayer_stale_no_answer_accept_after_decline_is_rejected(tmp_path: Path):
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        for index in range(2):
+            _player(
+                setup,
+                "NoAnswerDeclineRace",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/no-answer-decline-race-{index}",
+                euroleague_image_url=f"https://cdn/no-answer-decline-race-{index}.png",
+            )
+        setup.commit()
+        game = photo_quiz.create_game(setup, target_wins=3, player1_name="A")
+        photo_quiz.join_game(setup, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+        photo_quiz.offer_no_answer(
+            setup,
+            game=game,
+            acting_player=1,
+            round_number=current.round_number,
+        )
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    first = SessionLocal()
+    second = SessionLocal()
+    try:
+        first_game = first.get(PhotoQuizGame, game_id)
+        second_game = second.get(PhotoQuizGame, game_id)
+        first_round = photo_quiz._current_round(first_game)
+        second_round = photo_quiz._current_round(second_game)
+
+        assert (
+            photo_quiz.respond_no_answer(
+                first,
+                game=first_game,
+                acting_player=2,
+                accept=False,
+                round_number=first_round.round_number,
+            )
+            == "declined"
+        )
+        first.commit()
+
+        with pytest.raises(
+            ConflictGameActionError,
+            match="No answer offer is not pending for this player",
+        ):
+            photo_quiz.respond_no_answer(
+                second,
+                game=second_game,
+                acting_player=2,
+                accept=True,
+                round_number=second_round.round_number,
+            )
+        second.rollback()
+    finally:
+        first.close()
+        second.close()
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(PhotoQuizGame, game_id)
+        assert stored.player1_score == 0
+        assert stored.player2_score == 0
+        assert stored.pending_no_answer_from is None
+        assert stored.pending_no_answer_to is None
+        assert stored.round_number == 1
+        assert [round_obj.status for round_obj in stored.rounds] == ["active"]
     finally:
         verify.close()
 

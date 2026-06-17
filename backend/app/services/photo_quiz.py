@@ -317,11 +317,12 @@ def respond_no_answer(
     if accept:
         _raise_if_current_round_locked(game)
     if not accept:
-        _update_active_game_round(
+        _update_pending_no_answer_offer(
             db,
             game,
             round_number,
-            {
+            acting_player=acting_player,
+            values={
                 "pending_no_answer_from": None,
                 "pending_no_answer_to": None,
             },
@@ -332,22 +333,23 @@ def respond_no_answer(
 
     round_obj = _current_round(game)
     completed_at = datetime.utcnow()
+    _update_pending_no_answer_offer(
+        db,
+        game,
+        round_number,
+        acting_player=acting_player,
+        values={
+            "pending_no_answer_from": None,
+            "pending_no_answer_to": None,
+            "round_number": game.round_number + 1,
+        },
+    )
     _claim_active_round(
         db,
         round_obj,
         status="no_answer",
         winner_player=None,
         completed_at=completed_at,
-    )
-    _update_active_game_round(
-        db,
-        game,
-        round_number,
-        {
-            "pending_no_answer_from": None,
-            "pending_no_answer_to": None,
-            "round_number": game.round_number + 1,
-        },
     )
     game.pending_no_answer_from = None
     game.pending_no_answer_to = None
@@ -581,6 +583,43 @@ def _update_active_game_round(
     )
     if updated != 1:
         raise ConflictGameActionError("round_stale")
+    for key, value in update_values.items():
+        setattr(game, key, value)
+
+
+def _update_pending_no_answer_offer(
+    db: Session,
+    game: PhotoQuizGame,
+    round_number: int,
+    *,
+    acting_player: int,
+    values: dict[str, Any],
+) -> None:
+    expected_from = 2 if acting_player == 1 else 1
+    update_values = dict(values)
+    update_values.setdefault("updated_at", datetime.utcnow())
+    updated = (
+        db.query(PhotoQuizGame)
+        .filter(PhotoQuizGame.id == game.id)
+        .filter(PhotoQuizGame.status == "active")
+        .filter(PhotoQuizGame.round_number == round_number)
+        .filter(PhotoQuizGame.pending_no_answer_from == expected_from)
+        .filter(PhotoQuizGame.pending_no_answer_to == acting_player)
+        .update(update_values, synchronize_session=False)
+    )
+    if updated != 1:
+        current = (
+            db.query(PhotoQuizGame.status, PhotoQuizGame.round_number)
+            .filter(PhotoQuizGame.id == game.id)
+            .first()
+        )
+        if (
+            current is None
+            or current.status != "active"
+            or current.round_number != round_number
+        ):
+            raise ConflictGameActionError("round_stale")
+        raise ConflictGameActionError("No answer offer is not pending for this player")
     for key, value in update_values.items():
         setattr(game, key, value)
 
