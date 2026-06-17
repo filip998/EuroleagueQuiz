@@ -1475,6 +1475,7 @@ def test_photo_quick_match_first_request_waits_with_public_preset(
     game = _state_payload(response)["game"]
     assert game["status"] == "waiting_for_opponent"
     assert game["mode"] == "online_friend"
+    assert game["join_code"] is None
     assert game["is_public"] is True
     assert game["preset"] == "quick"
     assert game["target_wins"] == 1
@@ -1680,6 +1681,51 @@ def test_photo_quick_match_same_guest_does_not_self_match(
     assert third_game["status"] == "active"
 
 
+def test_photo_quick_match_public_join_code_cannot_bypass_matchmaking(
+    photo_client: TestClient,
+    photo_quick_match_effects,
+):
+    search = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+    assert search.status_code == 200
+    public_state = _state_payload(search)["game"]
+    assert public_state["join_code"] is None
+
+    with photo_client.session_local() as db:
+        stored = db.get(PhotoQuizGame, public_state["id"])
+        stored_join_code = stored.join_code
+
+    bypass = photo_client.post(
+        "/quiz/photo/games/join",
+        json={
+            "join_code": stored_join_code,
+            "player_name": "Bypass",
+            "guest_id": "joiner-guest",
+        },
+    )
+
+    assert bypass.status_code == 409
+    assert bypass.json() == {
+        "type": "error",
+        "payload": {
+            "code": "conflict",
+            "message": "Public games must be joined through quick match",
+        },
+    }
+    assert photo_quick_match_effects["started"] == []
+
+    with photo_client.session_local() as db:
+        stored = db.get(PhotoQuizGame, public_state["id"])
+        assert stored.status == "waiting_for_opponent"
+        assert stored.player2_guest_id is None
+
+
 def test_photo_quick_match_rejects_cooperative_no_answer_skip(
     photo_client: TestClient,
     photo_quick_match_effects,
@@ -1735,7 +1781,7 @@ def test_photo_realtime_adapter_rejects_public_no_answer_offer():
         game = photo_quiz.create_game(db, target_wins=3, player1_name="A")
         game.is_public = True
         game.preset = "standard"
-        photo_quiz.join_game(db, game.join_code, player_name="B")
+        photo_quiz.join_game(db, game.join_code, player_name="B", allow_public=True)
         current = photo_quiz._current_round(game)
 
         with pytest.raises(
@@ -1773,7 +1819,7 @@ async def test_photo_quick_match_public_round_timeout_auto_skips_with_injected_c
         game = photo_quiz.create_game(setup, target_wins=3, player1_name="A")
         game.is_public = True
         game.preset = "standard"
-        photo_quiz.join_game(setup, game.join_code, player_name="B")
+        photo_quiz.join_game(setup, game.join_code, player_name="B", allow_public=True)
         game_id = game.id
         setup.commit()
     finally:
@@ -1852,7 +1898,7 @@ async def test_photo_quick_match_unattended_timeout_finishes_without_rearming(
         game = photo_quiz.create_game(setup, target_wins=3, player1_name="A")
         game.is_public = True
         game.preset = "standard"
-        photo_quiz.join_game(setup, game.join_code, player_name="B")
+        photo_quiz.join_game(setup, game.join_code, player_name="B", allow_public=True)
         game_id = game.id
         setup.commit()
     finally:

@@ -449,6 +449,7 @@ class PhotoQuizMatchmakingAdapter:
             game.join_code,
             player_name=request.player_name,
             guest_id=request.guest_id,
+            allow_public=True,
         )
 
     def cancel_waiting_game(

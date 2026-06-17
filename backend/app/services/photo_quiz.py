@@ -180,6 +180,7 @@ def join_game(
     *,
     player_name: str | None = None,
     guest_id: str | None = None,
+    allow_public: bool = False,
 ) -> PhotoQuizGame:
     game = (
         db.query(PhotoQuizGame)
@@ -188,6 +189,8 @@ def join_game(
     )
     if game is None:
         raise NotFoundGameActionError("Game not found")
+    if game.is_public and not allow_public:
+        raise ConflictGameActionError("Public games must be joined through quick match")
     if game.status != "waiting_for_opponent":
         raise ConflictGameActionError("Game is not waiting for an opponent")
     joined_at = datetime.utcnow()
@@ -531,7 +534,7 @@ def serialize_game_state(db: Session, game: PhotoQuizGame) -> dict[str, Any]:
         "id": game.id,
         "mode": game.mode,
         "status": game.status,
-        "join_code": game.join_code,
+        "join_code": None if game.is_public else game.join_code,
         "is_public": game.is_public,
         "preset": game.preset,
         "target_wins": game.target_wins,
