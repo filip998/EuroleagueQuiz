@@ -6,10 +6,10 @@ const backendUrl = `http://127.0.0.1:${backendPort}`;
 async function startTicTacToeQuickMatch(page, { nickname, preset = "Standard" }) {
   await page.goto("/");
   await page.getByText("TICTACTOE").click();
-  await page.getByRole("button", { name: "Online" }).click();
-  await page.getByRole("button", { name: preset }).click();
+  // /tictactoe lands directly on Online -> Quick Match. Set the optional name,
+  // then a single tap on the pool card enters the pool (no Find Match button).
   await page.getByPlaceholder("Your name").fill(nickname);
-  await page.getByRole("button", { name: "Find Match" }).click();
+  await page.getByTestId(`quick-pick-${preset.toLowerCase()}`).click();
 }
 
 async function waitForOnlineBoard(page, { ownName, opponentName }) {
@@ -92,35 +92,45 @@ test.describe("Home Page", () => {
     await expect(page.getByText("Choose your game")).toBeVisible();
   });
 
-  test("navigates to TicTacToe setup", async ({ page }) => {
+  test("navigates to TicTacToe setup and lands on Quick Match", async ({ page }) => {
     await page.goto("/");
     await page.getByText("TICTACTOE").click();
 
     await expect(page.getByText("Game Mode")).toBeVisible();
-    await expect(page.getByText("Solo")).toBeVisible();
+    // Default landing is Online -> Quick Match (pool grid first).
+    await expect(page.getByTestId("quick-pick-standard")).toBeVisible();
+    // Solo is one tap away via the mode selector.
+    await page.getByText("Solo").click();
     await expect(page.getByText("Start Game")).toBeVisible();
   });
 
-  test("shows the Quick Match preset picker by default under Online", async ({ page }) => {
+  test("home TicTacToe Quick Match CTA lands on the pool grid", async ({ page }) => {
+    await page.goto("/");
+    await page.getByTestId("home-quick-match-cta").click();
+
+    await expect(page).toHaveURL(/\/tictactoe$/);
+    await expect(page.getByText("Pick a pool")).toBeVisible();
+    await expect(page.getByTestId("quick-pick-standard")).toBeVisible();
+  });
+
+  test("shows the Quick Match pool grid by default under Online", async ({ page }) => {
     await page.goto("/");
     await page.getByText("TICTACTOE").click();
 
-    await page.getByRole("button", { name: "Online" }).click();
-
-    // Online now defaults to the Quick Match sub-mode: a preset picker + the
-    // Find Match action, rather than the old direct Create/Join toggle.
+    // Online -> Quick Match is the default: a one-click pool grid, not the old
+    // Create/Join toggle or a separate Find Match button.
     await expect(page.getByText("Pick a pool")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Blitz" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Standard" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Long" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Find Match" })).toBeVisible();
+    await expect(page.getByTestId("quick-pick-blitz")).toBeVisible();
+    await expect(page.getByTestId("quick-pick-standard")).toBeVisible();
+    await expect(page.getByTestId("quick-pick-long")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Find Match" })).toHaveCount(0);
   });
 
   test("reveals the join-code form via Online then Play a Friend then Join", async ({ page }) => {
     await page.goto("/");
     await page.getByText("TICTACTOE").click();
 
-    await page.getByRole("button", { name: "Online" }).click();
+    // Online is already the default mode; switch the sub-mode to Play a Friend.
     await page.getByRole("button", { name: "Play a Friend" }).click();
     await page.getByRole("button", { name: "Join", exact: true }).click();
 
@@ -150,7 +160,8 @@ test.describe("TicTacToe Flow", () => {
     await page.goto("/");
     await page.getByText("TICTACTOE").click();
 
-    // Solo mode is default, just click Start Game
+    // Quick Match is now the default landing; Solo is one tap away.
+    await page.getByText("Solo").click();
     await page.getByText("Start Game").click();
 
     // Should see the game board with team names in headers
@@ -226,7 +237,9 @@ test.describe.serial("TicTacToe Quick Match Flow", () => {
       await expect(page.getByText("Game Mode")).toBeVisible({
         timeout: 10000,
       });
-      await expect(page.getByRole("button", { name: "Start Game" })).toBeVisible();
+      // Cancelling returns to the default Quick Match pool grid (not a Start
+      // Game form).
+      await expect(page.getByTestId("quick-pick-standard")).toBeVisible();
     } finally {
       await cleanupQuickMatchPage(page);
       await context.close();

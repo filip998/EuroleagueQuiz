@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getGuestId, getNickname, setNickname, NICKNAME_MAX_LENGTH } from "../identity";
+import {
+  getGuestId,
+  getNickname,
+  setNickname,
+  getGuestName,
+  getDisplayName,
+  NICKNAME_MAX_LENGTH,
+} from "../identity";
 
 // The Node 25 test runtime ships an inert experimental `localStorage` global
 // that shadows jsdom's, so install a working in-memory Storage for these tests.
@@ -124,5 +131,61 @@ describe("nickname", () => {
     localStorage.setItem("hol_nickname", "LegacyName");
     setNickname("CurrentName");
     expect(getNickname()).toBe("CurrentName");
+  });
+});
+
+describe("guest name", () => {
+  it("generates a Guest name once and persists it", () => {
+    const first = getGuestName();
+    expect(first).toMatch(/^Guest \d{4}$/);
+    expect(localStorage.getItem("elq_guest_name")).toBe(first);
+
+    const second = getGuestName();
+    expect(second).toBe(first);
+  });
+
+  it("returns the stored guest name without regenerating", () => {
+    localStorage.setItem("elq_guest_name", "Guest 1234");
+    expect(getGuestName()).toBe("Guest 1234");
+  });
+
+  it("regenerates when the stored guest name is blank", () => {
+    localStorage.setItem("elq_guest_name", "   ");
+    const name = getGuestName();
+    expect(name).toMatch(/^Guest \d{4}$/);
+    expect(localStorage.getItem("elq_guest_name")).toBe(name);
+  });
+
+  it("stays stable across calls when storage cannot persist", async () => {
+    globalThis.localStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("storage disabled");
+      },
+      removeItem: () => {},
+      clear: () => {},
+    };
+    vi.resetModules();
+    const { getGuestName: freshGetGuestName } = await import("../identity");
+    const first = freshGetGuestName();
+    const second = freshGetGuestName();
+    expect(first).toMatch(/^Guest \d{4}$/);
+    expect(second).toBe(first);
+  });
+});
+
+describe("display name", () => {
+  it("uses the saved nickname when present", () => {
+    setNickname("Dragan");
+    expect(getDisplayName()).toBe("Dragan");
+  });
+
+  it("falls back to the stable guest name when no nickname is set", () => {
+    const display = getDisplayName();
+    expect(display).toMatch(/^Guest \d{4}$/);
+    // Falling back must not write a nickname — clearing stays anonymous.
+    expect(localStorage.getItem("elq_nickname")).toBeNull();
+    // And it stays stable on a second read.
+    expect(getDisplayName()).toBe(display);
   });
 });

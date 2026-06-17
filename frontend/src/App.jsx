@@ -10,6 +10,7 @@ import CareerQuizSetup from "./CareerQuizSetup";
 import CareerQuizBoard from "./CareerQuizBoard";
 import PhotoQuizSetup from "./PhotoQuizSetup";
 import PhotoQuizBoard from "./PhotoQuizBoard";
+import HomeQuickMatchCta from "./HomeQuickMatchCta";
 import { LogoFull } from "./Logo";
 import { getCareerGame, getGame, getPhotoGame, getRosterGame } from "./api";
 import { parseJoinCode } from "./inviteLink";
@@ -57,24 +58,23 @@ function HomePage() {
 
           {/* Game cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-5 animate-fade-in-up" style={{ animationDelay: "150ms" }}>
-            {/* TicTacToe card */}
-            <Link
-              to="/tictactoe"
-              className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] active:scale-[0.98]"
-            >
-              <div className="w-12 h-12 rounded-xl bg-elq-player1/10 flex items-center justify-center mb-4 group-hover:bg-elq-player1/20 transition-colors">
-                <svg className="w-6 h-6 text-elq-player1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z" />
-                </svg>
-              </div>
-              <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">TICTACTOE</h2>
-              <p className="text-sm text-elq-muted leading-relaxed">
-                Claim cells on a 3×3 board by naming players who match both row and column criteria.
-              </p>
-              <div className="mt-4 text-xs font-semibold text-elq-orange opacity-0 group-hover:opacity-100 transition-opacity">
-                PLAY →
-              </div>
-            </Link>
+            {/* TicTacToe card — main link plus a visible one-click Quick Match CTA.
+                Two sibling links (never nested anchors); both land on the setup
+                screen, which now defaults to Online → Quick Match. */}
+            <div className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] flex flex-col">
+              <Link to="/tictactoe" className="block text-left flex-1">
+                <div className="w-12 h-12 rounded-xl bg-elq-player1/10 flex items-center justify-center mb-4 group-hover:bg-elq-player1/20 transition-colors">
+                  <svg className="w-6 h-6 text-elq-player1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z" />
+                  </svg>
+                </div>
+                <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">TICTACTOE</h2>
+                <p className="text-sm text-elq-muted leading-relaxed">
+                  Claim cells on a 3×3 board by naming players who match both row and column criteria.
+                </p>
+              </Link>
+              <HomeQuickMatchCta to="/tictactoe" />
+            </div>
 
             {/* Roster Guess card */}
             <Link

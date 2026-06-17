@@ -10,6 +10,7 @@ import { presetLabel, formatPresence, useQuickMatchPools } from "./quickMatch";
  * `usePools`/`getPresetLabel` default to the TicTacToe pool source but let other
  * games (e.g. Photo Quiz) reuse this lobby with their own pool feed and labels.
  * Both must be stable module-level references so the hook order stays constant.
+ * `title` lets a game override the heading; it defaults to the shared copy.
  */
 export default function QuickMatchSearchingLobby({
   preset,
@@ -17,6 +18,7 @@ export default function QuickMatchSearchingLobby({
   cancelling = false,
   usePools = useQuickMatchPools,
   getPresetLabel = presetLabel,
+  title = "SEARCHING THE POOL…",
 }) {
   const { pools } = usePools(true);
   const counts = preset && pools ? pools[preset] : null;
@@ -31,7 +33,7 @@ export default function QuickMatchSearchingLobby({
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
             </svg>
           </div>
-          <h2 className="font-display text-4xl text-elq-dark mb-3">SEARCHING THE POOL…</h2>
+          <h2 className="font-display text-4xl text-elq-dark mb-3">{title}</h2>
           <p className="text-elq-muted mb-6">
             Looking for an opponent in{" "}
             <strong className="text-elq-text">{getPresetLabel(preset)}</strong>
