@@ -59,4 +59,13 @@ __all__ = [
     "PhotoQuizGame",
     "PhotoQuizGuess",
     "PhotoQuizRound",
+    "User",
 ]
+
+
+def __getattr__(name):
+    if name == "User":
+        from app.models.user import User
+
+        return User
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -15,6 +15,7 @@ env/
 
 # SQLite database
 data/*.db
+backend/data/users.db*
 
 # IDE
 .idea/
