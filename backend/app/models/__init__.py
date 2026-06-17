@@ -26,6 +26,11 @@ from app.models.career import (
     PlayerCareerStint,
     PlayerCareerSourceMapping,
 )
+from app.models.photo_quiz import (
+    PhotoQuizGame,
+    PhotoQuizGuess,
+    PhotoQuizRound,
+)
 
 __all__ = [
     "Season",
@@ -51,4 +56,7 @@ __all__ = [
     "CareerQuizRound",
     "PlayerCareerStint",
     "PlayerCareerSourceMapping",
+    "PhotoQuizGame",
+    "PhotoQuizGuess",
+    "PhotoQuizRound",
 ]
