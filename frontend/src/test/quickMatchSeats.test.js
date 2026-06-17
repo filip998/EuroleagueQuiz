@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   recallQuickMatchSeat,
   rememberQuickMatchSeat,
@@ -85,19 +85,49 @@ describe("quick match seats", () => {
     };
     expect(() => forgetQuickMatchSeat(7)).not.toThrow();
   });
+});
 
-  it("degrades to inference when storage is unavailable", () => {
+// These exercise the in-memory fallback used when localStorage cannot retain the
+// seat map. Each test uses a fresh module instance (vi.resetModules) so the
+// module-level shadow can't leak across tests.
+describe("quick match seats without persistent storage", () => {
+  const originalLocalStorage = globalThis.localStorage;
+
+  afterEach(() => {
+    globalThis.localStorage = originalLocalStorage;
+  });
+
+  async function freshSeats() {
     globalThis.localStorage = {
       getItem: () => {
-        throw new Error("blocked");
+        throw new Error("storage disabled");
       },
       setItem: () => {
-        throw new Error("blocked");
+        throw new Error("storage disabled");
       },
       removeItem: () => {},
       clear: () => {},
     };
-    expect(resolveQuickMatchSeat(9, "active")).toBe(2);
-    expect(resolveQuickMatchSeat(9, "waiting_for_opponent")).toBe(1);
+    vi.resetModules();
+    return import("../quickMatchSeats");
+  }
+
+  it("infers the seat on first contact", async () => {
+    const { resolveQuickMatchSeat: resolve } = await freshSeats();
+    // First time each id is seen, with no recorded seat: pure status inference.
+    expect(resolve(9, "active")).toBe(2);
+    expect(resolve(10, "waiting_for_opponent")).toBe(1);
+  });
+
+  it("keeps the first seat across re-entry so the creator stays player 1", async () => {
+    const { resolveQuickMatchSeat: resolve, recallQuickMatchSeat: recall } =
+      await freshSeats();
+    // Created the game as player 1 while it was waiting.
+    expect(resolve(9, "waiting_for_opponent")).toBe(1);
+    // Re-entering once the backend returns it as ACTIVE must still resolve to
+    // player 1 — without the in-memory shadow this would mis-infer player 2 and
+    // seat the creator as their own opponent.
+    expect(resolve(9, "active")).toBe(1);
+    expect(recall(9)).toBe(1);
   });
 });

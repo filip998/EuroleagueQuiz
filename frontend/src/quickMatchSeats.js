@@ -15,6 +15,14 @@
 const SEATS_KEY = "elq_qm_seats";
 const MAX_ENTRIES = 25;
 
+// Fallback used only when localStorage cannot retain the seat map (private mode,
+// quota, disabled storage). Mirrors the guest-id fallback in identity.js: the
+// quick-match response never states the seat, so a stable guest re-entering
+// their own active game would otherwise mis-infer player 2 from the active
+// status. Keeping the map in memory holds the first-resolved seat for the page
+// lifetime so re-entry stays seated correctly even without storage.
+let memorySeats = null;
+
 function readSeats() {
   try {
     const raw = globalThis.localStorage?.getItem(SEATS_KEY);
@@ -22,17 +30,23 @@ function readSeats() {
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
-    return {};
+    // Storage threw — reuse the in-memory copy a prior write couldn't persist.
+    return memorySeats ? { ...memorySeats } : {};
   }
 }
 
 function writeSeats(seats) {
+  let persisted = false;
   try {
     globalThis.localStorage?.setItem(SEATS_KEY, JSON.stringify(seats));
+    persisted =
+      globalThis.localStorage?.getItem(SEATS_KEY) === JSON.stringify(seats);
   } catch {
-    // Storage unavailable (private mode, quota, disabled) — seat memory simply
-    // degrades to status inference.
+    persisted = false;
   }
+  // Shadow the map in memory only while storage refuses to retain it. A working
+  // backend resets the shadow on every successful write, so it never leaks.
+  memorySeats = persisted ? null : { ...seats };
 }
 
 function normalizeSeat(value) {
