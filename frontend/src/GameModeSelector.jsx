@@ -50,6 +50,7 @@ export default function GameModeSelector({
   sub,
   onSubChange,
   subModes = DEFAULT_SUB_MODES,
+  disabled = false,
 }) {
   if (!modes || modes.length < 2) return null;
 
@@ -70,8 +71,9 @@ export default function GameModeSelector({
               key={key}
               type="button"
               onClick={() => onModeChange(key)}
+              disabled={disabled}
               aria-pressed={active}
-              className={`relative p-4 rounded-xl border-2 transition-all text-center ${
+              className={`relative p-4 rounded-xl border-2 transition-all text-center disabled:cursor-not-allowed disabled:opacity-60 ${
                 active
                   ? "border-elq-orange bg-elq-orange/5 text-elq-orange"
                   : "border-elq-border hover:border-gray-300 text-elq-muted hover:text-elq-text"
@@ -95,8 +97,9 @@ export default function GameModeSelector({
               key={value}
               type="button"
               onClick={() => onSubChange(value)}
+              disabled={disabled}
               aria-pressed={sub === value}
-              className={`py-2 rounded-lg text-sm font-semibold transition-colors ${
+              className={`py-2 rounded-lg text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                 sub === value
                   ? "bg-white text-elq-orange shadow-sm"
                   : "text-elq-muted hover:text-elq-text"

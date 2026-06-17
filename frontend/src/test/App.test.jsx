@@ -72,6 +72,15 @@ describe("App", () => {
     expect(screen.getByTestId("game-setup")).toBeInTheDocument();
   });
 
+  it("renders a Quick Match CTA on the TicTacToe card that opens setup", () => {
+    render(<MemoryRouter><App /></MemoryRouter>);
+    const cta = screen.getByTestId("home-quick-match-cta");
+    expect(cta).toBeInTheDocument();
+    expect(cta).toHaveTextContent("Quick Match");
+    fireEvent.click(cta);
+    expect(screen.getByTestId("game-setup")).toBeInTheDocument();
+  });
+
   it("navigates to Roster Guess setup when clicking the card", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     fireEvent.click(screen.getByText("ROSTER GUESS"));

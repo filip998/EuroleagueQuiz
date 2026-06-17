@@ -8,6 +8,7 @@
 
 const GUEST_ID_KEY = "elq_guest_id";
 const NICKNAME_KEY = "elq_nickname";
+const GUEST_NAME_KEY = "elq_guest_name";
 const LEGACY_NICKNAME_KEY = "hol_nickname";
 
 export const NICKNAME_MAX_LENGTH = 30;
@@ -17,6 +18,9 @@ const GUEST_ID_MAX_LENGTH = 64;
 // quota, disabled storage). Keeps the id stable for the page lifetime so calls
 // that must agree on it — Quick Match create then cancel — use the same token.
 let memoryGuestId = null;
+
+// Same fallback for the auto-generated guest name (see getGuestName).
+let memoryGuestName = null;
 
 function readStorage(key) {
   try {
@@ -101,4 +105,41 @@ export function setNickname(name) {
   // so a stale Higher or Lower value can't reappear after the user clears it.
   removeStorage(LEGACY_NICKNAME_KEY);
   return trimmed;
+}
+
+function generateGuestName() {
+  // A four-digit suffix is enough to feel distinct without a name gate, e.g.
+  // "Guest 4821". Persisted (see getGuestName) so it stays stable.
+  return `Guest ${1000 + Math.floor(Math.random() * 9000)}`;
+}
+
+// Stable, auto-generated guest display name used when the player has no saved
+// nickname, so online Quick Match needs no name gate. Generated once and
+// persisted under `elq_guest_name` (separate from `elq_nickname` so it never
+// overwrites a deliberate nickname), with a page-lifetime memory fallback when
+// storage is unavailable — mirroring getGuestId — so the matched name stays
+// stable across re-entry within a session.
+export function getGuestName() {
+  const stored = readStorage(GUEST_NAME_KEY);
+  if (
+    typeof stored === "string" &&
+    stored.trim().length > 0 &&
+    stored.length <= NICKNAME_MAX_LENGTH
+  ) {
+    return stored;
+  }
+  if (memoryGuestName) return memoryGuestName;
+  const name = generateGuestName();
+  writeStorage(GUEST_NAME_KEY, name);
+  if (readStorage(GUEST_NAME_KEY) !== name) {
+    memoryGuestName = name;
+  }
+  return name;
+}
+
+// The display name a setup screen should prefill: the saved nickname when set,
+// otherwise the stable auto-generated guest name. Callers still treat the field
+// as optional — clearing it falls back to anonymous play.
+export function getDisplayName() {
+  return getNickname() || getGuestName();
 }

@@ -26,7 +26,7 @@ Then open `http://localhost:5173` to play.
 
 ## Games
 
-- **TicTacToe** — Claim cells on a 3×3 board by naming players who match both row and column team criteria. Solo, local 1v1, and online modes.
+- **TicTacToe** — Claim cells on a 3×3 board by naming players who match both row and column team criteria. Solo, local 1v1, and online modes. Opening `/tictactoe` lands on online **Quick Match** — a near-one-click, lichess-style pool grid — with Solo, Local 1v1, and Play-a-Friend one tap away.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo and multiplayer.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice and 2-player race modes.
@@ -206,6 +206,41 @@ Every game's pre-game screen is built from three shared building blocks in `fron
 `PhotoQuizSetup.jsx`, and `HigherLowerSetup.jsx` compose these, mapping the canonical UI
 keys (`solo` / `local` / `online`, sub `create` / `join`) onto their own backend modes.
 
+### TicTacToe Quick Match: default landing + one-click pooling
+
+Opening `/tictactoe` lands directly on **Online → Quick Match**, so the matchmaking pool
+grid is the first thing players see (Solo, Local 1v1, and Play-a-Friend stay one tap away
+via `GameModeSelector`; a valid `?join=` invite still lands on Online → Play a Friend →
+Join with the code prefilled). The flow is near one-click — there is **no separate "Find
+Match" button**. Tapping a pool card *is* the action: it immediately enters that pool and
+the board switches to the searching lobby. Standard (Best of 3 · 40s) is highlighted as the
+default. There is no name gate — the optional name field prefills with the saved nickname or
+a stable auto-generated guest name, and clearing it falls back to anonymous play. While a
+pick is in flight every pool card (and the mode controls) freeze, so a fast multi-tap can't
+open several waiting games for the same guest. The home TicTacToe card also carries a
+visible **Quick Match** call-to-action that jumps straight into the same default.
+
+These pieces are built game-agnostic so other games can adopt Quick Match by mirroring the
+shared-component pattern:
+
+- `QuickMatchPanel.jsx` — the reusable one-click pool grid. Props: `presets`, live `pools`
+  presence, `onPick(presetKey)`, `disabled`, `pendingPreset`, `defaultPreset`, `label`, and
+  an optional `formatPresence`. It carries no game specifics.
+- `QuickMatchSearchingLobby.jsx` — the generalized "searching the pool…" lobby. `usePools`,
+  `getPresetLabel`, and `title` are props (defaulting to the TicTacToe pool source/copy), so
+  Photo Quiz already reuses it with its own pool feed and labels.
+- `HomeQuickMatchCta.jsx` — the reusable home-card CTA `<Link>` (pass the setup route in
+  `to`); it sits beside a card's main link without nesting anchors.
+- `identity.js` `getGuestName()` / `getDisplayName()` — the guest-name fallback (see Guest
+  Identity below).
+
+**Extension checklist** — a new game adopts Quick Match by adding: (1) a backend
+`MatchmakingAdapter` + presets (the matchmaking engine is already generic); (2) a frontend
+presets array plus a pools hook built from `useQuickMatchPoolsFrom(enabled, fetchPools)`;
+(3) wiring its setup screen to `QuickMatchPanel` (one-click) and its board to
+`QuickMatchSearchingLobby`; and (4) a `HomeQuickMatchCta` on its home card. No new
+shared-component code is required.
+
 ### Guest Identity
 
 `frontend/src/identity.js` is the single source of a lightweight, persistent guest
@@ -218,12 +253,19 @@ identity used by online matchmaking:
 - `getNickname()` / `setNickname()` persist the shared display name under `elq_nickname`
   (clamped to `NICKNAME_MAX_LENGTH = 30`, the Higher or Lower backend limit), migrating
   the legacy `hol_nickname` key on first read.
+- `getGuestName()` returns a stable, auto-generated guest name (e.g. `Guest 4821`) persisted
+  under `elq_guest_name` (separate from `elq_nickname`, so it never overwrites a deliberate
+  nickname) with a page-lifetime memory fallback like `getGuestId()`. `getDisplayName()`
+  returns the saved nickname when set, otherwise that guest name — this is what the
+  near-one-click TicTacToe Quick Match prefills so online play needs no name gate.
 
-Every setup screen prefills its name field from `getNickname()` and persists edits via
-`setNickname()`; the shared nickname is not overwritten while a screen is in Local 1v1
-mode (where "Player 1" is a placeholder rather than the user's name). `frontend/src/api.js`
-attaches `guest_id` to TicTacToe, Roster Guess, and Career Quiz online `create`/`join`
-requests; the nickname rides the existing `player1_name` / `player_name` field.
+Every setup screen prefills its name field from `getNickname()` (TicTacToe Quick Match uses
+`getDisplayName()` so the field is never empty) and persists edits via `setNickname()`; the
+shared nickname is not overwritten while a screen is in Local 1v1 mode (where "Player 1" is
+a placeholder rather than the user's name). Clearing the field still sends no name, so
+anonymous play keeps working. `frontend/src/api.js` attaches `guest_id` to TicTacToe, Roster
+Guess, Career Quiz, and Photo Quiz online `create`/`join` requests; the nickname rides the
+existing `player1_name` / `player_name` field.
 
 
 ## Testing
