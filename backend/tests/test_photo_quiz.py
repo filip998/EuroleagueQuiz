@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,8 +11,11 @@ from app.database import Base, get_db
 from app.game_actions import ConflictGameActionError, InvalidGameActionError
 from app.main import app
 from app.models import PhotoQuizGame, PhotoQuizRound, Player
+from app.routers import photo_quiz as photo_quiz_router
+from app.schemas.realtime import RealtimeServerMessageAdapter
 from app.services import photo_quiz
 from app.services.realtime_adapters import PhotoQuizRealtimeAdapter
+from app.services.realtime import OnlineGameRealtimeModule, TurnTimerManager
 from app.services.solo_round_token import create_solo_round_token, validate_solo_round_token
 
 
@@ -1455,6 +1459,306 @@ def test_photo_http_rejects_replayed_no_answer_response_for_reoffer(
     assert current_game["round_number"] == round_number
 
 
+def test_photo_quick_match_first_request_waits_with_public_preset(
+    photo_client: TestClient,
+):
+    response = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "quick",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+
+    assert response.status_code == 200
+    game = _state_payload(response)["game"]
+    assert game["status"] == "waiting_for_opponent"
+    assert game["mode"] == "online_friend"
+    assert game["is_public"] is True
+    assert game["preset"] == "quick"
+    assert game["target_wins"] == 1
+    assert game["wrong_guess_visibility"] == "private"
+    assert game["current_round"] is None
+    assert "guest_id" not in game
+    assert "player1_guest_id" not in game
+
+
+def test_photo_quick_match_pools_tracks_public_waiting_active_cancel_and_finish(
+    photo_client: TestClient,
+    photo_quick_match_effects,
+):
+    friend = photo_client.post(
+        "/quiz/photo/games",
+        json={
+            "target_wins": 3,
+            "player1_name": "Friend Host",
+            "guest_id": "friend-guest",
+        },
+    )
+    assert friend.status_code == 200
+    friend_game = _state_payload(friend)["game"]
+    assert friend_game["is_public"] is False
+    assert friend_game["preset"] is None
+
+    empty_counts = photo_client.get("/quiz/photo/quick-match/pools")
+    assert empty_counts.status_code == 200
+    assert empty_counts.json() == {
+        "pools": {
+            "quick": {"searching": 0, "in_progress": 0},
+            "standard": {"searching": 0, "in_progress": 0},
+            "long": {"searching": 0, "in_progress": 0},
+        },
+        "poll_interval_seconds": 5,
+    }
+
+    first = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+    assert first.status_code == 200
+    standard_game = _state_payload(first)["game"]
+
+    waiting_counts = photo_client.get("/quiz/photo/quick-match/pools")
+    assert waiting_counts.status_code == 200
+    assert waiting_counts.json()["pools"]["standard"] == {
+        "searching": 1,
+        "in_progress": 0,
+    }
+
+    second = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Joiner",
+            "guest_id": "joiner-guest",
+        },
+    )
+    assert second.status_code == 200
+    matched_game = _state_payload(second)["game"]
+    assert matched_game["id"] == standard_game["id"]
+    assert matched_game["status"] == "active"
+    assert matched_game["current_round"]["round_number"] == 1
+    assert matched_game["is_public"] is True
+    assert matched_game["preset"] == "standard"
+    assert matched_game["target_wins"] == 3
+    assert matched_game["wrong_guess_visibility"] == "private"
+    assert photo_quick_match_effects["started"] == [matched_game["id"]]
+    assert [item[0] for item in photo_quick_match_effects["broadcasts"]] == [
+        matched_game["id"]
+    ]
+
+    active_counts = photo_client.get("/quiz/photo/quick-match/pools")
+    assert active_counts.status_code == 200
+    assert active_counts.json()["pools"]["standard"] == {
+        "searching": 0,
+        "in_progress": 1,
+    }
+
+    long_search = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "long",
+            "player_name": "Long Host",
+            "guest_id": "long-host-guest",
+        },
+    )
+    assert long_search.status_code == 200
+    long_game = _state_payload(long_search)["game"]
+
+    mixed_counts = photo_client.get("/quiz/photo/quick-match/pools")
+    assert mixed_counts.status_code == 200
+    assert mixed_counts.json()["pools"]["standard"] == {
+        "searching": 0,
+        "in_progress": 1,
+    }
+    assert mixed_counts.json()["pools"]["long"] == {
+        "searching": 1,
+        "in_progress": 0,
+    }
+
+    cancel = photo_client.post(
+        "/quiz/photo/quick-match/cancel",
+        json={
+            "preset": "long",
+            "game_id": long_game["id"],
+            "guest_id": "long-host-guest",
+        },
+    )
+    assert cancel.status_code == 200
+    cancelled_game = _state_payload(cancel)["game"]
+    assert cancelled_game["id"] == long_game["id"]
+    assert cancelled_game["status"] == "cancelled"
+    assert cancelled_game["is_public"] is True
+    assert cancelled_game["preset"] == "long"
+
+    with photo_client.session_local() as db:
+        assert db.get(PhotoQuizGame, long_game["id"]) is None
+        stored = db.get(PhotoQuizGame, standard_game["id"])
+        stored.status = "finished"
+        db.commit()
+
+    final_counts = photo_client.get("/quiz/photo/quick-match/pools")
+    assert final_counts.status_code == 200
+    assert final_counts.json()["pools"]["standard"] == {
+        "searching": 0,
+        "in_progress": 0,
+    }
+    assert final_counts.json()["pools"]["long"] == {
+        "searching": 0,
+        "in_progress": 0,
+    }
+
+
+def test_photo_quick_match_rejects_unknown_preset_with_error_envelope(
+    photo_client: TestClient,
+):
+    response = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "arcade",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "type": "error",
+        "payload": {
+            "code": "invalid_input",
+            "message": "Unknown Photo Quiz matchmaking preset",
+        },
+    }
+
+
+def test_photo_quick_match_same_guest_does_not_self_match(
+    photo_client: TestClient,
+    photo_quick_match_effects,
+):
+    first = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "First",
+            "guest_id": "same-guest",
+        },
+    )
+    assert first.status_code == 200
+    first_game = _state_payload(first)["game"]
+
+    second = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Second",
+            "guest_id": "same-guest",
+        },
+    )
+    assert second.status_code == 200
+    second_game = _state_payload(second)["game"]
+    assert second_game["id"] == first_game["id"]
+    assert second_game["status"] == "waiting_for_opponent"
+    assert photo_quick_match_effects["started"] == []
+    assert photo_quick_match_effects["broadcasts"] == []
+
+    third = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Third",
+            "guest_id": "other-guest",
+        },
+    )
+    assert third.status_code == 200
+    third_game = _state_payload(third)["game"]
+    assert third_game["id"] == first_game["id"]
+    assert third_game["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_photo_quick_match_public_round_timeout_auto_skips_with_injected_clock(
+    tmp_path: Path,
+):
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        for index in range(4):
+            _player(
+                setup,
+                "Timer",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/timer-{index}",
+                euroleague_image_url=f"https://cdn/timer-{index}.png",
+            )
+        setup.commit()
+
+        game = photo_quiz.create_game(setup, target_wins=3, player1_name="A")
+        game.is_public = True
+        game.preset = "standard"
+        photo_quiz.join_game(setup, game.join_code, player_name="B")
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    sleep = _ControlledSleep()
+    module = OnlineGameRealtimeModule(
+        PhotoQuizRealtimeAdapter(),
+        session_factory=SessionLocal,
+    )
+    module.timer = TurnTimerManager(module._expire_turn, sleep=sleep)
+    websocket = _FakeWebSocket()
+    await module.connections.connect(game_id, 1, websocket)
+
+    state_db = SessionLocal()
+    try:
+        state = photo_quiz.serialize_game_state(
+            state_db,
+            state_db.get(PhotoQuizGame, game_id),
+        )
+    finally:
+        state_db.close()
+
+    module.start_timer_from_state(state)
+    await sleep.wait_for_call()
+    assert sleep.calls[0][0] == 60
+
+    sleep.release(0)
+    await _drain_async_tasks()
+    await sleep.wait_for_call(2)
+    assert sleep.calls[1][0] > 60
+    module.cancel_timer(game_id)
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(PhotoQuizGame, game_id)
+        assert stored.status == "active"
+        assert stored.round_number == 2
+        assert stored.player1_score == 0
+        assert stored.player2_score == 0
+        assert [round_obj.status for round_obj in stored.rounds] == [
+            "no_answer",
+            "active",
+        ]
+        latest_completed = photo_quiz.serialize_game_state(
+            verify, stored
+        )["latest_completed_round"]
+        assert latest_completed["status"] == "no_answer"
+        assert latest_completed["winner_player"] is None
+    finally:
+        verify.close()
+
+    message = websocket.sent[-1]
+    RealtimeServerMessageAdapter.validate_python(message)
+    assert message["payload"]["result"] == "time_expired"
+    assert message["payload"]["game"]["latest_completed_round"]["status"] == "no_answer"
+
+
 def _session():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
@@ -1522,6 +1826,12 @@ def _assert_next_round_starts_at(resolved_at_value, next_round_starts_at_value):
     )
 
 
+def _state_payload(response) -> dict:
+    payload = response.json()
+    assert payload["type"] == "state"
+    return payload["payload"]
+
+
 @pytest.fixture()
 def photo_client(tmp_path: Path):
     db_path = tmp_path / "photo_api_test.db"
@@ -1565,3 +1875,64 @@ def photo_client(tmp_path: Path):
     else:
         app.dependency_overrides[get_db] = previous_override
     engine.dispose()
+
+
+@pytest.fixture()
+def photo_quick_match_effects(monkeypatch):
+    effects = {"started": [], "broadcasts": []}
+
+    def fake_start_timer(game_state: dict) -> None:
+        effects["started"].append(game_state["id"])
+
+    async def fake_broadcast_state(game_id: int, game_state: dict, **kwargs):
+        effects["broadcasts"].append((game_id, game_state, kwargs))
+        return 0
+
+    monkeypatch.setattr(
+        photo_quiz_router.photo_quiz_realtime,
+        "start_timer_from_state",
+        fake_start_timer,
+    )
+    monkeypatch.setattr(
+        photo_quiz_router.photo_quiz_realtime,
+        "broadcast_state",
+        fake_broadcast_state,
+    )
+    return effects
+
+
+class _FakeWebSocket:
+    def __init__(self):
+        self.accepted = False
+        self.sent: list[dict] = []
+
+    async def accept(self):
+        self.accepted = True
+
+    async def send_json(self, message: dict):
+        self.sent.append(message)
+
+
+class _ControlledSleep:
+    def __init__(self):
+        self.calls: list[tuple[float, asyncio.Event]] = []
+
+    async def __call__(self, seconds: float):
+        release = asyncio.Event()
+        self.calls.append((seconds, release))
+        await release.wait()
+
+    async def wait_for_call(self, count: int = 1):
+        for _ in range(50):
+            if len(self.calls) >= count:
+                return
+            await asyncio.sleep(0)
+        raise AssertionError(f"Expected {count} timer sleep call(s), got {len(self.calls)}")
+
+    def release(self, index: int = 0):
+        self.calls[index][1].set()
+
+
+async def _drain_async_tasks(count: int = 5):
+    for _ in range(count):
+        await asyncio.sleep(0)

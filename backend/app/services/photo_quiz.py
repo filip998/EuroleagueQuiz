@@ -159,6 +159,8 @@ def create_game(
         mode="online_friend",
         status="waiting_for_opponent",
         join_code=_generate_join_code(db),
+        is_public=False,
+        preset=None,
         target_wins=target_wins,
         wrong_guess_visibility=wrong_guess_visibility,
         player1_name=player1_name or "Player 1",
@@ -382,6 +384,85 @@ def respond_no_answer(
     return "accepted"
 
 
+def public_round_timer_delay_seconds(
+    game: PhotoQuizGame,
+    *,
+    round_seconds: int,
+    now: datetime | None = None,
+) -> float | None:
+    if round_seconds <= 0:
+        return None
+    if (
+        game.mode != "online_friend"
+        or not game.is_public
+        or game.status != "active"
+    ):
+        return None
+    try:
+        round_obj = _current_round(game)
+    except ConflictGameActionError:
+        return None
+    if round_obj.status != "active":
+        return None
+
+    now_utc = _as_utc(now or datetime.now(timezone.utc))
+    delay_seconds = float(round_seconds)
+    next_round_starts_at = _active_next_round_lock_starts_at(game, now=now_utc)
+    if next_round_starts_at is not None:
+        delay_seconds += max((next_round_starts_at - now_utc).total_seconds(), 0.0)
+    return delay_seconds
+
+
+def handle_public_round_time_expired(
+    db: Session,
+    *,
+    game: PhotoQuizGame,
+    expected_round: int,
+) -> bool:
+    if (
+        game.mode != "online_friend"
+        or not game.is_public
+        or game.status != "active"
+        or game.round_number != expected_round
+    ):
+        return False
+    if _active_next_round_lock_starts_at(game) is not None:
+        return False
+
+    try:
+        round_obj = _current_round(game)
+    except ConflictGameActionError:
+        return False
+    if round_obj.status != "active":
+        return False
+
+    try:
+        _claim_active_round(
+            db,
+            round_obj,
+            status="no_answer",
+            winner_player=None,
+            completed_at=datetime.utcnow(),
+        )
+    except ConflictGameActionError:
+        return False
+
+    _update_active_game_round(
+        db,
+        game,
+        expected_round,
+        {
+            "pending_no_answer_from": None,
+            "pending_no_answer_to": None,
+            "round_number": game.round_number + 1,
+        },
+    )
+    game.pending_no_answer_from = None
+    game.pending_no_answer_to = None
+    _create_next_round(db, game)
+    return True
+
+
 def serialize_game_state(db: Session, game: PhotoQuizGame) -> dict[str, Any]:
     current_round = None
     if game.status == "active":
@@ -395,6 +476,8 @@ def serialize_game_state(db: Session, game: PhotoQuizGame) -> dict[str, Any]:
         "mode": game.mode,
         "status": game.status,
         "join_code": game.join_code,
+        "is_public": game.is_public,
+        "preset": game.preset,
         "target_wins": game.target_wins,
         "wrong_guess_visibility": game.wrong_guess_visibility,
         "player1_name": game.player1_name,

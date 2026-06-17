@@ -30,7 +30,7 @@ Then open `http://localhost:5173` to play.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo and multiplayer.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice and 2-player race modes.
-- **Photo Quiz** — Guess the player from a headshot. The backend supports Solo rounds and 2-player online friend races from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
+- **Photo Quiz** — Guess the player from a headshot. The backend supports Solo rounds, 2-player online friend races, and public Quick Match races from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
 
 ## Backend
 
@@ -111,7 +111,11 @@ Photo Quiz rounds use signed Solo Round Tokens and expose only the resolved clue
 the answer is guessed correctly or revealed. Online Photo Quiz friend games use
 `POST /quiz/photo/games`, `/games/join`, `/games/{id}/guess`, `/no-answer-offer`,
 `/no-answer-response`, `GET /quiz/photo/games/{id}`, and `WS /quiz/photo/ws/{id}`;
-the round clue is the resolved `image_url`.
+the round clue is the resolved `image_url`. Public Photo Quiz Quick Match uses
+`POST /quiz/photo/quick-match`, `POST /quiz/photo/quick-match/cancel`, and
+`GET /quiz/photo/quick-match/pools` with `quick` / `standard` / `long` presets
+that set first-to-1 / first-to-3 / first-to-5, keep wrong guesses private, and
+server-skip idle public rounds after the per-round timeout.
 Multiplayer Career Quiz and Photo Quiz resolved-round state includes
 `latest_completed_round.next_round_starts_at` during the three-second reveal lock; the
 backend rejects next-round guesses with `round_locked` until that UTC timestamp elapses.
@@ -129,6 +133,8 @@ waiting-for-opponent polling, cleanup, and action dispatch stay out of the game 
 TicTacToe Quick Match setup screens can poll
 `GET /quiz/tictactoe/quick-match/pools` every 5 seconds for per-preset
 `searching` and `in_progress` presence counts derived from public pool rows.
+Photo Quiz exposes the same presence shape at `GET /quiz/photo/quick-match/pools`,
+counting only public Photo Quiz searches and active public matches.
 
 Mutating TicTacToe, Roster Guess, Career Quiz, and Photo Quiz HTTP endpoints now use the same realtime
 message envelopes as WebSocket broadcasts: successful actions return

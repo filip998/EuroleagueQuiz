@@ -5,6 +5,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -21,6 +22,8 @@ class PhotoQuizGame(Base):
     mode = Column(String, nullable=False, default="online_friend")
     status = Column(String, nullable=False, default="waiting_for_opponent")
     join_code = Column(String(6), nullable=True, unique=True, index=True)
+    is_public = Column(Boolean, nullable=False, default=False, server_default="0")
+    preset = Column(String(128), nullable=True)
     target_wins = Column(Integer, nullable=False, default=3)
     wrong_guess_visibility = Column(String, nullable=False, default="private")
     player1_name = Column(String, nullable=True)
@@ -47,6 +50,16 @@ class PhotoQuizGame(Base):
         back_populates="game",
         cascade="all, delete-orphan",
         order_by="PhotoQuizRound.round_number",
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_photo_quiz_games_matchmaking_pool",
+            "is_public",
+            "status",
+            "preset",
+            "created_at",
+        ),
     )
 
 

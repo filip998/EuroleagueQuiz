@@ -29,6 +29,28 @@ class PhotoQuizJoinRequest(BaseModel):
     guest_id: str | None = None
 
 
+class PhotoQuizQuickMatchRequest(BaseModel):
+    preset: str
+    player_name: str | None = None
+    guest_id: str | None = None
+
+
+class PhotoQuizQuickMatchCancelRequest(BaseModel):
+    preset: str
+    game_id: int
+    guest_id: str | None = None
+
+
+class PhotoQuizQuickMatchPoolCounts(BaseModel):
+    searching: int = Field(ge=0)
+    in_progress: int = Field(ge=0)
+
+
+class PhotoQuizQuickMatchPoolsResponse(BaseModel):
+    pools: dict[str, PhotoQuizQuickMatchPoolCounts]
+    poll_interval_seconds: int = Field(gt=0)
+
+
 class PhotoQuizGuessRequest(BaseModel):
     player_id: int = Field(gt=0)
     round_number: int = Field(gt=0)
