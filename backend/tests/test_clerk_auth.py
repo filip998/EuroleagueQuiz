@@ -491,6 +491,24 @@ def test_jit_provisioning_rejects_deleted_clerk_user(auth_session_factory):
         assert db.scalar(select(func.count()).select_from(User)) == 0
 
 
+def test_jit_provisioning_cleans_user_when_tombstone_wins_race(auth_session_factory):
+    with auth_session_factory() as db:
+        _add_deleted_sync_state(db, "user_deleted")
+        db.add(
+            User(
+                clerk_user_id="user_deleted",
+                username="raced",
+                email="raced@example.com",
+            )
+        )
+        db.commit()
+
+        with pytest.raises(DeletedClerkUserError):
+            get_or_create_user_for_claims(db, {"sub": "user_deleted"})
+
+        assert db.scalar(select(func.count()).select_from(User)) == 0
+
+
 def test_jit_provisioning_returns_existing_user_after_clerk_id_race(
     monkeypatch,
     auth_session_factory,

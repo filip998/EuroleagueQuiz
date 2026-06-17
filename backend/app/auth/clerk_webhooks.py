@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from svix.webhooks import Webhook, WebhookVerificationError
 
 from app.auth.user_sync_state import clerk_user_sync_key, find_clerk_user_sync_state
-from app.auth.users import upsert_user_for_claims
+from app.auth.users import delete_user_if_tombstoned, upsert_user_for_claims
 from app.config import settings
 from app.models.user import ClerkUserSyncState, User, utc_now
 
@@ -49,10 +49,12 @@ def handle_clerk_webhook(
         event_at = _event_timestamp(event)
         state = _find_sync_state(db, clerk_user_id)
         if _mutation_should_be_ignored(state, event_at):
+            delete_user_if_tombstoned(db, clerk_user_id)
             return ClerkWebhookResult(event_type=event_type, status="processed")
         upsert_user_for_claims(db, claims, commit=False)
         _record_mutation_state(db, clerk_user_id, event_at)
         db.commit()
+        delete_user_if_tombstoned(db, clerk_user_id)
         return ClerkWebhookResult(event_type=event_type, status="processed")
 
     if event_type == "user.deleted":
@@ -60,14 +62,16 @@ def handle_clerk_webhook(
         event_at = _event_timestamp(event)
         state = _find_sync_state(db, clerk_user_id)
         if _event_is_stale(state, event_at):
+            delete_user_if_tombstoned(db, clerk_user_id)
             return ClerkWebhookResult(event_type=event_type, status="processed")
-        user = db.execute(select(User).where(User.clerk_user_id == clerk_user_id)).scalar_one_or_none()
         _record_delete_state(db, clerk_user_id, event_at)
+        user = db.execute(select(User).where(User.clerk_user_id == clerk_user_id)).scalar_one_or_none()
         if user is not None:
             db.delete(user)
             db.commit()
         else:
             db.commit()
+        delete_user_if_tombstoned(db, clerk_user_id)
         return ClerkWebhookResult(event_type=event_type, status="processed")
 
     return ClerkWebhookResult(event_type=event_type, status="ignored")

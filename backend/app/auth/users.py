@@ -22,13 +22,15 @@ class DeletedClerkUserError(UserProvisioningError):
 
 def get_or_create_user_for_claims(db: Session, claims: Mapping[str, Any]) -> User:
     clerk_user_id = _validated_clerk_user_id(claims)
-    if clerk_user_is_tombstoned(db, clerk_user_id):
-        raise DeletedClerkUserError("Clerk user has been deleted")
+    _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
     existing = _find_by_clerk_user_id(db, clerk_user_id)
     if existing is not None:
+        _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
         return existing
 
-    return _create_user_from_claims(db, clerk_user_id, claims)
+    user = _create_user_from_claims(db, clerk_user_id, claims)
+    _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
+    return user
 
 
 def upsert_user_for_claims(
@@ -38,13 +40,34 @@ def upsert_user_for_claims(
     commit: bool = True,
 ) -> User:
     clerk_user_id = _validated_clerk_user_id(claims)
-    if clerk_user_is_tombstoned(db, clerk_user_id):
-        raise DeletedClerkUserError("Clerk user has been deleted")
+    _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
     existing = _find_by_clerk_user_id(db, clerk_user_id)
     if existing is None:
-        return _create_user_from_claims(db, clerk_user_id, claims, commit=commit)
+        user = _create_user_from_claims(db, clerk_user_id, claims, commit=commit)
+        if commit:
+            _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
+        return user
 
-    return _update_user_from_claims(db, existing, claims, commit=commit)
+    user = _update_user_from_claims(db, existing, claims, commit=commit)
+    if commit:
+        _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
+    return user
+
+
+def delete_user_if_tombstoned(db: Session, clerk_user_id: str) -> bool:
+    if not clerk_user_is_tombstoned(db, clerk_user_id):
+        return False
+    existing = _find_by_clerk_user_id(db, clerk_user_id)
+    if existing is None:
+        return False
+    db.delete(existing)
+    db.commit()
+    return True
+
+
+def _raise_if_clerk_user_is_tombstoned(db: Session, clerk_user_id: str) -> None:
+    if delete_user_if_tombstoned(db, clerk_user_id) or clerk_user_is_tombstoned(db, clerk_user_id):
+        raise DeletedClerkUserError("Clerk user has been deleted")
 
 
 def _validated_clerk_user_id(claims: Mapping[str, Any]) -> str:

@@ -274,6 +274,26 @@ def test_clerk_stale_update_after_delete_does_not_recreate_user(auth_client, aut
         assert db.scalar(select(func.count()).select_from(UserGuestId)) == 0
 
 
+def test_clerk_deleted_redelivery_cleans_raced_user(auth_client, auth_session_factory):
+    deleted = _user_event("user.deleted", event_timestamp=1_700_000_003_000)
+    assert _post_signed(auth_client, deleted).status_code == 200
+
+    with auth_session_factory() as db:
+        db.add(
+            User(
+                clerk_user_id="user_clerk_123",
+                username="raced",
+                email="raced@example.com",
+            )
+        )
+        db.commit()
+
+    assert _post_signed(auth_client, deleted).status_code == 200
+
+    with auth_session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(User)) == 0
+
+
 def test_clerk_webhook_maps_provisioning_errors_to_retryable_status(auth_client, monkeypatch):
     def fail_provisioning(db, claims, **kwargs):
         raise UserProvisioningError("could not provision")
