@@ -81,14 +81,17 @@ class JWKSCache:
         fetcher: JWKSFetcher = _default_fetch_jwks,
         ttl_seconds: float = 300.0,
         refresh_cooldown_seconds: float = 30.0,
+        unknown_kid_refresh_limit: int = 2,
         clock: Clock = time.monotonic,
     ) -> None:
         self._fetcher = fetcher
         self._ttl_seconds = ttl_seconds
         self._refresh_cooldown_seconds = refresh_cooldown_seconds
+        self._unknown_kid_refresh_limit = max(1, unknown_kid_refresh_limit)
         self._clock = clock
         self._cache: dict[str, _CachedJWKS] = {}
         self._in_flight_fetches: dict[str, _InFlightJWKSFetch] = {}
+        self._unknown_kid_refreshes: dict[str, list[tuple[str, float]]] = {}
         self._lock = threading.RLock()
 
     def get_key(self, jwks_url: str, kid: str) -> Mapping[str, Any]:
@@ -124,7 +127,7 @@ class JWKSCache:
                 in_flight = self._in_flight_fetches.get(jwks_url)
                 if in_flight is not None:
                     wait_for = in_flight
-                elif now - cached.last_unknown_kid_refresh_at < self._refresh_cooldown_seconds:
+                elif not self._reserve_unknown_kid_refresh(jwks_url, kid, now):
                     return cached
         if wait_for is not None:
             return self._wait_for_fetch(wait_for)
@@ -195,6 +198,20 @@ class JWKSCache:
         if in_flight.result is None:
             raise ClerkTokenError("Unable to fetch Clerk JWKS")
         return in_flight.result
+
+    def _reserve_unknown_kid_refresh(self, jwks_url: str, kid: str, now: float) -> bool:
+        refreshes = [
+            (refreshed_kid, refreshed_at)
+            for refreshed_kid, refreshed_at in self._unknown_kid_refreshes.get(jwks_url, [])
+            if now - refreshed_at < self._refresh_cooldown_seconds
+        ]
+        self._unknown_kid_refreshes[jwks_url] = refreshes
+        if any(refreshed_kid == kid for refreshed_kid, _ in refreshes):
+            return False
+        if len(refreshes) >= self._unknown_kid_refresh_limit:
+            return False
+        refreshes.append((kid, now))
+        return True
 
 
 def _keys_by_kid(jwks: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:

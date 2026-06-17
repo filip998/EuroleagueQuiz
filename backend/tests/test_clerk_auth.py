@@ -165,6 +165,30 @@ def test_jwks_cache_waits_for_in_flight_rotation_refresh():
     assert fetches == [JWKS_URL, JWKS_URL]
 
 
+def test_jwks_cache_allows_rotated_kid_after_different_unknown_kid():
+    old_key = _new_signing_key("old-key")
+    new_key = _new_signing_key("new-key")
+    responses: list[Mapping[str, Any]] = [
+        {"keys": [old_key.jwk]},
+        {"keys": [old_key.jwk]},
+        {"keys": [old_key.jwk, new_key.jwk]},
+    ]
+    fetches: list[str] = []
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        fetches.append(url)
+        return responses[min(len(fetches) - 1, len(responses) - 1)]
+
+    verifier = _verifier(old_key.jwk, fetcher=fetcher)
+
+    verifier.verify(_make_token(old_key))
+    with pytest.raises(ClerkTokenError):
+        verifier.verify(_make_token(old_key, kid="random-unknown"))
+    verifier.verify(_make_token(new_key))
+
+    assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL]
+
+
 def test_jwks_cache_rate_limits_unknown_kid_refreshes(signing_key):
     fetches: list[str] = []
     verifier = _verifier(signing_key.jwk, fetches=fetches)
@@ -174,8 +198,10 @@ def test_jwks_cache_rate_limits_unknown_kid_refreshes(signing_key):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-two"))
+    with pytest.raises(ClerkTokenError):
+        verifier.verify(_make_token(signing_key, kid="unknown-three"))
 
-    assert fetches == [JWKS_URL, JWKS_URL]
+    assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL]
 
 
 def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
@@ -194,8 +220,10 @@ def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-two"))
+    with pytest.raises(ClerkTokenError):
+        verifier.verify(_make_token(signing_key, kid="unknown-three"))
 
-    assert fetches == [JWKS_URL, JWKS_URL]
+    assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL]
 
 
 def test_jwks_cache_fetches_without_holding_lock(signing_key):
@@ -369,6 +397,40 @@ def test_jit_provisioning_handles_username_collision(auth_session_factory):
         assert user.email == "new@example.com"
         assert user.display_name == "New User"
         assert user.avatar_url == "https://example.com/avatar.png"
+
+
+def test_jit_provisioning_retries_when_fallback_username_is_taken(auth_session_factory):
+    with auth_session_factory() as db:
+        fallback_username = "user_76ece34db34813ba"
+        db.add(
+            User(
+                clerk_user_id="user_existing",
+                username=fallback_username,
+                email="existing@example.com",
+            )
+        )
+        db.commit()
+
+        user = get_or_create_user_for_claims(db, {"sub": "user_new"})
+
+        assert user.username == f"{fallback_username}_1"
+        assert user.email.endswith("@clerk.invalid")
+
+
+def test_jit_provisioning_does_not_allow_claimed_fallback_namespace(auth_session_factory):
+    with auth_session_factory() as db:
+        user = get_or_create_user_for_claims(
+            db,
+            {
+                "sub": "user_new",
+                "username": "user_0123456789abcdef",
+                "email": "new@example.com",
+            },
+        )
+
+        assert user.username != "user_0123456789abcdef"
+        assert user.username.startswith("user_")
+        assert user.email == "new@example.com"
 
 
 def test_auth_me_requires_token_and_returns_provisioned_user(
