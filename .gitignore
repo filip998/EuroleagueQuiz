@@ -15,10 +15,7 @@ env/
 
 # SQLite database
 data/*.db
-backend/data/users.db
-backend/data/users.db-wal
-backend/data/users.db-shm
-backend/data/users.db-journal
+backend/data/users.db*
 
 # IDE
 .idea/
