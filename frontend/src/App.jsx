@@ -10,6 +10,7 @@ import CareerQuizSetup from "./CareerQuizSetup";
 import CareerQuizBoard from "./CareerQuizBoard";
 import { LogoFull } from "./Logo";
 import { getCareerGame, getGame, getRosterGame } from "./api";
+import { parseJoinCode } from "./inviteLink";
 
 // ---------------------------------------------------------------------------
 // Helpers for persisting online game info across page refreshes
@@ -163,6 +164,8 @@ function HomePage() {
 
 function TicTacToeSetupPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const initialJoinCode = parseJoinCode(location.search);
 
   function handleGameCreated(resp, online) {
     const gameData = resp.state || resp.game || resp;
@@ -171,7 +174,14 @@ function TicTacToeSetupPage() {
     navigate(`/tictactoe/${id}`);
   }
 
-  return <GameSetup onGameCreated={handleGameCreated} onBack={() => navigate("/")} />;
+  return (
+    <GameSetup
+      key={initialJoinCode || "no-invite"}
+      initialJoinCode={initialJoinCode}
+      onGameCreated={handleGameCreated}
+      onBack={() => navigate("/")}
+    />
+  );
 }
 
 function TicTacToeGamePage() {

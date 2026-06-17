@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createGame, joinGame } from "./api";
 import { getNickname, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
+import { normalizeJoinCode } from "./inviteLink";
 import GameSetupShell from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 
@@ -16,14 +17,15 @@ const BACKEND_MODE = {
   online: "online_friend",
 };
 
-export default function GameSetup({ onGameCreated, onBack }) {
-  const [mode, setMode] = useState("solo");
-  const [sub, setSub] = useState("create");
+export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" }) {
+  const prefillCode = normalizeJoinCode(initialJoinCode);
+  const [mode, setMode] = useState(prefillCode ? "online" : "solo");
+  const [sub, setSub] = useState(prefillCode ? "join" : "create");
   const [targetWins, setTargetWins] = useState(3);
   const [timerMode, setTimerMode] = useState("40s");
   const [player1Name, setPlayer1Name] = useState(() => getNickname());
   const [player2Name, setPlayer2Name] = useState("");
-  const [joinCode, setJoinCode] = useState("");
+  const [joinCode, setJoinCode] = useState(prefillCode);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 

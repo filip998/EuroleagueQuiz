@@ -72,4 +72,32 @@ describe("GameSetup", () => {
     fireEvent.click(screen.getByText("Online"));
     expect(screen.getByText("Create Online Game")).toBeInTheDocument();
   });
+
+  it("prefills Online → Join with a valid initialJoinCode", () => {
+    render(
+      <GameSetup
+        onGameCreated={mockOnGameCreated}
+        onBack={mockOnBack}
+        initialJoinCode="ABC123"
+      />
+    );
+
+    expect(screen.getByText("Join Game")).toBeInTheDocument();
+    const codeInput = screen.getByPlaceholderText("ABC123");
+    expect(codeInput).toHaveValue("ABC123");
+    expect(screen.getByText("Join Game")).not.toBeDisabled();
+  });
+
+  it("ignores an invalid initialJoinCode and starts in solo mode", () => {
+    render(
+      <GameSetup
+        onGameCreated={mockOnGameCreated}
+        onBack={mockOnBack}
+        initialJoinCode="bad"
+      />
+    );
+
+    expect(screen.getByText("Start Game")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("ABC123")).not.toBeInTheDocument();
+  });
 });
