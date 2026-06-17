@@ -95,6 +95,42 @@ describe("useClerkPrefilledName", () => {
     );
   });
 
+  it("reverts to the guest fallback when Clerk signs out in place (unedited)", async () => {
+    const { rerender } = renderWithAuth(
+      <Probe getFallback={() => "Guest 99"} />,
+      signedIn({ username: "clerk_user" })
+    );
+    expect(screen.getByLabelText("name")).toHaveValue("clerk_user");
+
+    // Signing out must not leave the signed-in name lingering in anonymous play.
+    rerender(
+      <AuthContext.Provider value={SIGNED_OUT}>
+        <Probe getFallback={() => "Guest 99"} />
+      </AuthContext.Provider>
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("name")).toHaveValue("Guest 99")
+    );
+  });
+
+  it("preserves an edited value across a sign-out", async () => {
+    const { rerender } = renderWithAuth(
+      <Probe getFallback={() => "Guest 99"} />,
+      signedIn({ username: "clerk_user" })
+    );
+    const input = screen.getByLabelText("name");
+    fireEvent.change(input, { target: { value: "MyChosenName" } });
+    expect(input).toHaveValue("MyChosenName");
+
+    rerender(
+      <AuthContext.Provider value={SIGNED_OUT}>
+        <Probe getFallback={() => "Guest 99"} />
+      </AuthContext.Provider>
+    );
+    await waitFor(() => {});
+    expect(screen.getByLabelText("name")).toHaveValue("MyChosenName");
+  });
+
   it("never clobbers a value the user has typed", async () => {
     const { rerender } = renderWithAuth(
       <Probe getFallback={() => "Guest 99"} />,

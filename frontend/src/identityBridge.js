@@ -47,13 +47,15 @@ export function useClerkName() {
 
 // Name-field state for a setup screen that prefers the signed-in Clerk name and
 // falls back to the guest value. Clerk loads asynchronously, so the field seeds
-// from the guest fallback and is upgraded to the Clerk name once it arrives —
-// but only while the user hasn't edited the field, so typed input (including the
-// Local 1v1 "Player 1" case) is never clobbered.
+// from the guest fallback and is upgraded to the Clerk name once it arrives, and
+// reverts to the guest fallback if Clerk signs out in-place — but only while the
+// user hasn't edited the field, so typed input (including the Local 1v1
+// "Player 1" case) is never clobbered and a signed-in name never lingers into
+// anonymous play after sign-out.
 //
-// The upgrade uses the "adjust state while rendering" pattern (storing the
-// previous Clerk name and reconciling during render) rather than an effect, so
-// there is no extra commit/paint and no setState-in-effect.
+// This uses the "adjust state while rendering" pattern (storing the previous
+// Clerk name and reconciling during render) rather than an effect, so there is
+// no extra commit/paint and no setState-in-effect.
 export function useClerkPrefilledName(getFallback) {
   const clerkName = useClerkName();
   const [edited, setEdited] = useState(false);
@@ -62,7 +64,9 @@ export function useClerkPrefilledName(getFallback) {
 
   if (clerkName !== prevClerkName) {
     setPrevClerkName(clerkName);
-    if (clerkName && !edited) setNameState(clerkName);
+    // Mirror the live Clerk state into an unedited field: adopt the Clerk name
+    // when signed in, fall back to the guest value when it clears on sign-out.
+    if (!edited) setNameState(clerkName || getFallback());
   }
 
   const setName = useCallback((next) => {
