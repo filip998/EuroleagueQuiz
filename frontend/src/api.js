@@ -46,10 +46,13 @@ export function getAuthMe() {
 // Best-effort: associate the current guest id with the signed-in user after
 // sign-in. Idempotent server-side; callers must swallow failures so a missing
 // or briefly-unavailable endpoint never blocks sign-in. Pass the caller's
-// already-fetched Bearer token so the request carries exactly that token and is
-// never sent unauthenticated; omitting it falls back to the registry.
-export function linkGuest(authToken) {
-  return request("POST", "/auth/link-guest", { guest_id: getGuestId() }, { authToken });
+// already-fetched Bearer token so the request carries exactly that token;
+// when no token is available (signed out / no key) this no-ops without sending
+// a request, so link-guest is never POSTed unauthenticated.
+export async function linkGuest(authToken) {
+  const token = authToken !== undefined ? authToken : await getAuthToken();
+  if (!token) return null;
+  return request("POST", "/auth/link-guest", { guest_id: getGuestId() }, { authToken: token });
 }
 
 export function createGame(payload) {

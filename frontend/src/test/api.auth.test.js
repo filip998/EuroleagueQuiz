@@ -92,11 +92,14 @@ describe("api auth token plumbing", () => {
     expect(lastRequestInit().headers.Authorization).toBe("Bearer preflight-token");
   });
 
-  it("linkGuest omits auth when no token is available at all", async () => {
+  it("does not POST link-guest at all when no token is available", async () => {
     clearAuthTokenProvider();
     mockFetch.mockReturnValue(jsonResponse(null, { status: 204 }));
-    await linkGuest();
-    expect(lastRequestInit().headers.Authorization).toBeUndefined();
+    const result = await linkGuest();
+    // Best-effort and never unauthenticated: with no token, skip the request
+    // entirely rather than send a guaranteed-401 unauthenticated POST.
+    expect(result).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("getAuthMe GETs /auth/me with the token", async () => {
