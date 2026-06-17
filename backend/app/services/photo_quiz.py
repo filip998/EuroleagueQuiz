@@ -305,14 +305,12 @@ def offer_no_answer(
     _raise_if_current_round_locked(game)
     _assert_active_game_round(db, game, _current_round(game), round_number)
     pending_to = 2 if acting_player == 1 else 1
-    _update_active_game_round(
+    _create_pending_no_answer_offer(
         db,
         game,
         round_number,
-        {
-            "pending_no_answer_from": acting_player,
-            "pending_no_answer_to": pending_to,
-        },
+        acting_player=acting_player,
+        pending_to=pending_to,
     )
     game.pending_no_answer_from = acting_player
     game.pending_no_answer_to = pending_to
@@ -604,6 +602,49 @@ def _update_active_game_round(
         raise ConflictGameActionError("round_stale")
     for key, value in update_values.items():
         setattr(game, key, value)
+
+
+def _create_pending_no_answer_offer(
+    db: Session,
+    game: PhotoQuizGame,
+    round_number: int,
+    *,
+    acting_player: int,
+    pending_to: int,
+) -> None:
+    updated_at = datetime.utcnow()
+    updated = (
+        db.query(PhotoQuizGame)
+        .filter(PhotoQuizGame.id == game.id)
+        .filter(PhotoQuizGame.status == "active")
+        .filter(PhotoQuizGame.round_number == round_number)
+        .filter(PhotoQuizGame.pending_no_answer_from.is_(None))
+        .filter(PhotoQuizGame.pending_no_answer_to.is_(None))
+        .update(
+            {
+                "pending_no_answer_from": acting_player,
+                "pending_no_answer_to": pending_to,
+                "updated_at": updated_at,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated != 1:
+        current = (
+            db.query(PhotoQuizGame.status, PhotoQuizGame.round_number)
+            .filter(PhotoQuizGame.id == game.id)
+            .first()
+        )
+        if (
+            current is None
+            or current.status != "active"
+            or current.round_number != round_number
+        ):
+            raise ConflictGameActionError("round_stale")
+        raise ConflictGameActionError("No answer offer is already pending")
+    game.pending_no_answer_from = acting_player
+    game.pending_no_answer_to = pending_to
+    game.updated_at = updated_at
 
 
 def _update_pending_no_answer_offer(

@@ -644,6 +644,68 @@ def test_multiplayer_state_exposes_latest_completed_round_after_no_answer_accept
         db.close()
 
 
+def test_multiplayer_stale_second_no_answer_offer_is_rejected(tmp_path: Path):
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        for index in range(2):
+            _player(
+                setup,
+                "OfferRace",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/offer-race-{index}",
+                euroleague_image_url=f"https://cdn/offer-race-{index}.png",
+            )
+        setup.commit()
+        game = photo_quiz.create_game(setup, target_wins=3, player1_name="A")
+        photo_quiz.join_game(setup, game.join_code, player_name="B")
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    first = SessionLocal()
+    second = SessionLocal()
+    try:
+        first_game = first.get(PhotoQuizGame, game_id)
+        second_game = second.get(PhotoQuizGame, game_id)
+        first_round = photo_quiz._current_round(first_game)
+        second_round = photo_quiz._current_round(second_game)
+
+        photo_quiz.offer_no_answer(
+            first,
+            game=first_game,
+            acting_player=1,
+            round_number=first_round.round_number,
+        )
+        first.commit()
+
+        with pytest.raises(
+            ConflictGameActionError,
+            match="No answer offer is already pending",
+        ):
+            photo_quiz.offer_no_answer(
+                second,
+                game=second_game,
+                acting_player=2,
+                round_number=second_round.round_number,
+            )
+        second.rollback()
+    finally:
+        first.close()
+        second.close()
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(PhotoQuizGame, game_id)
+        assert stored.pending_no_answer_from == 1
+        assert stored.pending_no_answer_to == 2
+        assert stored.round_number == 1
+        assert [round_obj.status for round_obj in stored.rounds] == ["active"]
+    finally:
+        verify.close()
+
+
 def test_multiplayer_state_exposes_latest_completed_round_after_correct_guess():
     db = _session()
     try:
