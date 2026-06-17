@@ -1,0 +1,785 @@
+import { useEffect, useState } from "react";
+import {
+  autocompletePhotoPlayer,
+  connectPhotoRealtime,
+  createPhotoSoloRound,
+  getPhotoGame,
+  offerPhotoNoAnswer,
+  revealPhotoSoloAnswer,
+  respondPhotoNoAnswer,
+  submitPhotoGuess,
+  submitPhotoSoloGuess,
+} from "./api";
+import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
+import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
+import WaitingLobby from "./WaitingLobby";
+import {
+  getRevealCountdownRemaining,
+  shouldRevealCompletedRound,
+} from "./photoQuizUtils";
+
+const PHOTO_FEEDBACK_MESSAGES = {
+  correct: "Correct!",
+  soloWrong: "Not this player. Keep guessing.",
+  multiplayerWrong: "Wrong guess.",
+  noAnswerOfferSent: "No-answer offer sent.",
+  realtimeUnavailable: "Realtime connection unavailable. Reconnecting...",
+};
+const PHOTO_MULTIPLAYER_SUCCESS_RESULTS = new Set(["round_won", "match_won"]);
+const NO_ANSWER_OFFER_SENT_MESSAGE = PHOTO_FEEDBACK_MESSAGES.noAnswerOfferSent;
+const PHOTO_FEEDBACK_TONES = {
+  [PHOTO_FEEDBACK_MESSAGES.correct]: "success",
+  [PHOTO_FEEDBACK_MESSAGES.soloWrong]: "error",
+  [PHOTO_FEEDBACK_MESSAGES.multiplayerWrong]: "error",
+  [PHOTO_FEEDBACK_MESSAGES.noAnswerOfferSent]: "neutral",
+};
+const PHOTO_FEEDBACK_STYLES = {
+  success: {
+    container: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    dot: "bg-elq-success",
+  },
+  error: {
+    container: "border-red-200 bg-red-50 text-red-600",
+    dot: "bg-elq-player2",
+  },
+  neutral: {
+    container: "border-amber-200 bg-amber-50 text-amber-700",
+    dot: "bg-elq-warning",
+  },
+  info: {
+    container: "border-slate-200 bg-slate-100 text-slate-600",
+    dot: "bg-slate-400",
+  },
+};
+
+export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineInfo, onNewGame, onHome }) {
+  const [soloRound, setSoloRound] = useState(soloInitialRound || null);
+  const [recentIds, setRecentIds] = useState([]);
+  const [game, setGame] = useState(initialState || null);
+  const [completedRound, setCompletedRound] = useState(null);
+  const [lastRevealedRoundNumber, setLastRevealedRoundNumber] = useState(
+    initialState?.latest_completed_round?.round_number ?? null
+  );
+  const [answer, setAnswer] = useState(null);
+  const [message, setMessage] = useState("");
+  const [noAnswerOfferMessageRoundNumber, setNoAnswerOfferMessageRoundNumber] = useState(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const solo = Boolean(soloRound);
+  const isOnline = !solo && Boolean(onlineInfo);
+  const playerNumber = onlineInfo?.playerNumber || 1;
+  const imageUrl = solo ? soloRound?.image_url : game?.current_round?.image_url;
+  const currentRoundNumber = getPhotoGameRoundNumber(game);
+  const roundKey = solo ? soloRound?.round_token : currentRoundNumber;
+  const revealNextRoundStartsAt = completedRound?.next_round_starts_at
+    || game?.latest_completed_round?.next_round_starts_at
+    || null;
+  const revealCountdownRemaining = getRevealCountdownRemaining(revealNextRoundStartsAt, nowMs);
+  const roundLocked = revealCountdownRemaining > 0;
+  const sharedWrongGuesses = solo ? [] : game?.current_round?.wrong_guesses || [];
+  const offerVersion = game?.pending_no_answer_offer_version;
+  const canRespondNoAnswer = (
+    !solo
+    && game?.pending_no_answer_to === playerNumber
+    && Number.isInteger(offerVersion)
+    && offerVersion > 0
+  );
+
+  useEffect(() => {
+    if (!revealNextRoundStartsAt) return undefined;
+    const timer = setInterval(() => setNowMs(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, [revealNextRoundStartsAt]);
+
+  useEffect(() => {
+    if (!completedRound) return undefined;
+    const timer = setTimeout(() => setCompletedRound(null), 3000);
+    return () => clearTimeout(timer);
+  }, [completedRound]);
+
+  /* eslint-disable react-hooks/set-state-in-effect --
+     These mirror CareerQuizBoard's proven state-sync effects: they reconcile
+     React state with inbound realtime/poll game updates. The React Compiler
+     lint rule bails on that larger component but analyzes this one. */
+  useEffect(() => {
+    const latestRound = game?.latest_completed_round;
+    if (!shouldRevealCompletedRound(latestRound, lastRevealedRoundNumber)) return;
+    setCompletedRound(latestRound);
+    setLastRevealedRoundNumber(latestRound.round_number);
+  }, [game?.latest_completed_round, lastRevealedRoundNumber]);
+
+  useEffect(() => {
+    if (message !== NO_ANSWER_OFFER_SENT_MESSAGE || solo) return;
+
+    const offerStillPendingFromPlayer = (
+      game?.pending_no_answer_from === playerNumber
+      && game?.pending_no_answer_to != null
+    );
+    const activeRoundNumber = getPhotoGameRoundNumber(game);
+    const latestCompletedRoundNumber = game?.latest_completed_round?.round_number ?? null;
+    const offerRoundChanged = (
+      noAnswerOfferMessageRoundNumber != null
+      && activeRoundNumber != null
+      && activeRoundNumber !== noAnswerOfferMessageRoundNumber
+    );
+    const offerRoundCompleted = (
+      noAnswerOfferMessageRoundNumber != null
+      && latestCompletedRoundNumber != null
+      && latestCompletedRoundNumber >= noAnswerOfferMessageRoundNumber
+    );
+    if (!offerStillPendingFromPlayer || offerRoundChanged || offerRoundCompleted) {
+      setMessage("");
+      setNoAnswerOfferMessageRoundNumber(null);
+    }
+  }, [game, message, noAnswerOfferMessageRoundNumber, playerNumber, solo]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  function handleRealtimeState(result) {
+    if (!result?.state) return;
+    setGame(result.state);
+
+    if (!result.result) {
+      setMessage((currentMessage) => (
+        currentMessage === NO_ANSWER_OFFER_SENT_MESSAGE ? currentMessage : ""
+      ));
+      return;
+    }
+    if (result.result === "no_answer_offered") {
+      if (result.state.pending_no_answer_from === playerNumber) {
+        setNoAnswerOfferMessageRoundNumber(
+          getPhotoGameRoundNumber(result.state) ?? currentRoundNumber
+        );
+        setMessage(NO_ANSWER_OFFER_SENT_MESSAGE);
+      }
+      return;
+    }
+
+    if (result.result?.startsWith("no_answer_")) {
+      setNoAnswerOfferMessageRoundNumber(null);
+      setMessage("");
+      return;
+    }
+
+    const nextMessage = getPhotoMultiplayerGuessMessage(result.result);
+    if (nextMessage) {
+      if (shouldShowPhotoMultiplayerFeedback(result, playerNumber)) {
+        setNoAnswerOfferMessageRoundNumber(null);
+        setMessage(nextMessage);
+      } else {
+        setMessage((currentMessage) => (
+          currentMessage === NO_ANSWER_OFFER_SENT_MESSAGE ? currentMessage : ""
+        ));
+      }
+    }
+  }
+
+  async function handleRealtimeError(errorMessage) {
+    if (isPhotoActionSyncConflict({ message: errorMessage })) {
+      await resyncPhotoGame();
+      return;
+    }
+    setMessage(errorMessage || PHOTO_FEEDBACK_MESSAGES.realtimeUnavailable);
+  }
+
+  const realtime = useOnlineGameRealtime({
+    enabled: isOnline,
+    gameId: game?.id,
+    gameStatus: game?.status,
+    playerNumber,
+    connect: connectPhotoRealtime,
+    fetchState: getPhotoGame,
+    onState: handleRealtimeState,
+    onError: handleRealtimeError,
+  });
+
+  async function nextSoloRound() {
+    const next = await createPhotoSoloRound(recentIds);
+    setSoloRound(next);
+    setAnswer(null);
+    setMessage("");
+    setNoAnswerOfferMessageRoundNumber(null);
+  }
+
+  async function handleGuess(player) {
+    setMessage("");
+    setNoAnswerOfferMessageRoundNumber(null);
+    if (solo) {
+      const result = await submitPhotoSoloGuess(soloRound.round_token, player.id);
+      if (result.correct) {
+        setAnswer(result.answer);
+        setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+        setMessage(PHOTO_FEEDBACK_MESSAGES.correct);
+      } else {
+        setMessage(PHOTO_FEEDBACK_MESSAGES.soloWrong);
+      }
+      return;
+    }
+    try {
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.GUESS, {
+          player_id: player.id,
+          round_number: currentRoundNumber,
+        })) {
+          setMessage(PHOTO_FEEDBACK_MESSAGES.realtimeUnavailable);
+        }
+        return;
+      }
+
+      const result = await submitPhotoGuess(game.id, playerNumber, player.id, currentRoundNumber);
+      handleRealtimeState(result);
+    } catch (error) {
+      if (isPhotoActionSyncConflict(error)) {
+        await resyncPhotoGame();
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async function revealSolo() {
+    const result = await revealPhotoSoloAnswer(soloRound.round_token);
+    setAnswer(result.answer);
+    setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+  }
+
+  async function offerNoAnswer() {
+    try {
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.OFFER_NO_ANSWER, {
+          round_number: currentRoundNumber,
+        })) {
+          setMessage(PHOTO_FEEDBACK_MESSAGES.realtimeUnavailable);
+        }
+        return;
+      }
+
+      const result = await offerPhotoNoAnswer(game.id, playerNumber, currentRoundNumber);
+      handleRealtimeState(result);
+    } catch (error) {
+      if (isPhotoActionSyncConflict(error)) {
+        await resyncPhotoGame();
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async function respondNoAnswer(accept) {
+    // Re-read the offer version at click time; a stale/missing version means the
+    // offer was already resolved elsewhere, so silently resync instead of POSTing
+    // an int the backend would reject.
+    const version = game?.pending_no_answer_offer_version;
+    if (!Number.isInteger(version) || version <= 0) {
+      await resyncPhotoGame();
+      return;
+    }
+    try {
+      if (isOnline) {
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.RESPOND_NO_ANSWER, {
+          accept,
+          round_number: currentRoundNumber,
+          no_answer_offer_version: version,
+        })) {
+          setMessage(PHOTO_FEEDBACK_MESSAGES.realtimeUnavailable);
+        }
+        return;
+      }
+
+      const result = await respondPhotoNoAnswer(
+        game.id,
+        playerNumber,
+        accept,
+        currentRoundNumber,
+        version
+      );
+      handleRealtimeState(result);
+    } catch (error) {
+      if (isPhotoActionSyncConflict(error)) {
+        await resyncPhotoGame();
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async function resyncPhotoGame() {
+    setMessage("");
+    setNoAnswerOfferMessageRoundNumber(null);
+    if (!game?.id) return;
+    try {
+      setGame(await getPhotoGame(game.id));
+    } catch {
+      // Regular polling will retry transient refresh failures.
+    }
+  }
+
+  if (game?.status === "waiting_for_opponent") {
+    return <WaitingLobby joinCode={game.join_code} onCancel={onNewGame} />;
+  }
+
+  if (game?.status === "finished") {
+    return (
+      <Shell onHome={onHome}>
+        <div className="text-center">
+          <CompletedRoundReveal
+            round={completedRound}
+            countdownRemaining={revealCountdownRemaining}
+          />
+          <div className="text-5xl mb-3">🏆</div>
+          <h1 className="font-display text-4xl text-elq-dark mb-3">
+            {(game.winner_player === 1 ? game.player1_name : game.player2_name) || "Player"} wins!
+          </h1>
+          <p className="text-elq-muted mb-6">{game.player1_score} - {game.player2_score}</p>
+          <button onClick={onNewGame} className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl">
+            Play Again
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell onHome={onHome}>
+      <div className="w-full max-w-5xl">
+        <div className={`flex items-start justify-between gap-4 ${solo ? "mb-6" : "mb-4"}`}>
+          <div>
+            <h1 className="font-display text-4xl text-elq-dark">PHOTO QUIZ</h1>
+            <p className="text-sm text-elq-muted">Name the EuroLeague player in the photo.</p>
+          </div>
+        </div>
+
+        {!solo && (
+          <PhotoMultiplayerScoreboard
+            game={game}
+            playerNumber={playerNumber}
+            roundNumber={currentRoundNumber}
+          />
+        )}
+
+        <CompletedRoundReveal
+          round={completedRound}
+          countdownRemaining={revealCountdownRemaining}
+        />
+
+        <div className="grid lg:grid-cols-2 gap-6 items-start">
+          <div>
+            <PhotoClue key={`${roundKey ?? "none"}|${imageUrl ?? "none"}`} imageUrl={imageUrl} />
+          </div>
+
+          <div>
+            <PhotoGuessBox onGuess={handleGuess} disabled={Boolean(answer) || roundLocked} />
+
+            <PhotoFeedbackMessage message={message} />
+
+            <SharedWrongGuesses
+              guesses={sharedWrongGuesses}
+              player1Name={game?.player1_name}
+              player2Name={game?.player2_name}
+            />
+
+            {answer ? (
+              <div className="mt-6 rounded-2xl border border-elq-border bg-white p-5">
+                <div className="flex items-center gap-4 mb-4">
+                  <AnswerPlayerImage player={answer} />
+                  <div>
+                    <h2 className="font-display text-3xl text-elq-dark">{answer.name}</h2>
+                    <p className="text-sm text-elq-muted">
+                      {[answer.position, answer.nationality].filter(Boolean).join(" · ")}
+                    </p>
+                  </div>
+                </div>
+                <button onClick={nextSoloRound} className="px-6 py-3 rounded-xl bg-elq-orange text-white font-bold">
+                  Next photo
+                </button>
+              </div>
+            ) : (
+              <div className="mt-6 flex flex-wrap gap-3">
+                {solo && (
+                  <button onClick={revealSolo} className="px-5 py-2 rounded-xl border border-elq-border text-elq-text">
+                    Reveal answer
+                  </button>
+                )}
+                {!solo && canRespondNoAnswer && (
+                  <>
+                    <button
+                      onClick={() => respondNoAnswer(true)}
+                      disabled={roundLocked}
+                      className="px-5 py-2 rounded-xl bg-elq-orange text-white font-bold disabled:opacity-50"
+                    >
+                      Accept no answer
+                    </button>
+                    <button
+                      onClick={() => respondNoAnswer(false)}
+                      disabled={roundLocked}
+                      className="px-5 py-2 rounded-xl border border-elq-border disabled:opacity-50"
+                    >
+                      Decline
+                    </button>
+                  </>
+                )}
+                {!solo && !game?.pending_no_answer_to && (
+                  <button
+                    onClick={offerNoAnswer}
+                    disabled={roundLocked}
+                    className="px-5 py-2 rounded-xl border border-elq-border text-elq-text disabled:opacity-50"
+                  >
+                    Nobody knows
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+function getPhotoMultiplayerGuessMessage(result) {
+  if (result === "incorrect") return PHOTO_FEEDBACK_MESSAGES.multiplayerWrong;
+  if (PHOTO_MULTIPLAYER_SUCCESS_RESULTS.has(result)) return PHOTO_FEEDBACK_MESSAGES.correct;
+  return "";
+}
+
+function shouldShowPhotoMultiplayerFeedback(message, playerNumber) {
+  if (message.result === "incorrect") {
+    const wrongGuesses = message.state?.current_round?.wrong_guesses;
+    if (!Array.isArray(wrongGuesses) || wrongGuesses.length === 0) return true;
+    return wrongGuesses[wrongGuesses.length - 1]?.player_number === playerNumber;
+  }
+
+  if (PHOTO_MULTIPLAYER_SUCCESS_RESULTS.has(message.result)) {
+    const winnerPlayer =
+      message.completedRound?.winner_player
+      ?? message.state?.latest_completed_round?.winner_player;
+    return winnerPlayer === playerNumber;
+  }
+
+  return true;
+}
+
+function PhotoFeedbackMessage({ message }) {
+  if (!message) return null;
+
+  const tone = PHOTO_FEEDBACK_TONES[message] || "info";
+  const styles = PHOTO_FEEDBACK_STYLES[tone];
+
+  return (
+    <div
+      role="status"
+      data-testid="photo-feedback-message"
+      className={`mt-4 flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold shadow-sm animate-slide-down ${styles.container}`}
+    >
+      <span className={`h-2 w-2 rounded-full ${styles.dot}`} />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function PhotoMultiplayerScoreboard({ game, playerNumber, roundNumber }) {
+  const player1Name = game?.player1_name || "Player 1";
+  const player2Name = game?.player2_name || "Player 2";
+  const targetWins = game?.target_wins ?? "-";
+  const youName = game?.[`player${playerNumber}_name`] || `Player ${playerNumber}`;
+  const youClasses = playerNumber === 2
+    ? {
+      pill: "border-elq-player2/25 bg-elq-player2-bg",
+      dot: "bg-elq-player2",
+    }
+    : {
+      pill: "border-elq-player1/25 bg-elq-player1-bg",
+      dot: "bg-elq-player1",
+    };
+
+  return (
+    <section
+      role="group"
+      aria-label="Photo Quiz multiplayer scoreboard"
+      className="mb-6 overflow-hidden rounded-3xl border border-elq-border bg-white shadow-sm animate-fade-in-up"
+    >
+      <div className="h-1.5 bg-gradient-to-r from-elq-player1 via-elq-orange to-elq-player2" />
+      <div className="p-4 sm:p-5">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="font-display text-2xl tracking-wide text-elq-dark">ONLINE RACE</div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold uppercase tracking-[0.16em] text-elq-dark">
+              <span className="rounded-full bg-elq-bg px-2 py-0.5">
+                {roundNumber != null ? `Round ${roundNumber}` : "Round -"}
+              </span>
+              <span className="rounded-full border border-elq-orange/30 bg-elq-orange/10 px-2 py-0.5">
+                First to {targetWins}
+              </span>
+            </div>
+          </div>
+          <div
+            className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold text-elq-dark ${youClasses.pill}`}
+          >
+            <span className={`h-2 w-2 rounded-full ${youClasses.dot}`} />
+            <span>You are {youName}</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-[1fr_auto_1fr] sm:gap-4">
+          <PhotoPlayerScore
+            label="Player 1"
+            name={player1Name}
+            score={game?.player1_score ?? 0}
+            tone="player1"
+          />
+          <div className="flex items-center justify-center">
+            <div className="rounded-full border border-elq-border bg-elq-bg px-3 py-1 font-display text-xl tracking-wide text-elq-dark">
+              VS
+            </div>
+          </div>
+          <PhotoPlayerScore
+            label="Player 2"
+            name={player2Name}
+            score={game?.player2_score ?? 0}
+            tone="player2"
+            align="right"
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PhotoPlayerScore({ label, name, score, tone, align = "left" }) {
+  const toneClasses = tone === "player2"
+    ? {
+      bar: "right-0 bg-elq-player2",
+      panel: "border-elq-player2/25 bg-elq-player2-bg/70",
+      text: "text-elq-player2",
+    }
+    : {
+      bar: "left-0 bg-elq-player1",
+      panel: "border-elq-player1/25 bg-elq-player1-bg/70",
+      text: "text-elq-player1",
+    };
+
+  return (
+    <div
+      aria-label={`${name} score ${score}`}
+      className={`relative overflow-hidden rounded-2xl border p-4 ${toneClasses.panel}`}
+    >
+      <div className={`absolute inset-y-0 w-1.5 ${toneClasses.bar}`} />
+      <div className={`flex items-end justify-between gap-4 ${align === "right" ? "sm:flex-row-reverse sm:text-right" : ""}`}>
+        <div className="min-w-0">
+          <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-elq-dark">
+            {label}
+          </div>
+          <div className="mt-1 truncate text-base font-bold text-elq-dark sm:text-lg">{name}</div>
+        </div>
+        <div className={`font-display text-5xl font-bold leading-none sm:text-6xl ${toneClasses.text}`}>
+          {score}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SharedWrongGuesses({ guesses, player1Name, player2Name }) {
+  if (!guesses.length) return null;
+
+  return (
+    <div className="mt-4 rounded-2xl border border-elq-border bg-white p-3" aria-label="Shared wrong guesses">
+      <div className="mb-2 text-xs font-bold uppercase tracking-wide text-elq-muted">
+        Shared wrong guesses
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {guesses.map((guess, index) => {
+          const playerLabel = guess.player_number === 1
+            ? player1Name || "Player 1"
+            : player2Name || "Player 2";
+          const classes = guess.player_number === 1
+            ? "border-elq-player1/20 bg-elq-player1-bg text-elq-player1"
+            : "border-elq-player2/20 bg-elq-player2-bg text-elq-player2";
+
+          return (
+            <div
+              key={`${guess.player_number}-${guess.player?.id ?? index}`}
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${classes}`}
+            >
+              <span>{playerLabel}</span>
+              <span className="text-elq-muted">guessed</span>
+              <span>{guess.player?.name}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CompletedRoundReveal({ round, countdownRemaining = 0 }) {
+  if (!round) return null;
+  return (
+    <div className="mb-5 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 flex items-center gap-4">
+      <AnswerPlayerImage player={round.answer} />
+      <div>
+        <strong>{round.winner_player ? `Player ${round.winner_player} wins the round` : "No answer"}</strong>
+        <div>Answer: {round.answer?.name}</div>
+        {round.next_round_starts_at && (
+          <div className="text-sm font-semibold">
+            {countdownRemaining > 0
+              ? `Next round unlocks in ${countdownRemaining}`
+              : "Next round unlocked"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AnswerPlayerImage({ player }) {
+  if (!player?.image_url) return null;
+  return (
+    <img
+      src={player.image_url}
+      alt={player.name || ""}
+      className="w-20 h-20 rounded-full object-cover object-top border border-elq-border shrink-0"
+      onError={(e) => { e.target.style.display = "none"; }}
+    />
+  );
+}
+
+function PhotoClue({ imageUrl }) {
+  // The parent remounts this component (via `key`) whenever the clue identity
+  // changes, so the broken-image state resets per round without an effect.
+  const [errored, setErrored] = useState(false);
+
+  return (
+    <div className="bg-white rounded-3xl border border-elq-border shadow-sm p-5 mb-5">
+      <div
+        className="relative mx-auto flex w-full max-w-sm items-center justify-center overflow-hidden rounded-2xl bg-elq-bg"
+        style={{ aspectRatio: "3 / 4" }}
+      >
+        {!imageUrl ? (
+          <PhotoCluePlaceholder testId="photo-clue-loading" label="Loading photo…" />
+        ) : errored ? (
+          <PhotoCluePlaceholder testId="photo-clue-fallback" label="Photo unavailable" />
+        ) : (
+          <img
+            data-testid="photo-clue-image"
+            src={imageUrl}
+            alt="Mystery player"
+            className="h-full w-full object-cover object-top"
+            onError={() => setErrored(true)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PhotoCluePlaceholder({ label, testId }) {
+  return (
+    <div
+      data-testid={testId}
+      className="flex flex-col items-center justify-center gap-3 p-6 text-center text-elq-muted"
+    >
+      <svg className="w-20 h-20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      </svg>
+      <span className="text-sm font-semibold">{label}</span>
+    </div>
+  );
+}
+
+function getPhotoGameRoundNumber(game) {
+  return game?.current_round?.round_number ?? game?.round_number ?? null;
+}
+
+function isPhotoActionSyncConflict(error) {
+  const candidates = [
+    error?.message,
+    error?.detail,
+    error?.payload?.message,
+    error?.payload?.code,
+  ];
+  if (candidates.some((code) => code === "round_locked" || code === "round_stale")) {
+    return true;
+  }
+  // A stale/duplicate no-answer response (offer version mismatch) self-heals by
+  // resyncing rather than surfacing the backend's conflict text to the player.
+  return candidates.some(
+    (code) => typeof code === "string"
+      && code.toLowerCase().includes("no answer offer is not pending")
+  );
+}
+
+function PhotoGuessBox({ onGuess, disabled }) {
+  const [query, setQuery] = useState("");
+  const [players, setPlayers] = useState([]);
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (!query || disabled) {
+        setPlayers([]);
+        return;
+      }
+      try {
+        const result = await autocompletePhotoPlayer(query);
+        setPlayers(result.players || []);
+      } catch {
+        setPlayers([]);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [query, disabled]);
+
+  function selectPlayer(player) {
+    onGuess(player);
+    setQuery("");
+    setPlayers([]);
+  }
+
+  function handleKeyDown(event) {
+    if (disabled) return;
+    if (event.key === "Enter" && players.length === 1) {
+      selectPlayer(players[0]);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-elq-border p-4">
+      <input
+        value={query}
+        disabled={disabled}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Type a player name..."
+        className="w-full px-4 py-3 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:outline-none"
+      />
+      {players.length > 0 && (
+        <div className="mt-2 rounded-xl border border-elq-border overflow-hidden">
+          {players.map((player) => (
+            <button
+              key={player.id}
+              onClick={() => selectPlayer(player)}
+              className="block w-full text-left px-4 py-2 hover:bg-elq-orange/5"
+            >
+              {player.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Shell({ children, onHome }) {
+  return (
+    <div className="min-h-screen flex flex-col">
+      <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
+      <div className="p-4">
+        <button onClick={onHome} className="text-sm text-elq-muted hover:text-elq-orange">
+          ← Home
+        </button>
+      </div>
+      <div className="flex-1 flex items-center justify-center p-4 pt-0">
+        {children}
+      </div>
+    </div>
+  );
+}

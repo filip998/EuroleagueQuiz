@@ -30,7 +30,7 @@ Then open `http://localhost:5173` to play.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo and multiplayer.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice and 2-player race modes.
-- **Photo Quiz** — Guess the player from a headshot. The backend supports Solo rounds and 2-player online friend races from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
+- **Photo Quiz** — Guess the player from a headshot. Solo practice and 2-player online friend races, drawn from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
 
 ## Backend
 
@@ -179,9 +179,9 @@ Every game's pre-game screen is built from three shared building blocks in `fron
   the code prefilled in Online → Join, so the invitee only adds a name and joins. The
   link helpers live in `frontend/src/inviteLink.js` (`buildInviteUrl` / `parseJoinCode`).
 
-`GameSetup.jsx` (TicTacToe), `RosterGuessSetup.jsx`, `CareerQuizSetup.jsx`, and
-`HigherLowerSetup.jsx` compose these, mapping the canonical UI keys (`solo` / `local` /
-`online`, sub `create` / `join`) onto their own backend modes.
+`GameSetup.jsx` (TicTacToe), `RosterGuessSetup.jsx`, `CareerQuizSetup.jsx`,
+`PhotoQuizSetup.jsx`, and `HigherLowerSetup.jsx` compose these, mapping the canonical UI
+keys (`solo` / `local` / `online`, sub `create` / `join`) onto their own backend modes.
 
 ### Guest Identity
 
