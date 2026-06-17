@@ -388,7 +388,8 @@ def _strip_refs(value: str) -> str:
 
 
 def _strip_file_prefix(value: str) -> str:
-    return re.sub(r"^\s*(?:file|image)\s*:\s*", "", value.strip(), flags=re.IGNORECASE)
+    decoded = unquote(value.strip())
+    return re.sub(r"^\s*(?:file|image)\s*:\s*", "", decoded, flags=re.IGNORECASE)
 
 
 def _looks_like_file_name(value: str) -> bool:

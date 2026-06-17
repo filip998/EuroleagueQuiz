@@ -83,6 +83,15 @@ def test_extract_infobox_image_file_uses_fallback_params_and_strips_prefixes():
     assert normalize_image_file("File:Another legend.webp|thumb|caption") == "Another legend.webp"
 
 
+def test_normalize_image_file_decodes_percent_encoded_titles():
+    assert (
+        normalize_image_file(
+            "Kaleb_Tarczewski_15_AX_Armani_Exchange_Olimpia_Milan_20180222_%282%29.jpg"
+        )
+        == "Kaleb_Tarczewski_15_AX_Armani_Exchange_Olimpia_Milan_20180222_(2).jpg"
+    )
+
+
 def test_imageinfo_resolver_accepts_shared_commons_files_marked_missing_locally():
     assert _image_url_from_pages(
         [
