@@ -76,13 +76,13 @@ describe("GameSetup", () => {
     render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
 
     // Online -> Quick Match is the default landing: the pool cards are the first
-    // content, with Standard highlighted as the default.
+    // content, with Standard flagged as the recommended preset (not pre-selected).
     expect(screen.getByText("Quick Match")).toBeInTheDocument();
     expect(screen.getByText("Play a Friend")).toBeInTheDocument();
     expect(screen.getByTestId("quick-pick-blitz")).toBeInTheDocument();
     expect(screen.getByTestId("quick-pick-standard")).toBeInTheDocument();
     expect(screen.getByTestId("quick-pick-long")).toBeInTheDocument();
-    expect(screen.getByText("Default")).toBeInTheDocument();
+    expect(screen.getByText("Recommended")).toBeInTheDocument();
   });
 
   it("does not render a submit button in the one-click Quick Match landing", () => {
