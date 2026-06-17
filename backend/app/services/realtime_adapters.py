@@ -11,6 +11,7 @@ from app.game_actions import (
 )
 from app.schemas.realtime import RealtimeClientAction, RealtimeResult
 from app.services import career_quiz as career_service
+from app.services import photo_quiz as photo_service
 from app.services import roster_guess as roster_service
 from app.services import tictactoe as ttt_service
 from app.services.game_action_orchestration import (
@@ -23,6 +24,7 @@ from app.services.game_action_orchestration import (
 _TICTACTOE_ROUND_RESULTS = {"round_won", "round_drawn", "match_won", "board_complete"}
 _ROSTER_ROUND_RESULTS = {"round_won", "round_complete", "match_won", "board_complete"}
 _CAREER_ROUND_RESULTS = {"round_won", "match_won"}
+_PHOTO_ROUND_RESULTS = {"round_won", "match_won"}
 
 
 def _required_int(data: dict[str, Any], field: str) -> int:
@@ -574,6 +576,168 @@ class CareerQuizRealtimeAdapter:
             )
 
         raise AssertionError(f"Unhandled Career Quiz game action: {action}")
+
+    def handle_time_expired(
+        self,
+        db: Session,
+        game: Any,
+        *,
+        expected_player: int,
+        expected_round: int,
+    ) -> Any:
+        return GAME_ACTION_NOOP
+
+    def handle_player_forfeit(
+        self,
+        _db: Session,
+        _game: Any,
+        *,
+        forfeiting_player: int,
+        result: RealtimeResult,
+    ) -> Any:
+        return GAME_ACTION_NOOP
+
+
+class PhotoQuizRealtimeAdapter:
+    disconnect_forfeit_enabled = False
+    http_actions = {
+        GameActionName.CREATE.value,
+        GameActionName.JOIN.value,
+        GameActionName.GUESS.value,
+        GameActionName.OFFER_NO_ANSWER.value,
+        GameActionName.RESPOND_NO_ANSWER.value,
+    }
+    websocket_actions = {
+        RealtimeClientAction.GUESS.value,
+        RealtimeClientAction.OFFER_NO_ANSWER.value,
+        RealtimeClientAction.RESPOND_NO_ANSWER.value,
+    }
+    client_actions = websocket_actions
+
+    def get_game(self, db: Session, game_id: int) -> Any:
+        return photo_service.get_game_or_404(db, game_id)
+
+    def serialize_state(self, db: Session, game: Any) -> dict[str, Any]:
+        return photo_service.serialize_game_state(db, game)
+
+    def serialize_completed_round(
+        self, db: Session, game_id: int, round_number: int
+    ) -> dict[str, Any] | None:
+        return photo_service.serialize_completed_round(db, game_id, round_number)
+
+    def handle_client_action(
+        self,
+        db: Session,
+        game: Any,
+        *,
+        action: str,
+        data: dict[str, Any],
+        player: int,
+    ) -> RealtimeActionOutcome:
+        return self._handle_bound_action(db, game, action=action, data=data, player=player)
+
+    def handle_game_action(
+        self,
+        db: Session,
+        command: GameActionCommand,
+    ) -> RealtimeActionOutcome:
+        data = command.payload
+        if command.action == GameActionName.CREATE:
+            game = photo_service.create_game(
+                db,
+                target_wins=data.get("target_wins", 3),
+                wrong_guess_visibility=data.get("wrong_guess_visibility", "private"),
+                player1_name=data.get("player1_name"),
+                guest_id=data.get("guest_id"),
+            )
+            return RealtimeActionOutcome(game=game, broadcast=False)
+
+        if command.action == GameActionName.JOIN:
+            game = photo_service.join_game(
+                db,
+                _required_str(data, "join_code").upper(),
+                player_name=data.get("player_name"),
+                guest_id=data.get("guest_id"),
+            )
+            return RealtimeActionOutcome(game=game, broadcast=True)
+
+        game = self.get_game(db, _required_game_id(command.game_id))
+        return self._handle_bound_action(
+            db,
+            game,
+            action=command.action,
+            data=data,
+            player=command.player,
+        )
+
+    def _handle_bound_action(
+        self,
+        db: Session,
+        game: Any,
+        *,
+        action: str,
+        data: dict[str, Any],
+        player: int | None,
+    ) -> RealtimeActionOutcome:
+        if action == GameActionName.GUESS:
+            acting_player = _online_actor(game, player)
+            prev_round_number = game.round_number
+            result = photo_service.submit_guess(
+                db,
+                game=game,
+                player_id=_required_int(data, "player_id"),
+                acting_player=acting_player,
+                round_number=_required_int(data, "round_number"),
+            )
+            return RealtimeActionOutcome(
+                game=game,
+                result=result,
+                completed_round_number=(
+                    prev_round_number if result in _PHOTO_ROUND_RESULTS else None
+                ),
+                broadcast_to_player=(
+                    acting_player
+                    if result == RealtimeResult.INCORRECT.value
+                    and game.wrong_guess_visibility != "shared"
+                    else None
+                ),
+            )
+
+        if action == GameActionName.OFFER_NO_ANSWER:
+            acting_player = _online_actor(game, player)
+            photo_service.offer_no_answer(
+                db,
+                game=game,
+                acting_player=acting_player,
+                round_number=_required_int(data, "round_number"),
+            )
+            return RealtimeActionOutcome(
+                game=game,
+                result=RealtimeResult.NO_ANSWER_OFFERED,
+            )
+
+        if action == GameActionName.RESPOND_NO_ANSWER:
+            acting_player = _online_actor(game, player)
+            prev_round_number = game.round_number
+            result = photo_service.respond_no_answer(
+                db,
+                game=game,
+                acting_player=acting_player,
+                accept=_required_bool(data, "accept"),
+                round_number=_required_int(data, "round_number"),
+                no_answer_offer_version=_required_int(
+                    data, "no_answer_offer_version"
+                ),
+            )
+            return RealtimeActionOutcome(
+                game=game,
+                result=f"no_answer_{result}",
+                completed_round_number=(
+                    prev_round_number if result == "accepted" else None
+                ),
+            )
+
+        raise AssertionError(f"Unhandled Photo Quiz game action: {action}")
 
     def handle_time_expired(
         self,
