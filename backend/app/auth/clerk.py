@@ -15,11 +15,11 @@ from jwt.exceptions import PyJWKError
 from app.config import settings
 
 
-class ClerkAuthError(ValueError):
+class ClerkAuthConfigurationError(RuntimeError):
     pass
 
 
-class ClerkAuthConfigurationError(ClerkAuthError):
+class ClerkAuthError(ValueError):
     pass
 
 
@@ -68,6 +68,13 @@ class _CachedJWKS:
     last_unknown_kid_refresh_at: float
 
 
+@dataclass
+class _InFlightJWKSFetch:
+    event: threading.Event
+    result: _CachedJWKS | None = None
+    error: Exception | None = None
+
+
 class JWKSCache:
     def __init__(
         self,
@@ -82,6 +89,7 @@ class JWKSCache:
         self._refresh_cooldown_seconds = refresh_cooldown_seconds
         self._clock = clock
         self._cache: dict[str, _CachedJWKS] = {}
+        self._in_flight_fetches: dict[str, _InFlightJWKSFetch] = {}
         self._lock = threading.RLock()
 
     def get_key(self, jwks_url: str, kid: str) -> Mapping[str, Any]:
@@ -91,7 +99,7 @@ class JWKSCache:
             return key
 
         if not refreshed:
-            cached = self._refresh_for_unknown_kid(jwks_url)
+            cached = self._refresh_for_unknown_kid(jwks_url, kid)
             key = cached.keys_by_kid.get(kid)
             if key is not None:
                 return key
@@ -104,26 +112,27 @@ class JWKSCache:
             cached = self._cache.get(jwks_url)
             if cached is not None and now - cached.fetched_at < self._ttl_seconds:
                 return cached, False
-            return self._fetch_and_store(jwks_url, now=now), True
+        return self._fetch_and_store(jwks_url, now=now, minimum_fetched_at=now), True
 
-    def _refresh_for_unknown_kid(self, jwks_url: str) -> _CachedJWKS:
+    def _refresh_for_unknown_kid(self, jwks_url: str, kid: str) -> _CachedJWKS:
         now = self._clock()
         with self._lock:
             cached = self._cache.get(jwks_url)
-            if cached is None:
-                return self._fetch_and_store(jwks_url, now=now)
-            if now - cached.last_unknown_kid_refresh_at < self._refresh_cooldown_seconds:
+            if cached is not None and kid in cached.keys_by_kid:
                 return cached
-            self._cache[jwks_url] = _CachedJWKS(
-                keys_by_kid=cached.keys_by_kid,
-                fetched_at=cached.fetched_at,
-                last_unknown_kid_refresh_at=now,
-            )
-            return self._fetch_and_store(
-                jwks_url,
-                now=now,
-                last_unknown_kid_refresh_at=now,
-            )
+            if cached is not None:
+                if now - cached.last_unknown_kid_refresh_at < self._refresh_cooldown_seconds:
+                    return cached
+                self._cache[jwks_url] = _CachedJWKS(
+                    keys_by_kid=cached.keys_by_kid,
+                    fetched_at=cached.fetched_at,
+                    last_unknown_kid_refresh_at=now,
+                )
+        return self._fetch_and_store(
+            jwks_url,
+            now=now,
+            last_unknown_kid_refresh_at=now,
+        )
 
     def _fetch_and_store(
         self,
@@ -131,20 +140,52 @@ class JWKSCache:
         *,
         now: float,
         last_unknown_kid_refresh_at: float | None = None,
+        minimum_fetched_at: float | None = None,
     ) -> _CachedJWKS:
-        previous = self._cache.get(jwks_url)
-        jwks = self._fetcher(jwks_url)
-        cached = _CachedJWKS(
-            keys_by_kid=_keys_by_kid(jwks),
-            fetched_at=now,
-            last_unknown_kid_refresh_at=(
-                previous.last_unknown_kid_refresh_at
-                if last_unknown_kid_refresh_at is None and previous is not None
-                else last_unknown_kid_refresh_at or 0.0
-            ),
-        )
-        self._cache[jwks_url] = cached
-        return cached
+        with self._lock:
+            cached = self._cache.get(jwks_url)
+            if minimum_fetched_at is not None and cached is not None and cached.fetched_at >= minimum_fetched_at:
+                return cached
+            in_flight = self._in_flight_fetches.get(jwks_url)
+            if in_flight is None:
+                in_flight = _InFlightJWKSFetch(event=threading.Event())
+                self._in_flight_fetches[jwks_url] = in_flight
+                owns_fetch = True
+            else:
+                owns_fetch = False
+
+        if not owns_fetch:
+            in_flight.event.wait()
+            if in_flight.error is not None:
+                raise in_flight.error
+            if in_flight.result is None:
+                raise ClerkTokenError("Unable to fetch Clerk JWKS")
+            return in_flight.result
+
+        try:
+            jwks = self._fetcher(jwks_url)
+            with self._lock:
+                previous = self._cache.get(jwks_url)
+                cached = _CachedJWKS(
+                    keys_by_kid=_keys_by_kid(jwks),
+                    fetched_at=now,
+                    last_unknown_kid_refresh_at=(
+                        previous.last_unknown_kid_refresh_at
+                        if last_unknown_kid_refresh_at is None and previous is not None
+                        else last_unknown_kid_refresh_at or 0.0
+                    ),
+                )
+                self._cache[jwks_url] = cached
+                in_flight.result = cached
+                return cached
+        except Exception as exc:
+            with self._lock:
+                in_flight.error = exc
+            raise
+        finally:
+            with self._lock:
+                self._in_flight_fetches.pop(jwks_url, None)
+                in_flight.event.set()
 
 
 def _keys_by_kid(jwks: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
@@ -247,8 +288,6 @@ class ClerkJWTVerifier:
         if not self._authorized_parties:
             return
         azp = claims.get("azp")
-        if azp is None:
-            return
         if not isinstance(azp, str) or azp not in self._authorized_parties:
             raise ClerkTokenError("Invalid Clerk authorized party")
 

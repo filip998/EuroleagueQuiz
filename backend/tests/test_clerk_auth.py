@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import threading
 from typing import Any, Mapping
 
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -14,7 +16,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 import app.auth.dependencies as auth_dependencies
-from app.auth.clerk import ClerkJWTVerifier, ClerkTokenError, JWKSCache
+from app.auth.clerk import ClerkAuthConfigurationError, ClerkJWTVerifier, ClerkTokenError, JWKSCache
 from app.auth.users import get_or_create_user_for_claims
 from app.auth_database import Base, get_auth_db, sqlite_connect_args
 from app.main import app
@@ -91,8 +93,9 @@ def test_verifier_validates_authorized_party_when_present(signing_key):
     verifier = _verifier(signing_key.jwk, authorized_parties=("https://app.example.com",))
 
     verifier.verify(_make_token(signing_key, claims={"azp": "https://app.example.com"}))
-    verifier.verify(_make_token(signing_key))
 
+    with pytest.raises(ClerkTokenError):
+        verifier.verify(_make_token(signing_key))
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, claims={"azp": "https://evil.example.com"}))
 
@@ -151,6 +154,28 @@ def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
     assert fetches == [JWKS_URL, JWKS_URL]
 
 
+def test_jwks_cache_fetches_without_holding_lock(signing_key):
+    fetches: list[str] = []
+    fetch_started = threading.Event()
+    release_fetch = threading.Event()
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        fetches.append(url)
+        fetch_started.set()
+        assert release_fetch.wait(timeout=2.0)
+        return {"keys": [signing_key.jwk]}
+
+    cache = JWKSCache(fetcher=fetcher, ttl_seconds=300.0, refresh_cooldown_seconds=30.0)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(cache.get_key, JWKS_URL, signing_key.kid)
+        assert fetch_started.wait(timeout=2.0)
+        assert cache._lock.acquire(blocking=False)
+        cache._lock.release()
+        release_fetch.set()
+        assert future.result(timeout=2.0) == signing_key.jwk
+    assert fetches == [JWKS_URL]
+
+
 def test_get_current_user_401s_and_jit_provisions(monkeypatch, auth_session_factory, signing_key):
     verifier = _verifier(signing_key.jwk)
     monkeypatch.setattr(auth_dependencies, "get_clerk_jwt_verifier", lambda: verifier)
@@ -173,6 +198,19 @@ def test_get_current_user_401s_and_jit_provisions(monkeypatch, auth_session_fact
         assert user.clerk_user_id == "user_clerk_123"
         assert user.username.startswith("user_")
         assert user.email.endswith("@clerk.invalid")
+
+
+def test_auth_dependencies_do_not_swallow_configuration_errors(monkeypatch, auth_session_factory):
+    def raise_configuration_error():
+        raise ClerkAuthConfigurationError("missing Clerk config")
+
+    monkeypatch.setattr(auth_dependencies, "get_clerk_jwt_verifier", raise_configuration_error)
+
+    with auth_session_factory() as db:
+        with pytest.raises(ClerkAuthConfigurationError):
+            auth_dependencies.get_current_user(authorization="Bearer token", db=db)
+        with pytest.raises(ClerkAuthConfigurationError):
+            auth_dependencies.get_optional_user(authorization="Bearer token", db=db)
 
 
 def test_get_optional_user_returns_none_for_missing_and_invalid_tokens(
