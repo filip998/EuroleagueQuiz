@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import secrets
 import string
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, or_
@@ -15,6 +15,7 @@ from app.game_actions import (
     NotFoundGameActionError,
 )
 from app.models import PhotoQuizGame, PhotoQuizGuess, PhotoQuizRound, Player
+from app.services.race_rounds import normalize_utc, reveal_window_starts_at
 from app.services.solo_round_token import (
     SoloRoundTokenError,
     create_solo_round_token,
@@ -635,9 +636,7 @@ def _utc_isoformat(value: datetime | None) -> str | None:
 
 
 def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+    return normalize_utc(value)
 
 
 def _raise_if_current_round_locked(game: PhotoQuizGame) -> None:
@@ -661,11 +660,14 @@ def _active_next_round_lock_starts_at(
     previous_round = _previous_completed_round_for_current(game)
     if previous_round is None:
         return None
-    starts_at = _round_next_starts_at(previous_round)
+    starts_at = reveal_window_starts_at(
+        previous_round.completed_at,
+        reveal_seconds=PHOTO_REVEAL_COUNTDOWN_SECONDS,
+        now=now,
+    )
     if starts_at is None:
         return None
-    now_utc = _as_utc(now or datetime.now(timezone.utc))
-    return starts_at if now_utc < starts_at else None
+    return starts_at
 
 
 def _previous_completed_round_for_current(
@@ -681,14 +683,6 @@ def _previous_completed_round_for_current(
         ):
             return round_obj
     return None
-
-
-def _round_next_starts_at(round_obj: PhotoQuizRound) -> datetime | None:
-    if round_obj.completed_at is None:
-        return None
-    return _as_utc(round_obj.completed_at) + timedelta(
-        seconds=PHOTO_REVEAL_COUNTDOWN_SECONDS
-    )
 
 
 def _assert_active_game_round(

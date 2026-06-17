@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -21,6 +20,7 @@ from app.services.game_action_orchestration import (
     RealtimeActionOutcome,
 )
 from app.services.matchmaking_adapters import PhotoQuizMatchmakingAdapter
+from app.services.race_rounds import public_round_timer_delay_seconds_from_state
 from app.services.realtime import TurnTimerState
 
 
@@ -798,39 +798,19 @@ class PhotoQuizRealtimeAdapter:
         )
 
     def timer_state_from_state(self, game_state: dict[str, Any]) -> TurnTimerState | None:
-        if (
-            game_state.get("mode") != "online_friend"
-            or game_state.get("status") != "active"
-            or not game_state.get("is_public")
-        ):
-            return None
-        current_round = game_state.get("current_round")
-        if not isinstance(current_round, dict) or current_round.get("status") != "active":
-            return None
         round_seconds = self._round_seconds_for_preset(game_state.get("preset"))
         if round_seconds is None:
             return None
-        round_number = game_state.get("round_number")
-        if not isinstance(round_number, int) or isinstance(round_number, bool):
-            return None
-
-        delay = float(round_seconds)
-        next_round_starts_at = (
-            (game_state.get("latest_completed_round") or {}).get(
-                "next_round_starts_at"
-            )
-            if isinstance(game_state.get("latest_completed_round"), dict)
-            else None
+        timer_delay = public_round_timer_delay_seconds_from_state(
+            game_state,
+            round_seconds=round_seconds,
         )
-        starts_at = _parse_utc_datetime(next_round_starts_at)
-        if starts_at is not None:
-            now = datetime.now(timezone.utc)
-            if now < starts_at:
-                delay += max((starts_at - now).total_seconds(), 0.0)
+        if timer_delay is None:
+            return None
         return TurnTimerState(
-            seconds=delay,
+            seconds=timer_delay.seconds,
             current_player=0,
-            round_number=round_number,
+            round_number=timer_delay.round_number,
         )
 
     def _round_seconds_for_preset(self, preset: object) -> int | None:
@@ -850,15 +830,3 @@ class PhotoQuizRealtimeAdapter:
         result: RealtimeResult,
     ) -> Any:
         return GAME_ACTION_NOOP
-
-
-def _parse_utc_datetime(value: object) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
