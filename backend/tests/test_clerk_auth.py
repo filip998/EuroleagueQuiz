@@ -28,7 +28,7 @@ from app.auth.clerk import (
 from app.auth.users import get_or_create_user_for_claims
 from app.auth_database import Base, get_auth_db, sqlite_connect_args
 from app.main import app
-from app.models.user import User
+from app.models.user import User, UserGuestId
 
 ISSUER = "https://test-instance.clerk.accounts.dev"
 JWKS_URL = f"{ISSUER}/.well-known/jwks.json"
@@ -597,6 +597,102 @@ def test_auth_me_requires_token_and_returns_provisioned_user(
     assert body["username"].startswith("user_")
     assert body["email"].endswith("@clerk.invalid")
     assert "clerk_user_id" not in body
+
+
+def test_auth_link_guest_requires_token_and_links_guest_id(
+    monkeypatch,
+    auth_session_factory,
+    signing_key,
+):
+    verifier = _verifier(signing_key.jwk)
+    monkeypatch.setattr(auth_dependencies, "get_clerk_jwt_verifier", lambda: verifier)
+    previous_override = app.dependency_overrides.get(get_auth_db)
+
+    def override_get_auth_db():
+        db = auth_session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_auth_db] = override_get_auth_db
+    try:
+        client = TestClient(app)
+        missing = client.post("/auth/link-guest", json={"guest_id": "guest-123"})
+        valid = client.post(
+            "/auth/link-guest",
+            json={"guest_id": " guest-123 "},
+            headers={"Authorization": f"Bearer {_make_token(signing_key)}"},
+        )
+        relink = client.post(
+            "/auth/link-guest",
+            json={"guest_id": "guest-123"},
+            headers={"Authorization": f"Bearer {_make_token(signing_key)}"},
+        )
+        invalid = client.post(
+            "/auth/link-guest",
+            json={"guest_id": "   "},
+            headers={"Authorization": f"Bearer {_make_token(signing_key)}"},
+        )
+        with auth_session_factory() as db:
+            stored = db.execute(select(UserGuestId)).scalar_one()
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(get_auth_db, None)
+        else:
+            app.dependency_overrides[get_auth_db] = previous_override
+
+    assert missing.status_code == 401
+    assert valid.status_code == 200
+    assert valid.json() == {"guest_id": "guest-123", "status": "linked"}
+    assert relink.status_code == 200
+    assert relink.json() == {"guest_id": "guest-123", "status": "already_linked"}
+    assert invalid.status_code == 422
+    assert stored.guest_id == "guest-123"
+
+
+def test_auth_link_guest_enforces_first_wins_conflict(
+    monkeypatch,
+    auth_session_factory,
+    signing_key,
+):
+    verifier = _verifier(signing_key.jwk)
+    monkeypatch.setattr(auth_dependencies, "get_clerk_jwt_verifier", lambda: verifier)
+    previous_override = app.dependency_overrides.get(get_auth_db)
+
+    def override_get_auth_db():
+        db = auth_session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_auth_db] = override_get_auth_db
+    try:
+        client = TestClient(app)
+        winner = client.post(
+            "/auth/link-guest",
+            json={"guest_id": "guest-123"},
+            headers={"Authorization": f"Bearer {_make_token(signing_key, subject='user_winner')}"},
+        )
+        loser = client.post(
+            "/auth/link-guest",
+            json={"guest_id": "guest-123"},
+            headers={"Authorization": f"Bearer {_make_token(signing_key, subject='user_loser')}"},
+        )
+        with auth_session_factory() as db:
+            stored = db.execute(select(UserGuestId)).scalar_one()
+            owner = db.get(User, stored.user_id)
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(get_auth_db, None)
+        else:
+            app.dependency_overrides[get_auth_db] = previous_override
+
+    assert winner.status_code == 200
+    assert loser.status_code == 409
+    assert loser.json() == {"detail": "guest_id is already linked to another user"}
+    assert owner.clerk_user_id == "user_winner"
 
 
 def _verifier(

@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, String
+from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy.orm import relationship
 from sqlalchemy.types import TypeDecorator
 
 from app.auth_database import Base
@@ -42,3 +43,25 @@ class User(Base):
     role = Column(String(50), nullable=False, default="user", server_default="user")
     created_at = Column(UTCDateTime(), nullable=False, default=utc_now)
     updated_at = Column(UTCDateTime(), nullable=False, default=utc_now, onupdate=utc_now)
+    guest_ids = relationship(
+        "UserGuestId",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class UserGuestId(Base):
+    __tablename__ = "user_guest_ids"
+    __table_args__ = (
+        UniqueConstraint("guest_id", name="uq_user_guest_ids_guest_id"),
+    )
+
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    guest_id = Column(String(64), primary_key=True)
+    linked_at = Column(UTCDateTime(), nullable=False, default=utc_now)
+
+    user = relationship("User", back_populates="guest_ids")
