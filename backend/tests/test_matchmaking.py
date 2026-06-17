@@ -123,7 +123,7 @@ def test_tictactoe_matchmaking_ignores_friend_games(session_factory):
         assert friend_game.is_public is False
 
 
-def test_tictactoe_matchmaking_avoids_same_guest_and_keeps_oldest(session_factory):
+def test_tictactoe_matchmaking_is_idempotent_for_same_guest(session_factory):
     adapter = TicTacToeMatchmakingAdapter()
     with session_factory() as db:
         first = asyncio.run(
@@ -150,7 +150,7 @@ def test_tictactoe_matchmaking_avoids_same_guest_and_keeps_oldest(session_factor
         )
         assert first.status == MatchmakingStatus.SEARCHING
         assert second.status == MatchmakingStatus.SEARCHING
-        assert second.game.id != first.game.id
+        assert second.game.id == first.game.id
 
         third = asyncio.run(
             find_or_create_match(
@@ -174,34 +174,20 @@ def test_tictactoe_matchmaking_avoids_same_guest_and_keeps_oldest(session_factor
             )
             .all()
         )
-        assert [game.id for game in remaining_waiting] == [second.game.id]
+        assert remaining_waiting == []
 
 
-def test_identified_guest_can_match_anonymous_waiting_game(session_factory):
+def test_find_or_create_requires_guest_id(session_factory):
     adapter = TicTacToeMatchmakingAdapter()
     with session_factory() as db:
-        anonymous = asyncio.run(
-            find_or_create_match(
-                db,
-                adapter,
-                MatchmakingRequest(preset="standard", player_name="Anonymous"),
+        with pytest.raises(InvalidGameActionError, match="guest_id is required"):
+            asyncio.run(
+                find_or_create_match(
+                    db,
+                    adapter,
+                    MatchmakingRequest(preset="standard", player_name="Anonymous"),
+                )
             )
-        )
-        identified = asyncio.run(
-            find_or_create_match(
-                db,
-                adapter,
-                MatchmakingRequest(
-                    preset="standard",
-                    player_name="Identified",
-                    guest_id="identified-guest",
-                ),
-            )
-        )
-
-        assert anonymous.status == MatchmakingStatus.SEARCHING
-        assert identified.status == MatchmakingStatus.MATCHED
-        assert identified.game.id == anonymous.game.id
 
 
 def test_tictactoe_matchmaking_randomizes_first_move(session_factory, monkeypatch):
@@ -322,6 +308,11 @@ def test_cancel_search_requires_guest_id(session_factory):
 def test_two_simultaneous_requests_to_empty_pool_create_exactly_one_match(session_factory):
     adapter = TicTacToeMatchmakingAdapter()
 
+    async def yield_after_find():
+        await asyncio.sleep(0)
+
+    matchmaking._after_find_hook = yield_after_find
+
     async def request(player_name: str, guest_id: str):
         db = session_factory()
         try:
@@ -338,10 +329,13 @@ def test_two_simultaneous_requests_to_empty_pool_create_exactly_one_match(sessio
             db.close()
 
     async def run_requests():
-        return await asyncio.gather(
-            request("Player A", "guest-a"),
-            request("Player B", "guest-b"),
-        )
+        try:
+            return await asyncio.gather(
+                request("Player A", "guest-a"),
+                request("Player B", "guest-b"),
+            )
+        finally:
+            matchmaking._after_find_hook = None
 
     first, second = asyncio.run(run_requests())
 

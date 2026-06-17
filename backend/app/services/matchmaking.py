@@ -13,6 +13,7 @@ import threading
 import weakref
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from collections.abc import Awaitable, Callable
 from typing import Any, Mapping, Protocol
 
 from sqlalchemy.orm import Session
@@ -57,6 +58,12 @@ class MatchmakingResult:
 class MatchmakingAdapter(Protocol):
     game_kind: str
 
+    def find_existing_search(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> Any | None: ...
+
     def find_waiting_game(
         self,
         db: Session,
@@ -92,6 +99,7 @@ _pool_locks_by_loop: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop,
     dict[PoolKey, asyncio.Lock],
 ] = weakref.WeakKeyDictionary()
+_after_find_hook: Callable[[], Awaitable[None]] | None = None
 
 
 def clean_guest_id(guest_id: str | None) -> str | None:
@@ -125,8 +133,28 @@ async def find_or_create_match(
     async with _pool_lock(game_kind, normalized.preset):
         await asyncio.sleep(0)
 
-        def action() -> MatchmakingResult:
+        try:
+            db.expire_all()
+            existing_search = adapter.find_existing_search(db, normalized)
+            if existing_search is not None:
+                return run_game_action(
+                    db,
+                    lambda: MatchmakingResult(
+                        status=MatchmakingStatus.SEARCHING,
+                        game_kind=game_kind,
+                        preset=normalized.preset,
+                        game=existing_search,
+                        player=1,
+                    ),
+                )
+
             waiting_game = adapter.find_waiting_game(db, normalized)
+            await _run_after_find_hook()
+        except Exception:
+            db.rollback()
+            raise
+
+        def action() -> MatchmakingResult:
             if waiting_game is not None:
                 starting_player = random_starting_player()
                 game = adapter.join_waiting_game(
@@ -181,10 +209,13 @@ async def cancel_search(
 
 
 def _normalize_request(request: MatchmakingRequest) -> MatchmakingRequest:
+    guest_id = clean_guest_id(request.guest_id)
+    if guest_id is None:
+        raise InvalidGameActionError("guest_id is required for quick match")
     return replace(
         request,
         preset=clean_preset(request.preset),
-        guest_id=clean_guest_id(request.guest_id),
+        guest_id=guest_id,
     )
 
 
@@ -220,3 +251,8 @@ def _pool_lock(game_kind: str, preset: str) -> asyncio.Lock:
             lock = asyncio.Lock()
             locks[key] = lock
         return lock
+
+
+async def _run_after_find_hook() -> None:
+    if _after_find_hook is not None:
+        await _after_find_hook()

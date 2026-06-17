@@ -44,6 +44,28 @@ class TicTacToeMatchmakingAdapter:
         source = DEFAULT_TICTACTOE_MATCHMAKING_PRESETS if presets is None else presets
         self._presets = {clean_preset(key): value for key, value in source.items()}
 
+    def find_existing_search(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> QuizTicTacToeGame | None:
+        self._preset_config(request.preset)
+        return (
+            db.query(QuizTicTacToeGame)
+            .filter(
+                QuizTicTacToeGame.mode == "online_friend",
+                QuizTicTacToeGame.status == "waiting_for_opponent",
+                QuizTicTacToeGame.is_public.is_(True),
+                QuizTicTacToeGame.preset == request.preset,
+                QuizTicTacToeGame.player1_guest_id == request.guest_id,
+            )
+            .order_by(
+                QuizTicTacToeGame.created_at.asc(),
+                QuizTicTacToeGame.id.asc(),
+            )
+            .first()
+        )
+
     def find_waiting_game(
         self,
         db: Session,
