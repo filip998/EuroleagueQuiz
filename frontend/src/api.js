@@ -5,11 +5,14 @@ import { getAuthToken } from "./authToken";
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
 
-async function request(method, path, body = null) {
+async function request(method, path, body = null, { authToken } = {}) {
   const headers = { "Content-Type": "application/json" };
   // Additive auth: attach the Clerk session token only when signed in. Signed-out
   // (anonymous) play registers no provider, so no Authorization header is sent.
-  const token = await getAuthToken();
+  // Callers may pass an already-fetched token (`authToken`) to send exactly that
+  // token — used by link-guest so its pre-flight token is the one transmitted
+  // rather than a second, racy registry lookup.
+  const token = authToken !== undefined ? authToken : await getAuthToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
@@ -42,9 +45,11 @@ export function getAuthMe() {
 
 // Best-effort: associate the current guest id with the signed-in user after
 // sign-in. Idempotent server-side; callers must swallow failures so a missing
-// or briefly-unavailable endpoint never blocks sign-in.
-export function linkGuest() {
-  return request("POST", "/auth/link-guest", { guest_id: getGuestId() });
+// or briefly-unavailable endpoint never blocks sign-in. Pass the caller's
+// already-fetched Bearer token so the request carries exactly that token and is
+// never sent unauthenticated; omitting it falls back to the registry.
+export function linkGuest(authToken) {
+  return request("POST", "/auth/link-guest", { guest_id: getGuestId() }, { authToken });
 }
 
 export function createGame(payload) {

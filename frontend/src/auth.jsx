@@ -66,7 +66,7 @@ function ClerkAuthBridge({ children }) {
       const token = await getToken().catch(() => null);
       if (cancelled || !token) return;
       try {
-        await linkGuest();
+        await linkGuest(token);
         if (!cancelled) linkedRef.current = key;
       } catch {
         // Best-effort: leave unlinked so a later mount can retry.

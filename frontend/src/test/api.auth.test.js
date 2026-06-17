@@ -82,6 +82,23 @@ describe("api auth token plumbing", () => {
     expect(lastRequestInit().headers.Authorization).toBe("Bearer session-token");
   });
 
+  it("linkGuest sends an explicitly-passed token even with no registry provider", async () => {
+    // Simulates the auth bridge passing its pre-flight token while the registry
+    // provider has been cleared by a racing sign-out: the request must still
+    // carry exactly that token (never sent unauthenticated).
+    clearAuthTokenProvider();
+    mockFetch.mockReturnValue(jsonResponse(null, { status: 204 }));
+    await linkGuest("preflight-token");
+    expect(lastRequestInit().headers.Authorization).toBe("Bearer preflight-token");
+  });
+
+  it("linkGuest omits auth when no token is available at all", async () => {
+    clearAuthTokenProvider();
+    mockFetch.mockReturnValue(jsonResponse(null, { status: 204 }));
+    await linkGuest();
+    expect(lastRequestInit().headers.Authorization).toBeUndefined();
+  });
+
   it("getAuthMe GETs /auth/me with the token", async () => {
     setAuthTokenProvider(async () => "session-token");
     mockFetch.mockReturnValue(jsonResponse({ id: "user_1" }));

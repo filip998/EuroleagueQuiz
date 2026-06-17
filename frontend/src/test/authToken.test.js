@@ -46,4 +46,29 @@ describe("authToken", () => {
     clearAuthTokenProvider();
     expect(await getAuthToken()).toBeNull();
   });
+
+  it("discards the token if the provider is cleared mid-flight (sign-out race)", async () => {
+    let release;
+    const deferred = new Promise((resolve) => {
+      release = resolve;
+    });
+    setAuthTokenProvider(() => deferred);
+    const pending = getAuthToken(); // starts resolving against the live provider
+    clearAuthTokenProvider(); // user signs out before the token resolves
+    release("stale-token");
+    expect(await pending).toBeNull();
+  });
+
+  it("discards the token if the provider is replaced mid-flight", async () => {
+    let release;
+    const deferred = new Promise((resolve) => {
+      release = resolve;
+    });
+    setAuthTokenProvider(() => deferred);
+    const pending = getAuthToken();
+    setAuthTokenProvider(async () => "newer-token"); // re-registered (e.g. new getToken)
+    release("stale-token");
+    // The in-flight call must not return the stale token from the old provider.
+    expect(await pending).toBeNull();
+  });
 });

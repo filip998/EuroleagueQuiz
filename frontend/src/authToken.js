@@ -4,10 +4,12 @@
 //
 // Anonymous play is the default: when no provider is registered (signed out or
 // Clerk not configured) `getAuthToken()` resolves to `null`, so no
-// `Authorization` header is ever attached. The registered provider also guards
-// itself on the live signed-in state, so a momentarily-stale registration can
-// never leak a token for a signed-out user. A provider that throws, rejects, or
-// stalls is treated as "no token" so a token hiccup never breaks a REST call.
+// `Authorization` header is ever attached. The provider is registered only
+// while signed in and cleared on sign-out; `getAuthToken()` additionally
+// discards a token if the provider was cleared or replaced while it was being
+// awaited, so a sign-out that races an in-flight request can never leak a token
+// for a signed-out user. A provider that throws, rejects, or stalls is treated
+// as "no token" so a token hiccup never breaks a REST call.
 
 let tokenProvider = null;
 
@@ -40,6 +42,10 @@ export async function getAuthToken() {
       Promise.resolve().then(provider),
       new Promise((resolve) => setTimeout(() => resolve(null), TOKEN_TIMEOUT_MS)),
     ]);
+    // Discard the token if the provider was cleared or swapped while we awaited
+    // (e.g. the user signed out mid-request), so a signed-out request can never
+    // attach a stale Bearer header.
+    if (tokenProvider !== provider) return null;
     return token || null;
   } catch {
     return null;
