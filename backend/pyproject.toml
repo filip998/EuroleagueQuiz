@@ -27,6 +27,7 @@ dev = [
 [project.scripts]
 ingest = "ingestion.ingest:main"
 ingest-wikipedia-careers = "ingestion.wikipedia_careers:main"
+ingest-wikipedia-images = "ingestion.wikipedia_images:main"
 
 [tool.setuptools.packages.find]
 include = ["app*", "ingestion*"]

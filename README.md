@@ -67,6 +67,15 @@ python -m ingestion.wikipedia_careers --limit 500 --report data/wikipedia-career
 
 Reviewed page/team overrides live in `backend/ingestion/wikipedia_overrides.json`. The default candidate set is 500 players: 450 recent/top EuroLeague game-count players plus 50 early-era roster-heavy players from 2000–2006. The ingestion command fails the feature-enablement threshold when fewer than 200 eligible players are available. After running this ingestion or any migration locally, upload `backend/data/euroleague.db` to Azure before deploying.
 
+### Run Wikipedia Photo Ingestion
+
+Photo Quiz uses cached Wikipedia infobox images for players who have a Wikipedia page but no EuroLeague CDN headshot. The image ingestion command inspects unchecked `players.wikipedia_url` rows, stores a resolved Wikimedia image URL in `wikipedia_image_url` when the basketball infobox has an image, and always sets `wikipedia_image_checked_at` for successful inspections so normal re-runs skip already checked players.
+
+```bash
+cd backend
+python -m ingestion.wikipedia_images --report data/wikipedia-image-report.json
+```
+
 ### API Docs
 
 Once the server is running, visit `http://localhost:8000/docs` for the interactive API documentation.
@@ -93,7 +102,7 @@ roster stints as validation/fill data, stores cached Career Timelines, and recor
 Career Data Revision. Solo Career Quiz rounds use signed Solo Round Tokens so the answer
 is not stored in browser state or persisted as a solo game row.
 Player image/link data lives directly on `players`: EuroLeague CDN headshots are stored in
-`euroleague_image_url`, Wikipedia page URLs in `wikipedia_url`, and future Wikipedia photo
+`euroleague_image_url`, Wikipedia page URLs in `wikipedia_url`, and Wikipedia infobox photo
 enrichment in `wikipedia_image_url` / `wikipedia_image_checked_at`. Existing game payloads
 continue to expose the frontend-compatible `image_url` JSON key for the EuroLeague image.
 Photo Quiz uses those same columns for its eligible pool and resolves images CDN-first:
