@@ -9,8 +9,9 @@
 // browser, which means its seat was already recorded here. So consulting this
 // localStorage-backed, first-write-wins map before trusting the inference makes
 // seat resolution correct across same-tab re-entry, multiple tabs, and fresh
-// tabs recovering an in-progress game. It degrades to pure inference when
-// storage is unavailable.
+// tabs recovering an in-progress game. When storage cannot retain the map it
+// falls back to an in-memory shadow (see memorySeats) so the first-resolved seat
+// still holds for the page lifetime.
 
 const SEATS_KEY = "elq_qm_seats";
 const MAX_ENTRIES = 25;
@@ -24,14 +25,18 @@ const MAX_ENTRIES = 25;
 let memorySeats = null;
 
 function readSeats() {
+  // A non-null shadow means a prior write could not be persisted, so storage is
+  // not retaining the map — the in-memory copy is authoritative until a write
+  // succeeds again. This also covers storage that allows reads (getItem returns
+  // null) but rejects/ignores writes, e.g. Safari private mode.
+  if (memorySeats) return { ...memorySeats };
   try {
     const raw = globalThis.localStorage?.getItem(SEATS_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
-    // Storage threw — reuse the in-memory copy a prior write couldn't persist.
-    return memorySeats ? { ...memorySeats } : {};
+    return {};
   }
 }
 

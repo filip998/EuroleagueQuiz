@@ -77,14 +77,6 @@ describe("quick match seats", () => {
     forgetQuickMatchSeat(null);
     expect(recallQuickMatchSeat(7)).toBe(1);
   });
-
-  it("swallows storage errors when forgetting a seat", () => {
-    rememberQuickMatchSeat(7, 1);
-    globalThis.localStorage.setItem = () => {
-      throw new Error("blocked");
-    };
-    expect(() => forgetQuickMatchSeat(7)).not.toThrow();
-  });
 });
 
 // These exercise the in-memory fallback used when localStorage cannot retain the
@@ -97,8 +89,14 @@ describe("quick match seats without persistent storage", () => {
     globalThis.localStorage = originalLocalStorage;
   });
 
-  async function freshSeats() {
-    globalThis.localStorage = {
+  async function freshSeats(localStorageShim) {
+    globalThis.localStorage = localStorageShim;
+    vi.resetModules();
+    return import("../quickMatchSeats");
+  }
+
+  function throwingStorage() {
+    return {
       getItem: () => {
         throw new Error("storage disabled");
       },
@@ -108,20 +106,33 @@ describe("quick match seats without persistent storage", () => {
       removeItem: () => {},
       clear: () => {},
     };
-    vi.resetModules();
-    return import("../quickMatchSeats");
+  }
+
+  // Reads succeed (return null for missing keys) but writes are rejected — the
+  // common Safari private-mode shape, where getItem never throws.
+  function readableWriteRejectingStorage() {
+    return {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("write blocked");
+      },
+      removeItem: () => {},
+      clear: () => {},
+    };
   }
 
   it("infers the seat on first contact", async () => {
-    const { resolveQuickMatchSeat: resolve } = await freshSeats();
+    const { resolveQuickMatchSeat: resolve } = await freshSeats(
+      throwingStorage(),
+    );
     // First time each id is seen, with no recorded seat: pure status inference.
     expect(resolve(9, "active")).toBe(2);
     expect(resolve(10, "waiting_for_opponent")).toBe(1);
   });
 
-  it("keeps the first seat across re-entry so the creator stays player 1", async () => {
+  it("keeps the first seat across re-entry when reads and writes both throw", async () => {
     const { resolveQuickMatchSeat: resolve, recallQuickMatchSeat: recall } =
-      await freshSeats();
+      await freshSeats(throwingStorage());
     // Created the game as player 1 while it was waiting.
     expect(resolve(9, "waiting_for_opponent")).toBe(1);
     // Re-entering once the backend returns it as ACTIVE must still resolve to
@@ -129,5 +140,41 @@ describe("quick match seats without persistent storage", () => {
     // seat the creator as their own opponent.
     expect(resolve(9, "active")).toBe(1);
     expect(recall(9)).toBe(1);
+  });
+
+  it("keeps the first seat when reads return null but writes are rejected", async () => {
+    // Safari private mode: getItem returns null, setItem throws. The shadow must
+    // still win even though readSeats() never hits its catch branch, otherwise
+    // re-entry mis-infers player 2 from the active status.
+    const { resolveQuickMatchSeat: resolve, recallQuickMatchSeat: recall } =
+      await freshSeats(readableWriteRejectingStorage());
+    expect(resolve(9, "waiting_for_opponent")).toBe(1);
+    expect(resolve(9, "active")).toBe(1);
+    expect(recall(9)).toBe(1);
+  });
+
+  it("forgets a seat in memory even when the removal cannot persist", async () => {
+    const store = new Map();
+    const storage = {
+      getItem: (key) => (store.has(key) ? store.get(key) : null),
+      setItem: (key, value) => store.set(key, String(value)),
+      removeItem: (key) => store.delete(key),
+      clear: () => store.clear(),
+    };
+    const {
+      rememberQuickMatchSeat: remember,
+      forgetQuickMatchSeat: forget,
+      recallQuickMatchSeat: recall,
+    } = await freshSeats(storage);
+    remember(7, 1); // persists while storage works
+    expect(recall(7)).toBe(1);
+    // Storage degrades: writes now throw.
+    storage.setItem = () => {
+      throw new Error("write blocked");
+    };
+    expect(() => forget(7)).not.toThrow();
+    // The seat is gone even though the removal couldn't be persisted, so a reused
+    // id is not mis-seated from the stale persisted entry.
+    expect(recall(7)).toBeNull();
   });
 });
