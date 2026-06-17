@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from svix.webhooks import Webhook, WebhookVerificationError
 
+from app.auth.user_sync_state import clerk_user_sync_key, find_clerk_user_sync_state
 from app.auth.users import upsert_user_for_claims
 from app.config import settings
 from app.models.user import ClerkUserSyncState, User, utc_now
@@ -49,8 +50,9 @@ def handle_clerk_webhook(
         state = _find_sync_state(db, clerk_user_id)
         if _mutation_should_be_ignored(state, event_at):
             return ClerkWebhookResult(event_type=event_type, status="processed")
-        upsert_user_for_claims(db, claims)
+        upsert_user_for_claims(db, claims, commit=False)
         _record_mutation_state(db, clerk_user_id, event_at)
+        db.commit()
         return ClerkWebhookResult(event_type=event_type, status="processed")
 
     if event_type == "user.deleted":
@@ -101,7 +103,7 @@ def _clerk_user_id_from_data(data: Any) -> str:
 
 
 def _find_sync_state(db: Session, clerk_user_id: str) -> ClerkUserSyncState | None:
-    return db.get(ClerkUserSyncState, clerk_user_id)
+    return find_clerk_user_sync_state(db, clerk_user_id)
 
 
 def _mutation_should_be_ignored(
@@ -131,10 +133,9 @@ def _record_mutation_state(
 ) -> None:
     state = _find_sync_state(db, clerk_user_id)
     if state is None:
-        state = ClerkUserSyncState(clerk_user_id=clerk_user_id)
+        state = ClerkUserSyncState(clerk_user_key=clerk_user_sync_key(clerk_user_id))
         db.add(state)
     state.last_event_at = event_at or utc_now()
-    db.commit()
 
 
 def _record_delete_state(
@@ -144,7 +145,7 @@ def _record_delete_state(
 ) -> None:
     state = _find_sync_state(db, clerk_user_id)
     if state is None:
-        state = ClerkUserSyncState(clerk_user_id=clerk_user_id)
+        state = ClerkUserSyncState(clerk_user_key=clerk_user_sync_key(clerk_user_id))
         db.add(state)
     deleted_at = event_at or utc_now()
     state.last_event_at = deleted_at

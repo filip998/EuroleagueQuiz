@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth.user_sync_state import clerk_user_is_tombstoned
 from app.models.user import User
 
 
@@ -15,8 +16,14 @@ class UserProvisioningError(ValueError):
     pass
 
 
+class DeletedClerkUserError(UserProvisioningError):
+    pass
+
+
 def get_or_create_user_for_claims(db: Session, claims: Mapping[str, Any]) -> User:
     clerk_user_id = _validated_clerk_user_id(claims)
+    if clerk_user_is_tombstoned(db, clerk_user_id):
+        raise DeletedClerkUserError("Clerk user has been deleted")
     existing = _find_by_clerk_user_id(db, clerk_user_id)
     if existing is not None:
         return existing
@@ -24,13 +31,20 @@ def get_or_create_user_for_claims(db: Session, claims: Mapping[str, Any]) -> Use
     return _create_user_from_claims(db, clerk_user_id, claims)
 
 
-def upsert_user_for_claims(db: Session, claims: Mapping[str, Any]) -> User:
+def upsert_user_for_claims(
+    db: Session,
+    claims: Mapping[str, Any],
+    *,
+    commit: bool = True,
+) -> User:
     clerk_user_id = _validated_clerk_user_id(claims)
+    if clerk_user_is_tombstoned(db, clerk_user_id):
+        raise DeletedClerkUserError("Clerk user has been deleted")
     existing = _find_by_clerk_user_id(db, clerk_user_id)
     if existing is None:
-        return _create_user_from_claims(db, clerk_user_id, claims)
+        return _create_user_from_claims(db, clerk_user_id, claims, commit=commit)
 
-    return _update_user_from_claims(db, existing, claims)
+    return _update_user_from_claims(db, existing, claims, commit=commit)
 
 
 def _validated_clerk_user_id(claims: Mapping[str, Any]) -> str:
@@ -40,7 +54,13 @@ def _validated_clerk_user_id(claims: Mapping[str, Any]) -> str:
     return clerk_user_id
 
 
-def _create_user_from_claims(db: Session, clerk_user_id: str, claims: Mapping[str, Any]) -> User:
+def _create_user_from_claims(
+    db: Session,
+    clerk_user_id: str,
+    claims: Mapping[str, Any],
+    *,
+    commit: bool = True,
+) -> User:
     username = _claimed_username(claims)
     if username is None or _is_reserved_fallback_username(username):
         username = _fallback_username(clerk_user_id)
@@ -54,19 +74,26 @@ def _create_user_from_claims(db: Session, clerk_user_id: str, claims: Mapping[st
         email=_claimed_email(claims) or _fallback_email(clerk_user_id),
         display_name=_claimed_display_name(claims),
         avatar_url=_claimed_avatar_url(claims),
+        commit=commit,
     )
 
 
-def _update_user_from_claims(db: Session, user: User, claims: Mapping[str, Any]) -> User:
+def _update_user_from_claims(
+    db: Session,
+    user: User,
+    claims: Mapping[str, Any],
+    *,
+    commit: bool = True,
+) -> User:
     clerk_user_id = user.clerk_user_id
     _assign_update_profile(db, user, claims)
     try:
-        db.commit()
+        _flush_or_commit(db, commit=commit)
     except IntegrityError as exc:
         db.rollback()
         refreshed = _find_by_clerk_user_id(db, clerk_user_id)
         if refreshed is None:
-            return _create_user_from_claims(db, clerk_user_id, claims)
+            return _create_user_from_claims(db, clerk_user_id, claims, commit=commit)
         fallback_username = _next_available_fallback_username(
             db,
             refreshed.clerk_user_id,
@@ -76,13 +103,15 @@ def _update_user_from_claims(db: Session, user: User, claims: Mapping[str, Any])
             raise UserProvisioningError("Could not provision Clerk user") from exc
         _assign_update_profile(db, refreshed, claims, username=fallback_username)
         try:
-            db.commit()
+            _flush_or_commit(db, commit=commit)
         except IntegrityError as retry_exc:
             db.rollback()
             raise UserProvisioningError("Could not provision Clerk user") from retry_exc
-        db.refresh(refreshed)
+        if commit:
+            db.refresh(refreshed)
         return refreshed
-    db.refresh(user)
+    if commit:
+        db.refresh(user)
     return user
 
 
@@ -127,6 +156,7 @@ def _insert_user(
     email: str,
     display_name: str | None,
     avatar_url: str | None,
+    commit: bool = True,
 ) -> User:
     user = User(
         clerk_user_id=clerk_user_id,
@@ -137,7 +167,7 @@ def _insert_user(
     )
     db.add(user)
     try:
-        db.commit()
+        _flush_or_commit(db, commit=commit)
     except IntegrityError as exc:
         db.rollback()
         existing = _find_by_clerk_user_id(db, clerk_user_id)
@@ -152,10 +182,19 @@ def _insert_user(
                 email=email,
                 display_name=display_name,
                 avatar_url=avatar_url,
+                commit=commit,
             )
         raise UserProvisioningError("Could not provision Clerk user") from exc
-    db.refresh(user)
+    if commit:
+        db.refresh(user)
     return user
+
+
+def _flush_or_commit(db: Session, *, commit: bool) -> None:
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def _find_by_clerk_user_id(db: Session, clerk_user_id: str) -> User | None:

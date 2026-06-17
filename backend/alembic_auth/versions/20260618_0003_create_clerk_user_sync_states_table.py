@@ -22,10 +22,10 @@ def upgrade() -> None:
     """Upgrade schema."""
     op.create_table(
         "clerk_user_sync_states",
-        sa.Column("clerk_user_id", sa.String(length=255), nullable=False),
+        sa.Column("clerk_user_key", sa.String(length=64), nullable=False),
         sa.Column("last_event_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint("clerk_user_id"),
+        sa.PrimaryKeyConstraint("clerk_user_key"),
     )
 
 

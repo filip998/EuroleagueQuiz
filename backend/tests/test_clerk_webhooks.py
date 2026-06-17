@@ -14,10 +14,11 @@ from sqlalchemy.orm import sessionmaker
 
 import app.auth.clerk_webhooks as clerk_webhooks
 from app.auth.guest_links import link_guest_id
+from app.auth.user_sync_state import clerk_user_sync_key
 from app.auth.users import UserProvisioningError
 from app.auth_database import Base, get_auth_db, sqlite_connect_args
 from app.main import app
-from app.models.user import User, UserGuestId
+from app.models.user import ClerkUserSyncState, User, UserGuestId
 
 WEBHOOK_SECRET_BYTES = b"test-clerk-webhook-secret"
 WEBHOOK_SECRET = f"whsec_{base64.b64encode(WEBHOOK_SECRET_BYTES).decode()}"
@@ -247,6 +248,9 @@ def test_clerk_user_deleted_removes_user_and_guest_ids(auth_client, auth_session
     assert first.status_code == 200
     assert second.status_code == 200
     with auth_session_factory() as db:
+        state = db.execute(select(ClerkUserSyncState)).scalar_one()
+        assert state.clerk_user_key == clerk_user_sync_key("user_clerk_123")
+        assert state.clerk_user_key != "user_clerk_123"
         assert db.scalar(select(func.count()).select_from(User)) == 0
         assert db.scalar(select(func.count()).select_from(UserGuestId)) == 0
 
@@ -271,7 +275,7 @@ def test_clerk_stale_update_after_delete_does_not_recreate_user(auth_client, aut
 
 
 def test_clerk_webhook_maps_provisioning_errors_to_retryable_status(auth_client, monkeypatch):
-    def fail_provisioning(db, claims):
+    def fail_provisioning(db, claims, **kwargs):
         raise UserProvisioningError("could not provision")
 
     monkeypatch.setattr(clerk_webhooks, "upsert_user_for_claims", fail_provisioning)
