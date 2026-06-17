@@ -5,8 +5,8 @@ import App from "../App";
 
 // Mock all child components to isolate App logic
 vi.mock("../GameSetup", () => ({
-  default: ({ onBack }) => (
-    <div data-testid="game-setup">
+  default: ({ onBack, initialJoinCode }) => (
+    <div data-testid="game-setup" data-initial-join-code={initialJoinCode || ""}>
       <button onClick={onBack}>Back</button>
     </div>
   ),
@@ -87,5 +87,29 @@ describe("App", () => {
     fireEvent.click(screen.getByText("Back"));
     expect(screen.getByText("TICTACTOE")).toBeInTheDocument();
     expect(screen.getByText("ROSTER GUESS")).toBeInTheDocument();
+  });
+
+  it("prefills the TicTacToe setup join code from a ?join= invite URL", () => {
+    render(
+      <MemoryRouter initialEntries={["/tictactoe?join=abc123"]}>
+        <App />
+      </MemoryRouter>
+    );
+    expect(screen.getByTestId("game-setup")).toHaveAttribute(
+      "data-initial-join-code",
+      "ABC123"
+    );
+  });
+
+  it("normalizes an invalid ?join= invite code to empty", () => {
+    render(
+      <MemoryRouter initialEntries={["/tictactoe?join=bad"]}>
+        <App />
+      </MemoryRouter>
+    );
+    expect(screen.getByTestId("game-setup")).toHaveAttribute(
+      "data-initial-join-code",
+      ""
+    );
   });
 });
