@@ -41,3 +41,4 @@ class PhotoQuizNoAnswerOfferRequest(BaseModel):
 class PhotoQuizNoAnswerResponseRequest(BaseModel):
     accept: bool
     round_number: int = Field(gt=0)
+    no_answer_offer_version: int = Field(gt=0)

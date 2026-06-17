@@ -725,6 +725,9 @@ class PhotoQuizRealtimeAdapter:
                 acting_player=acting_player,
                 accept=_required_bool(data, "accept"),
                 round_number=_required_int(data, "round_number"),
+                no_answer_offer_version=_required_int(
+                    data, "no_answer_offer_version"
+                ),
             )
             return RealtimeActionOutcome(
                 game=game,

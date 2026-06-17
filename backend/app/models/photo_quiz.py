@@ -33,6 +33,7 @@ class PhotoQuizGame(Base):
     winner_player = Column(Integer, nullable=True)
     pending_no_answer_from = Column(Integer, nullable=True)
     pending_no_answer_to = Column(Integer, nullable=True)
+    no_answer_offer_version = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime,

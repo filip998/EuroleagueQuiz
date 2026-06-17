@@ -55,6 +55,7 @@ def create_solo_round(
         player1_score=0,
         player2_score=0,
         round_number=1,
+        no_answer_offer_version=0,
     )
     db.add(game)
     db.flush()
@@ -325,9 +326,12 @@ def respond_no_answer(
     acting_player: int,
     accept: bool,
     round_number: int,
+    no_answer_offer_version: int,
 ) -> str:
     if acting_player not in (1, 2):
         raise InvalidGameActionError("Player identity is required")
+    if no_answer_offer_version <= 0:
+        raise InvalidGameActionError("No answer offer version is required")
     if game.status != "active":
         raise ConflictGameActionError("Game is not active")
     _raise_if_round_stale(game, round_number)
@@ -345,6 +349,7 @@ def respond_no_answer(
                 "pending_no_answer_from": None,
                 "pending_no_answer_to": None,
             },
+            expected_offer_version=no_answer_offer_version,
         )
         game.pending_no_answer_from = None
         game.pending_no_answer_to = None
@@ -369,6 +374,7 @@ def respond_no_answer(
             "pending_no_answer_to": None,
             "round_number": game.round_number + 1,
         },
+        expected_offer_version=no_answer_offer_version,
     )
     game.pending_no_answer_from = None
     game.pending_no_answer_to = None
@@ -399,6 +405,12 @@ def serialize_game_state(db: Session, game: PhotoQuizGame) -> dict[str, Any]:
         "winner_player": game.winner_player,
         "pending_no_answer_from": game.pending_no_answer_from,
         "pending_no_answer_to": game.pending_no_answer_to,
+        "pending_no_answer_offer_version": (
+            game.no_answer_offer_version
+            if game.pending_no_answer_from is not None
+            and game.pending_no_answer_to is not None
+            else None
+        ),
         "current_round": current_round,
         "latest_completed_round": latest_completed_round,
     }
@@ -649,6 +661,7 @@ def _create_pending_no_answer_offer(
             {
                 "pending_no_answer_from": acting_player,
                 "pending_no_answer_to": pending_to,
+                "no_answer_offer_version": PhotoQuizGame.no_answer_offer_version + 1,
                 "updated_at": updated_at,
             },
             synchronize_session=False,
@@ -667,8 +680,14 @@ def _create_pending_no_answer_offer(
         ):
             raise ConflictGameActionError("round_stale")
         raise ConflictGameActionError("No answer offer is already pending")
+    no_answer_offer_version = (
+        db.query(PhotoQuizGame.no_answer_offer_version)
+        .filter(PhotoQuizGame.id == game.id)
+        .scalar()
+    )
     game.pending_no_answer_from = acting_player
     game.pending_no_answer_to = pending_to
+    game.no_answer_offer_version = int(no_answer_offer_version or 0)
     game.updated_at = updated_at
 
 
@@ -679,6 +698,7 @@ def _update_pending_no_answer_offer(
     *,
     acting_player: int,
     values: dict[str, Any],
+    expected_offer_version: int,
 ) -> None:
     expected_from = 2 if acting_player == 1 else 1
     expected_updated_at = game.updated_at
@@ -692,6 +712,7 @@ def _update_pending_no_answer_offer(
         .filter(PhotoQuizGame.updated_at == expected_updated_at)
         .filter(PhotoQuizGame.pending_no_answer_from == expected_from)
         .filter(PhotoQuizGame.pending_no_answer_to == acting_player)
+        .filter(PhotoQuizGame.no_answer_offer_version == expected_offer_version)
         .update(update_values, synchronize_session=False)
     )
     if updated != 1:

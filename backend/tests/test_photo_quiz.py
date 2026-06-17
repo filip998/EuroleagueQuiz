@@ -621,12 +621,14 @@ def test_multiplayer_state_exposes_latest_completed_round_after_no_answer_accept
             acting_player=1,
             round_number=current.round_number,
         )
+        no_answer_offer_version = game.no_answer_offer_version
         result = photo_quiz.respond_no_answer(
             db,
             game=game,
             acting_player=2,
             accept=True,
             round_number=current.round_number,
+            no_answer_offer_version=no_answer_offer_version,
         )
 
         assert result == "accepted"
@@ -700,6 +702,7 @@ def test_multiplayer_stale_second_no_answer_offer_is_rejected(tmp_path: Path):
         stored = verify.get(PhotoQuizGame, game_id)
         assert stored.pending_no_answer_from == 1
         assert stored.pending_no_answer_to == 2
+        assert stored.no_answer_offer_version == 1
         assert stored.round_number == 1
         assert [round_obj.status for round_obj in stored.rounds] == ["active"]
     finally:
@@ -839,12 +842,14 @@ def test_multiplayer_no_answer_accept_locks_next_round_guesses():
             acting_player=1,
             round_number=current.round_number,
         )
+        no_answer_offer_version = game.no_answer_offer_version
         result = photo_quiz.respond_no_answer(
             db,
             game=game,
             acting_player=2,
             accept=True,
             round_number=current.round_number,
+            no_answer_offer_version=no_answer_offer_version,
         )
 
         assert result == "accepted"
@@ -914,6 +919,7 @@ def test_multiplayer_rejects_stale_round_scoped_actions():
                 acting_player=2,
                 accept=True,
                 round_number=completed_round.round_number,
+                no_answer_offer_version=1,
             )
     finally:
         db.close()
@@ -946,6 +952,7 @@ def test_multiplayer_stale_correct_guess_from_second_session_is_rejected(tmp_pat
         second_game = second.get(PhotoQuizGame, game_id)
         first_round = photo_quiz._current_round(first_game)
         second_round = photo_quiz._current_round(second_game)
+        second_offer_version = second_game.no_answer_offer_version
 
         assert (
             photo_quiz.submit_guess(
@@ -1112,6 +1119,7 @@ def test_multiplayer_stale_no_answer_accept_after_correct_guess_is_rejected(tmp_
         second_game = second.get(PhotoQuizGame, game_id)
         first_round = photo_quiz._current_round(first_game)
         second_round = photo_quiz._current_round(second_game)
+        second_offer_version = second_game.no_answer_offer_version
 
         assert (
             photo_quiz.submit_guess(
@@ -1132,6 +1140,7 @@ def test_multiplayer_stale_no_answer_accept_after_correct_guess_is_rejected(tmp_
                 acting_player=2,
                 accept=True,
                 round_number=second_round.round_number,
+                no_answer_offer_version=second_offer_version,
             )
         second.rollback()
     finally:
@@ -1184,6 +1193,8 @@ def test_multiplayer_stale_no_answer_accept_after_decline_is_rejected(tmp_path: 
         second_game = second.get(PhotoQuizGame, game_id)
         first_round = photo_quiz._current_round(first_game)
         second_round = photo_quiz._current_round(second_game)
+        first_offer_version = first_game.no_answer_offer_version
+        second_offer_version = second_game.no_answer_offer_version
 
         assert (
             photo_quiz.respond_no_answer(
@@ -1192,6 +1203,7 @@ def test_multiplayer_stale_no_answer_accept_after_decline_is_rejected(tmp_path: 
                 acting_player=2,
                 accept=False,
                 round_number=first_round.round_number,
+                no_answer_offer_version=first_offer_version,
             )
             == "declined"
         )
@@ -1207,6 +1219,7 @@ def test_multiplayer_stale_no_answer_accept_after_decline_is_rejected(tmp_path: 
                 acting_player=2,
                 accept=True,
                 round_number=second_round.round_number,
+                no_answer_offer_version=second_offer_version,
             )
         second.rollback()
     finally:
@@ -1259,9 +1272,11 @@ def test_multiplayer_stale_no_answer_accept_after_reoffer_is_rejected(tmp_path: 
     try:
         stale_game = stale.get(PhotoQuizGame, game_id)
         stale_round = photo_quiz._current_round(stale_game)
+        stale_offer_version = stale_game.no_answer_offer_version
 
         decline_game = decline.get(PhotoQuizGame, game_id)
         decline_round = photo_quiz._current_round(decline_game)
+        decline_offer_version = decline_game.no_answer_offer_version
         assert (
             photo_quiz.respond_no_answer(
                 decline,
@@ -1269,6 +1284,7 @@ def test_multiplayer_stale_no_answer_accept_after_reoffer_is_rejected(tmp_path: 
                 acting_player=2,
                 accept=False,
                 round_number=decline_round.round_number,
+                no_answer_offer_version=decline_offer_version,
             )
             == "declined"
         )
@@ -1294,6 +1310,7 @@ def test_multiplayer_stale_no_answer_accept_after_reoffer_is_rejected(tmp_path: 
                 acting_player=2,
                 accept=True,
                 round_number=stale_round.round_number,
+                no_answer_offer_version=stale_offer_version,
             )
         stale.rollback()
     finally:
@@ -1369,6 +1386,73 @@ def test_photo_http_create_join_get_and_guess_envelopes(photo_client: TestClient
     assert guess_body["type"] == "state"
     assert guess_body["payload"]["result"] == "match_won"
     assert guess_body["payload"]["terminal"] is True
+
+
+def test_photo_http_rejects_replayed_no_answer_response_for_reoffer(
+    photo_client: TestClient,
+):
+    create = photo_client.post(
+        "/quiz/photo/games",
+        json={"target_wins": 3, "player1_name": "Host"},
+    )
+    assert create.status_code == 200
+    game = create.json()["payload"]["game"]
+
+    join = photo_client.post(
+        "/quiz/photo/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner"},
+    )
+    assert join.status_code == 200
+    joined_game = join.json()["payload"]["game"]
+    game_id = joined_game["id"]
+    round_number = joined_game["round_number"]
+
+    first_offer = photo_client.post(
+        f"/quiz/photo/games/{game_id}/no-answer-offer?player=1",
+        json={"round_number": round_number},
+    )
+    assert first_offer.status_code == 200
+    first_offer_game = first_offer.json()["payload"]["game"]
+    first_offer_version = first_offer_game["pending_no_answer_offer_version"]
+    assert first_offer_version == 1
+
+    decline = photo_client.post(
+        f"/quiz/photo/games/{game_id}/no-answer-response?player=2",
+        json={
+            "accept": False,
+            "round_number": round_number,
+            "no_answer_offer_version": first_offer_version,
+        },
+    )
+    assert decline.status_code == 200
+    assert decline.json()["payload"]["game"]["pending_no_answer_offer_version"] is None
+
+    second_offer = photo_client.post(
+        f"/quiz/photo/games/{game_id}/no-answer-offer?player=1",
+        json={"round_number": round_number},
+    )
+    assert second_offer.status_code == 200
+    second_offer_game = second_offer.json()["payload"]["game"]
+    assert second_offer_game["pending_no_answer_offer_version"] == 2
+
+    replayed_decline = photo_client.post(
+        f"/quiz/photo/games/{game_id}/no-answer-response?player=2",
+        json={
+            "accept": False,
+            "round_number": round_number,
+            "no_answer_offer_version": first_offer_version,
+        },
+    )
+    assert replayed_decline.status_code == 409
+    assert replayed_decline.json()["payload"]["code"] == "conflict"
+
+    state = photo_client.get(f"/quiz/photo/games/{game_id}")
+    assert state.status_code == 200
+    current_game = state.json()
+    assert current_game["pending_no_answer_from"] == 1
+    assert current_game["pending_no_answer_to"] == 2
+    assert current_game["pending_no_answer_offer_version"] == 2
+    assert current_game["round_number"] == round_number
 
 
 def _session():

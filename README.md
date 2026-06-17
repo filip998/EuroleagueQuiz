@@ -116,7 +116,9 @@ Multiplayer Career Quiz and Photo Quiz resolved-round state includes
 `latest_completed_round.next_round_starts_at` during the three-second reveal lock; the
 backend rejects next-round guesses with `round_locked` until that UTC timestamp elapses.
 Multiplayer Career Quiz and Photo Quiz guess and no-answer mutations must include the client-visible
-`round_number`; stale actions are rejected with `round_stale` so the frontend can resync
+`round_number`; Photo Quiz no-answer responses must also echo the current
+`pending_no_answer_offer_version` from state so replayed responses cannot resolve a later offer.
+Stale actions are rejected with `round_stale` or a conflict so the frontend can resync
 without applying old input to the current round. Career Quiz and Photo Quiz multiplayer use WebSocket
 push as their primary sync path, while plain `GET /quiz/{career|photo}/games/{id}` remains the
 refresh and fallback-sync Interface.
