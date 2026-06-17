@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -13,6 +22,8 @@ class QuizTicTacToeGame(Base):
     mode = Column(String, nullable=False)
     status = Column(String, nullable=False, default="active")
     join_code = Column(String(6), nullable=True, unique=True, index=True)
+    is_public = Column(Boolean, nullable=False, default=False, server_default="0")
+    preset = Column(String(128), nullable=True)
     target_wins = Column(Integer, nullable=False)
     turn_seconds = Column(Integer, nullable=True)
     turn_started_at = Column(DateTime, nullable=True)
@@ -40,6 +51,16 @@ class QuizTicTacToeGame(Base):
         back_populates="game",
         cascade="all, delete-orphan",
         order_by="QuizTicTacToeRound.round_number",
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_quiz_ttt_games_matchmaking_pool",
+            "is_public",
+            "status",
+            "preset",
+            "created_at",
+        ),
     )
 
 

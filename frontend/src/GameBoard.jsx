@@ -6,6 +6,7 @@ import PlayerSearch from "./PlayerSearch";
 import { LogoMini } from "./Logo";
 import ClubLogo from "./ClubLogo";
 import WaitingLobby from "./WaitingLobby";
+import { buildInviteUrl } from "./inviteLink";
 
 function AxisLabel({ axis }) {
   const isTeam = axis.axis_type === "team";
@@ -274,7 +275,13 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
   // Waiting for opponent screen
   if (game?.status === "waiting_for_opponent") {
-    return <WaitingLobby joinCode={game.join_code} onCancel={onNewGame} />;
+    return (
+      <WaitingLobby
+        joinCode={game.join_code}
+        inviteUrl={buildInviteUrl(game.join_code)}
+        onCancel={onNewGame}
+      />
+    );
   }
 
   if (!game || !round) {

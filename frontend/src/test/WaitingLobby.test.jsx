@@ -30,4 +30,21 @@ describe("WaitingLobby", () => {
     expect(writeText).toHaveBeenCalledWith("ABC123");
     expect(await screen.findByText("Copied!")).toBeInTheDocument();
   });
+
+  it("renders the invite link and copies it with its own feedback", async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.assign(navigator, { clipboard: { writeText } });
+    const inviteUrl = "https://play.example.com/tictactoe?join=ABC123";
+    render(<WaitingLobby joinCode="ABC123" inviteUrl={inviteUrl} onCancel={() => {}} />);
+
+    expect(screen.getByText(inviteUrl)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Copy link"));
+    expect(writeText).toHaveBeenCalledWith(inviteUrl);
+    expect(await screen.findByText("Link copied!")).toBeInTheDocument();
+  });
+
+  it("omits the invite link when no inviteUrl is provided", () => {
+    render(<WaitingLobby joinCode="ABC123" onCancel={() => {}} />);
+    expect(screen.queryByText("Copy link")).not.toBeInTheDocument();
+  });
 });

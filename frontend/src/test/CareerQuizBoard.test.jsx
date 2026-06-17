@@ -5,6 +5,7 @@ vi.mock("../api", () => ({
   autocompleteCareerPlayer: vi.fn(),
   connectCareerRealtime: vi.fn(),
   createCareerSoloRound: vi.fn(),
+  fetchCareerSoloHint: vi.fn(),
   getCareerGame: vi.fn(),
   offerCareerNoAnswer: vi.fn(),
   revealCareerSoloAnswer: vi.fn(),
@@ -22,6 +23,8 @@ import {
 import {
   autocompleteCareerPlayer,
   connectCareerRealtime,
+  createCareerSoloRound,
+  fetchCareerSoloHint,
   getCareerGame,
   submitCareerGuess,
   submitCareerSoloGuess,
@@ -491,6 +494,143 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(successFeedback).toHaveClass("bg-emerald-50", "text-emerald-700");
   });
 
+  it("reveals solo hints progressively and stops at the hidden-letter cap", async () => {
+    fetchCareerSoloHint
+      .mockResolvedValueOnce({ type: "nationality", nationality: "Serbia", country_code: "RS" })
+      .mockResolvedValueOnce({ type: "position", position: "Guard" })
+      .mockResolvedValueOnce({
+        type: "name_skeleton",
+        skeleton: soloNameSkeleton(),
+      })
+      .mockResolvedValueOnce({ type: "letter_reveal", letter: "o", positions: [1, 3] })
+      .mockResolvedValueOnce({ type: "exhausted" });
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const revealButton = screen.getByRole("button", { name: "Reveal a hint" });
+    expect(screen.getByText("Hints used: 0")).toBeInTheDocument();
+
+    fireEvent.click(revealButton);
+    expect(await screen.findByText("Serbia")).toBeInTheDocument();
+    expect(screen.getByText("Hints used: 1")).toBeInTheDocument();
+
+    fireEvent.click(revealButton);
+    expect(await screen.findByText("Guard")).toBeInTheDocument();
+    expect(screen.getByText("Hints used: 2")).toBeInTheDocument();
+
+    fireEvent.click(revealButton);
+    const maskedName = await screen.findByTestId("career-hint-masked-name");
+    expect(maskedName).toHaveTextContent("____ ___");
+    expect(screen.getByText("Hints used: 3")).toBeInTheDocument();
+
+    fireEvent.click(revealButton);
+    await waitFor(() => expect(maskedName).toHaveTextContent("_O_O ___"));
+    expect(screen.getByText("Hints used: 4")).toBeInTheDocument();
+
+    fireEvent.click(revealButton);
+    await waitFor(() => expect(revealButton).toHaveTextContent("No more hints"));
+    expect(revealButton).toBeDisabled();
+    expect(screen.getByText("Hints used: 4")).toBeInTheDocument();
+
+    expect(fetchCareerSoloHint).toHaveBeenNthCalledWith(1, "solo-round", {
+      shown_hints: [],
+      revealed_letters: [],
+    });
+    expect(fetchCareerSoloHint).toHaveBeenNthCalledWith(4, "solo-round", {
+      shown_hints: ["nationality", "position", "name_skeleton"],
+      revealed_letters: [],
+    });
+    expect(fetchCareerSoloHint).toHaveBeenNthCalledWith(5, "solo-round", {
+      shown_hints: ["nationality", "position", "name_skeleton"],
+      revealed_letters: ["o"],
+    });
+  });
+
+  it("resets solo hints when advancing to the next solo round", async () => {
+    fetchCareerSoloHint.mockResolvedValueOnce({ type: "nationality", nationality: "Spain" });
+    autocompleteCareerPlayer.mockResolvedValueOnce({ players: [{ id: 52, name: "Solo Hit" }] });
+    submitCareerSoloGuess.mockResolvedValueOnce({
+      correct: true,
+      answer: careerAnswer({ id: 52, name: "Solo Hit" }),
+    });
+    createCareerSoloRound.mockResolvedValueOnce(soloCareerRound({ round_token: "next-round" }));
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reveal a hint" }));
+    expect(await screen.findByText("Spain")).toBeInTheDocument();
+    expect(screen.getByText("Hints used: 1")).toBeInTheDocument();
+
+    await selectCareerPlayer("Solo Hit");
+    fireEvent.click(screen.getByRole("button", { name: "Next career" }));
+
+    await waitFor(() => expect(createCareerSoloRound).toHaveBeenCalledWith([52]));
+    expect(screen.queryByText("Spain")).not.toBeInTheDocument();
+    expect(screen.getByText("Hints used: 0")).toBeInTheDocument();
+  });
+
+  it("ignores stale hint responses after advancing to a new solo round", async () => {
+    let resolveHint;
+    fetchCareerSoloHint.mockReturnValueOnce(new Promise((resolve) => {
+      resolveHint = resolve;
+    }));
+    autocompleteCareerPlayer.mockResolvedValueOnce({ players: [{ id: 52, name: "Solo Hit" }] });
+    submitCareerSoloGuess.mockResolvedValueOnce({
+      correct: true,
+      answer: careerAnswer({ id: 52, name: "Solo Hit" }),
+    });
+    createCareerSoloRound.mockResolvedValueOnce(soloCareerRound({ round_token: "next-round" }));
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reveal a hint" }));
+    expect(await screen.findByRole("button", { name: "Loading hint..." })).toBeDisabled();
+
+    await selectCareerPlayer("Solo Hit");
+    fireEvent.click(screen.getByRole("button", { name: "Next career" }));
+    await waitFor(() => expect(createCareerSoloRound).toHaveBeenCalledWith([52]));
+
+    await act(async () => {
+      resolveHint({ type: "nationality", nationality: "Stale Country" });
+    });
+
+    expect(screen.queryByText("Stale Country")).not.toBeInTheDocument();
+    expect(screen.getByText("Hints used: 0")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reveal a hint" })).toBeEnabled();
+  });
+
+  it("does not show solo hints in multiplayer", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTestId("career-solo-hints")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reveal a hint" })).not.toBeInTheDocument();
+  });
+
   it("shows a polled latest completed round once for a non-acting player", async () => {
     vi.useFakeTimers();
     getCareerGame.mockResolvedValue(
@@ -865,7 +1005,7 @@ function activeCareerGame(overrides = {}) {
   };
 }
 
-function soloCareerRound() {
+function soloCareerRound(overrides = {}) {
   return {
     round_token: "solo-round",
     timeline: [
@@ -875,7 +1015,21 @@ function soloCareerRound() {
         end_season: "2020/21",
       },
     ],
+    ...overrides,
   };
+}
+
+function soloNameSkeleton() {
+  return [
+    { kind: "hidden_letter", index: 0 },
+    { kind: "hidden_letter", index: 1 },
+    { kind: "hidden_letter", index: 2 },
+    { kind: "hidden_letter", index: 3 },
+    { kind: "space", index: 4, value: " " },
+    { kind: "hidden_letter", index: 5 },
+    { kind: "hidden_letter", index: 6 },
+    { kind: "hidden_letter", index: 7 },
+  ];
 }
 
 function careerAnswer({ id, name }) {

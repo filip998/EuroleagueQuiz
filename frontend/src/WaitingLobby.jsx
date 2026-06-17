@@ -4,20 +4,32 @@ import { useState } from "react";
  * Shared "waiting for opponent" lobby used by every online game board while a
  * game sits in `waiting_for_opponent`: the join code in a dashed box with a
  * copy-to-clipboard button, the auto-start helper text, and a Cancel action.
+ *
+ * When an `inviteUrl` is supplied, it also renders a shareable invite link with
+ * its own copy button (issue #55) — the plain code stays as a fallback.
  */
-export default function WaitingLobby({ joinCode, onCancel }) {
+export default function WaitingLobby({ joinCode, inviteUrl, onCancel }) {
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
-  async function handleCopy() {
+  async function copyToClipboard(text, setFlag) {
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(joinCode);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        await navigator.clipboard.writeText(text);
+        setFlag(true);
+        setTimeout(() => setFlag(false), 2000);
       }
     } catch {
-      // Clipboard unavailable (e.g. denied permission) — leave the code visible.
+      // Clipboard unavailable (e.g. denied permission) — leave the value visible.
     }
+  }
+
+  function handleCopy() {
+    copyToClipboard(joinCode, setCopied);
+  }
+
+  function handleCopyLink() {
+    copyToClipboard(inviteUrl, setLinkCopied);
   }
 
   return (
@@ -50,6 +62,32 @@ export default function WaitingLobby({ joinCode, onCancel }) {
               {copied ? "Copied!" : "Copy code"}
             </button>
           </div>
+
+          {inviteUrl && (
+            <div className="w-full max-w-sm mx-auto mb-6">
+              <p className="text-xs font-semibold uppercase tracking-wider text-elq-muted mb-2">
+                Or share an invite link
+              </p>
+              <div className="flex items-center gap-2 bg-elq-bg border border-elq-border rounded-xl pl-3 pr-2 py-2">
+                <span
+                  className="flex-1 min-w-0 truncate text-sm text-elq-muted text-left"
+                  title={inviteUrl}
+                >
+                  {inviteUrl}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopyLink}
+                  className="inline-flex items-center gap-1.5 flex-shrink-0 text-sm font-semibold text-elq-orange hover:text-elq-orange-dark transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                  </svg>
+                  {linkCopied ? "Link copied!" : "Copy link"}
+                </button>
+              </div>
+            </div>
+          )}
 
           <p className="text-sm text-elq-muted mb-8">
             The game will start automatically when they join.

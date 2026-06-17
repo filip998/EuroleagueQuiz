@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import hmac
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from cryptography.fernet import Fernet, InvalidToken
 
 from app.config import settings
 
@@ -20,7 +21,7 @@ class SoloRoundTokenPayload:
     player_id: int
     issued_at: datetime
     data_revision: str
-    token_version: int = 1
+    token_version: int = 2
 
 
 def create_solo_round_token(
@@ -29,7 +30,7 @@ def create_solo_round_token(
     data_revision: str,
     secret: str = settings.solo_round_token_secret,
     issued_at: datetime | None = None,
-    token_version: int = 1,
+    token_version: int = 2,
 ) -> str:
     issued = issued_at or datetime.now(timezone.utc)
     payload = {
@@ -38,10 +39,7 @@ def create_solo_round_token(
         "data_revision": data_revision,
         "token_version": token_version,
     }
-    payload_bytes = _json_bytes(payload)
-    encoded_payload = _b64encode(payload_bytes)
-    signature = _signature(encoded_payload, secret)
-    return f"{encoded_payload}.{signature}"
+    return _fernet(secret).encrypt(_json_bytes(payload)).decode("ascii")
 
 
 def validate_solo_round_token(
@@ -50,22 +48,16 @@ def validate_solo_round_token(
     current_data_revision: str,
     secret: str = settings.solo_round_token_secret,
     max_age: timedelta = timedelta(hours=1),
-    expected_token_version: int = 1,
+    expected_token_version: int = 2,
 ) -> SoloRoundTokenPayload:
     try:
-        encoded_payload, supplied_signature = token.split(".", 1)
-    except ValueError as exc:
-        raise SoloRoundTokenError("Malformed solo round token") from exc
-
-    expected_signature = _signature(encoded_payload, secret)
-    if not hmac.compare_digest(supplied_signature, expected_signature):
-        raise SoloRoundTokenError("Invalid solo round token signature")
-
-    try:
-        payload = json.loads(_b64decode(encoded_payload))
+        payload_bytes = _fernet(secret).decrypt(token.encode("ascii"))
+        payload = json.loads(payload_bytes)
         issued_at = datetime.fromisoformat(payload["issued_at"])
         if issued_at.tzinfo is None:
             issued_at = issued_at.replace(tzinfo=timezone.utc)
+    except (InvalidToken, UnicodeEncodeError) as exc:
+        raise SoloRoundTokenError("Invalid solo round token") from exc
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise SoloRoundTokenError("Invalid solo round token payload") from exc
 
@@ -94,19 +86,6 @@ def _json_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
-def _signature(encoded_payload: str, secret: str) -> str:
-    digest = hmac.new(
-        secret.encode("utf-8"),
-        encoded_payload.encode("ascii"),
-        hashlib.sha256,
-    ).digest()
-    return _b64encode(digest)
-
-
-def _b64encode(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
-
-
-def _b64decode(value: str) -> str:
-    padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode((value + padding).encode("ascii")).decode("utf-8")
+def _fernet(secret: str) -> Fernet:
+    key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
+    return Fernet(key)

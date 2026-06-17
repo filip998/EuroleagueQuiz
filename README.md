@@ -166,6 +166,10 @@ Every game's pre-game screen is built from three shared building blocks in `fron
   single-mode games (Higher or Lower).
 - `WaitingLobby.jsx` — the shared "waiting for opponent" screen (join code with
   copy-to-clipboard, auto-start helper text, and Cancel) used by every online board.
+  For TicTacToe it also renders a copyable **shareable invite link**
+  (`${origin}/tictactoe?join=ABC123`); opening that link lands on TicTacToe setup with
+  the code prefilled in Online → Join, so the invitee only adds a name and joins. The
+  link helpers live in `frontend/src/inviteLink.js` (`buildInviteUrl` / `parseJoinCode`).
 
 `GameSetup.jsx` (TicTacToe), `RosterGuessSetup.jsx`, `CareerQuizSetup.jsx`, and
 `HigherLowerSetup.jsx` compose these, mapping the canonical UI keys (`solo` / `local` /
