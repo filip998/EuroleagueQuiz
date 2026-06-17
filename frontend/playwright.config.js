@@ -10,7 +10,12 @@ const backendUrl = `http://127.0.0.1:${backendPort}`;
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const configDir = dirname(fileURLToPath(import.meta.url));
 const backendDir = resolve(configDir, "../backend");
-const tempDbDir = process.env.E2E_DATABASE_URL
+const reuseExistingServer = process.env.E2E_REUSE_EXISTING_SERVER === "1" && !process.env.CI;
+const explicitDatabaseUrl = process.env.E2E_DATABASE_URL;
+const defaultReuseDbPath = reuseExistingServer && !explicitDatabaseUrl
+  ? join(backendDir, "data/euroleague.db")
+  : null;
+const tempDbDir = explicitDatabaseUrl || defaultReuseDbPath
   ? null
   : mkdtempSync(join(tmpdir(), "elq-e2e-"));
 const tempDbPath = tempDbDir ? join(tempDbDir, "euroleague.db") : null;
@@ -18,15 +23,15 @@ if (tempDbPath) {
   copyFileSync(join(backendDir, "data/euroleague.db"), tempDbPath);
   process.once("exit", () => rmSync(tempDbDir, { recursive: true, force: true }));
 }
-const databaseUrl = process.env.E2E_DATABASE_URL || `sqlite:///${tempDbPath}`;
-if (!process.env.E2E_DATABASE_URL && tempDbPath) {
+const databaseUrl = explicitDatabaseUrl
+  || (defaultReuseDbPath ? `sqlite:///${defaultReuseDbPath}` : `sqlite:///${tempDbPath}`);
+if (!explicitDatabaseUrl && (tempDbPath || defaultReuseDbPath)) {
   process.env.E2E_DATABASE_URL = databaseUrl;
 }
-const databasePath = tempDbPath || sqlitePathFromUrl(process.env.E2E_DATABASE_URL);
+const databasePath = tempDbPath || defaultReuseDbPath || sqlitePathFromUrl(process.env.E2E_DATABASE_URL);
 if (databasePath) {
   process.env.E2E_DATABASE_PATH = databasePath;
 }
-const reuseExistingServer = process.env.E2E_REUSE_EXISTING_SERVER === "1" && !process.env.CI;
 
 function sqlitePathFromUrl(url) {
   if (!url?.startsWith("sqlite:///")) return null;
