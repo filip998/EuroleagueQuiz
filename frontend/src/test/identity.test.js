@@ -48,6 +48,13 @@ describe("guest id", () => {
     expect(id).not.toBe(corrupted);
     expect(id.length).toBeLessThanOrEqual(64);
   });
+
+  it("regenerates when the stored id is only whitespace", () => {
+    localStorage.setItem("elq_guest_id", "   ");
+    const id = getGuestId();
+    expect(id.trim().length).toBeGreaterThan(0);
+    expect(localStorage.getItem("elq_guest_id")).toBe(id);
+  });
 });
 
 describe("nickname", () => {
@@ -80,6 +87,16 @@ describe("nickname", () => {
     localStorage.setItem("hol_nickname", "LegacyName");
     expect(getNickname()).toBe("LegacyName");
     expect(localStorage.getItem("elq_nickname")).toBe("LegacyName");
+    // The legacy key is dropped so it can't resurrect later.
+    expect(localStorage.getItem("hol_nickname")).toBeNull();
+  });
+
+  it("does not resurrect the legacy nickname after it is cleared", () => {
+    localStorage.setItem("hol_nickname", "LegacyName");
+    expect(getNickname()).toBe("LegacyName");
+    setNickname("   ");
+    expect(getNickname()).toBe("");
+    expect(localStorage.getItem("elq_nickname")).toBeNull();
   });
 
   it("prefers the shared nickname over the legacy key", () => {

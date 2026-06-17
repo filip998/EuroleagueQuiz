@@ -49,7 +49,11 @@ function generateGuestId() {
 
 export function getGuestId() {
   const stored = readStorage(GUEST_ID_KEY);
-  if (typeof stored === "string" && stored.length > 0 && stored.length <= GUEST_ID_MAX_LENGTH) {
+  if (
+    typeof stored === "string" &&
+    stored.trim().length > 0 &&
+    stored.length <= GUEST_ID_MAX_LENGTH
+  ) {
     return stored;
   }
   const guestId = generateGuestId();
@@ -60,13 +64,16 @@ export function getGuestId() {
 export function getNickname() {
   const stored = readStorage(NICKNAME_KEY);
   if (typeof stored === "string" && stored.length > 0) return stored;
-  // One-time migration from the legacy Higher or Lower nickname key.
+  // One-time migration from the legacy Higher or Lower nickname key. Remove the
+  // legacy key so it can't resurrect a cleared nickname on a later read.
   const legacy = readStorage(LEGACY_NICKNAME_KEY);
   if (typeof legacy === "string" && legacy.trim().length > 0) {
     const migrated = legacy.trim().slice(0, NICKNAME_MAX_LENGTH);
     writeStorage(NICKNAME_KEY, migrated);
+    removeStorage(LEGACY_NICKNAME_KEY);
     return migrated;
   }
+  removeStorage(LEGACY_NICKNAME_KEY);
   return "";
 }
 
@@ -77,5 +84,8 @@ export function setNickname(name) {
   } else {
     removeStorage(NICKNAME_KEY);
   }
+  // Once the nickname is managed through the shared key, drop the legacy key
+  // so a stale Higher or Lower value can't reappear after the user clears it.
+  removeStorage(LEGACY_NICKNAME_KEY);
   return trimmed;
 }
