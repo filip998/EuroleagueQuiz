@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -29,6 +30,13 @@ from app.services.game_action_orchestration import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TurnTimerState:
+    seconds: float | None
+    current_player: int
+    round_number: int
 
 
 class OnlineGameAdapter(Protocol):
@@ -152,7 +160,7 @@ class TurnTimerManager:
     def start(
         self,
         game_id: int,
-        turn_seconds: int | None,
+        turn_seconds: float | None,
         current_player: int,
         round_number: int,
     ) -> None:
@@ -383,23 +391,53 @@ class OnlineGameRealtimeModule:
             self._start_disconnect_grace(game_id, player)
 
     def start_timer_from_game(self, game: Any) -> None:
+        timer_state = self._timer_state_from_game(game)
+        if timer_state is None:
+            self.timer.cancel(game.id)
+            return
         self.timer.start(
             game.id,
-            game.turn_seconds,
-            game.current_player,
-            game.round_number,
+            timer_state.seconds,
+            timer_state.current_player,
+            timer_state.round_number,
         )
 
     def start_timer_from_state(self, game_state: dict[str, Any]) -> None:
+        timer_state = self._timer_state_from_state(game_state)
+        if timer_state is None:
+            self.timer.cancel(game_state["id"])
+            return
         self.timer.start(
             game_state["id"],
-            game_state.get("turn_seconds"),
-            game_state["current_player"],
-            game_state["round_number"],
+            timer_state.seconds,
+            timer_state.current_player,
+            timer_state.round_number,
         )
 
     def cancel_timer(self, game_id: int) -> None:
         self.timer.cancel(game_id)
+
+    def _timer_state_from_game(self, game: Any) -> TurnTimerState | None:
+        hook = getattr(self.adapter, "timer_state_from_game", None)
+        if hook is not None:
+            return hook(game)
+        return TurnTimerState(
+            seconds=getattr(game, "turn_seconds", None),
+            current_player=getattr(game, "current_player", 0),
+            round_number=game.round_number,
+        )
+
+    def _timer_state_from_state(
+        self, game_state: dict[str, Any]
+    ) -> TurnTimerState | None:
+        hook = getattr(self.adapter, "timer_state_from_state", None)
+        if hook is not None:
+            return hook(game_state)
+        return TurnTimerState(
+            seconds=game_state.get("turn_seconds"),
+            current_player=game_state.get("current_player", 0),
+            round_number=game_state["round_number"],
+        )
 
     def _start_disconnect_grace(self, game_id: int, player: int) -> None:
         if self.connections.has_player(game_id, player):
@@ -499,6 +537,22 @@ class OnlineGameRealtimeModule:
                     game = self.adapter.get_game(db, game_id)
                 except GameActionError:
                     return GAME_ACTION_NOOP
+                handle_unattended_time_expired = getattr(
+                    self.adapter,
+                    "handle_unattended_time_expired",
+                    None,
+                )
+                if (
+                    handle_unattended_time_expired is not None
+                    and not self.connections.has_player(game_id, 1)
+                    and not self.connections.has_player(game_id, 2)
+                ):
+                    return handle_unattended_time_expired(
+                        db,
+                        game,
+                        expected_player=expected_player,
+                        expected_round=expected_round,
+                    )
                 return self.adapter.handle_time_expired(
                     db,
                     game,

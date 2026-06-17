@@ -29,6 +29,7 @@ class GameKind(StrEnum):
     TICTACTOE = "tictactoe"
     ROSTER_GUESS = "roster_guess"
     CAREER_QUIZ = "career_quiz"
+    PHOTO_QUIZ = "photo_quiz"
 
 
 class GameActionName(StrEnum):

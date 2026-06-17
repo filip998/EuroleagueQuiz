@@ -12,7 +12,8 @@ from app.game_actions import (
     InvalidGameActionError,
     NotFoundGameActionError,
 )
-from app.models import QuizTicTacToeGame
+from app.models import PhotoQuizGame, QuizTicTacToeGame
+from app.services import photo_quiz as photo_service
 from app.services import tictactoe as ttt_service
 from app.services.game_action_orchestration import GameKind
 from app.services.matchmaking import (
@@ -37,12 +38,32 @@ class TicTacToeQuickMatchPoolCounts:
     in_progress: int = 0
 
 
+@dataclass(frozen=True)
+class PhotoQuizMatchmakingPreset:
+    target_wins: int
+    wrong_guess_visibility: str = "private"
+    round_seconds: int = 60
+
+
+@dataclass(frozen=True)
+class PhotoQuizQuickMatchPoolCounts:
+    searching: int = 0
+    in_progress: int = 0
+
+
 TICTACTOE_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS = 5
+PHOTO_QUIZ_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS = 5
 
 DEFAULT_TICTACTOE_MATCHMAKING_PRESETS = {
     "blitz": TicTacToeMatchmakingPreset(target_wins=3, timer_mode="15s"),
     "standard": TicTacToeMatchmakingPreset(target_wins=3, timer_mode="40s"),
     "long": TicTacToeMatchmakingPreset(target_wins=5, timer_mode="40s"),
+}
+
+DEFAULT_PHOTO_QUIZ_MATCHMAKING_PRESETS = {
+    "quick": PhotoQuizMatchmakingPreset(target_wins=1),
+    "standard": PhotoQuizMatchmakingPreset(target_wins=3),
+    "long": PhotoQuizMatchmakingPreset(target_wins=5),
 }
 
 
@@ -259,4 +280,224 @@ class TicTacToeMatchmakingAdapter:
         if config.timer_mode not in ttt_service.TIMER_MODE_TO_SECONDS:
             raise InvalidGameActionError(
                 f"Invalid TicTacToe timer_mode for preset '{preset}'"
+            )
+
+
+class PhotoQuizMatchmakingAdapter:
+    game_kind = GameKind.PHOTO_QUIZ.value
+
+    def __init__(
+        self,
+        presets: Mapping[str, PhotoQuizMatchmakingPreset] | None = None,
+    ):
+        source = DEFAULT_PHOTO_QUIZ_MATCHMAKING_PRESETS if presets is None else presets
+        self._presets = {}
+        for key, value in source.items():
+            preset_key = clean_preset(key)
+            self._validate_preset_config(preset_key, value)
+            self._presets[preset_key] = value
+
+    def preset_keys(self) -> tuple[str, ...]:
+        return tuple(self._presets.keys())
+
+    def round_seconds_for_preset(self, preset: str) -> int:
+        return self._preset_config(preset).round_seconds
+
+    def pool_presence_counts(
+        self,
+        db: Session,
+    ) -> dict[str, PhotoQuizQuickMatchPoolCounts]:
+        counts = {
+            preset: PhotoQuizQuickMatchPoolCounts() for preset in self.preset_keys()
+        }
+        if not counts:
+            return counts
+
+        rows = (
+            db.query(
+                PhotoQuizGame.preset,
+                PhotoQuizGame.status,
+                func.count(PhotoQuizGame.id),
+            )
+            .filter(
+                PhotoQuizGame.mode == "online_friend",
+                PhotoQuizGame.is_public.is_(True),
+                PhotoQuizGame.preset.in_(tuple(counts)),
+                PhotoQuizGame.status.in_(("waiting_for_opponent", "active")),
+            )
+            .group_by(PhotoQuizGame.preset, PhotoQuizGame.status)
+            .all()
+        )
+
+        for preset, status, total in rows:
+            current = counts[preset]
+            total_count = int(total or 0)
+            if status == "waiting_for_opponent":
+                counts[preset] = PhotoQuizQuickMatchPoolCounts(
+                    searching=total_count,
+                    in_progress=current.in_progress,
+                )
+            elif status == "active":
+                counts[preset] = PhotoQuizQuickMatchPoolCounts(
+                    searching=current.searching,
+                    in_progress=total_count,
+                )
+
+        return counts
+
+    def find_existing_game(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> ExistingMatchmakingGame | None:
+        self._preset_config(request.preset)
+        game = (
+            db.query(PhotoQuizGame)
+            .filter(
+                PhotoQuizGame.mode == "online_friend",
+                PhotoQuizGame.status.in_(("waiting_for_opponent", "active")),
+                PhotoQuizGame.is_public.is_(True),
+                PhotoQuizGame.preset == request.preset,
+                or_(
+                    PhotoQuizGame.player1_guest_id == request.guest_id,
+                    PhotoQuizGame.player2_guest_id == request.guest_id,
+                ),
+            )
+            .order_by(
+                PhotoQuizGame.status.asc(),
+                PhotoQuizGame.created_at.asc(),
+                PhotoQuizGame.id.asc(),
+            )
+            .first()
+        )
+        if game is None:
+            return None
+
+        player = 1 if clean_guest_id(game.player1_guest_id) == request.guest_id else 2
+        status = (
+            MatchmakingStatus.MATCHED
+            if game.status == "active"
+            else MatchmakingStatus.SEARCHING
+        )
+        return ExistingMatchmakingGame(status=status, game=game, player=player)
+
+    def find_waiting_game(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> PhotoQuizGame | None:
+        self._preset_config(request.preset)
+        query = db.query(PhotoQuizGame).filter(
+            PhotoQuizGame.mode == "online_friend",
+            PhotoQuizGame.status == "waiting_for_opponent",
+            PhotoQuizGame.is_public.is_(True),
+            PhotoQuizGame.preset == request.preset,
+        )
+        if request.guest_id is not None:
+            query = query.filter(
+                or_(
+                    PhotoQuizGame.player1_guest_id.is_(None),
+                    PhotoQuizGame.player1_guest_id != request.guest_id,
+                )
+            )
+        return query.order_by(
+            PhotoQuizGame.created_at.asc(),
+            PhotoQuizGame.id.asc(),
+        ).first()
+
+    def create_waiting_game(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> PhotoQuizGame:
+        preset = self._preset_config(request.preset)
+        game = photo_service.create_game(
+            db,
+            target_wins=preset.target_wins,
+            wrong_guess_visibility=preset.wrong_guess_visibility,
+            player1_name=request.player_name,
+            guest_id=request.guest_id,
+        )
+        game.is_public = True
+        game.preset = request.preset
+        game.updated_at = datetime.utcnow()
+        db.flush()
+        return game
+
+    def join_waiting_game(
+        self,
+        db: Session,
+        game: PhotoQuizGame,
+        request: MatchmakingRequest,
+        *,
+        starting_player: int,
+    ) -> PhotoQuizGame:
+        if (
+            game.mode != "online_friend"
+            or game.status != "waiting_for_opponent"
+            or not game.is_public
+            or game.preset != request.preset
+        ):
+            raise ConflictGameActionError("Matchmaking game is no longer available")
+        if (
+            request.guest_id is not None
+            and clean_guest_id(game.player1_guest_id) == request.guest_id
+        ):
+            raise ConflictGameActionError("Cannot match a game created by the same guest")
+        return photo_service.join_game(
+            db,
+            game.join_code,
+            player_name=request.player_name,
+            guest_id=request.guest_id,
+            allow_public=True,
+        )
+
+    def cancel_waiting_game(
+        self,
+        db: Session,
+        request: MatchmakingCancelRequest,
+    ) -> PhotoQuizGame:
+        self._preset_config(request.preset)
+        game = (
+            db.query(PhotoQuizGame)
+            .filter(
+                PhotoQuizGame.id == request.game_id,
+                PhotoQuizGame.mode == "online_friend",
+                PhotoQuizGame.status == "waiting_for_opponent",
+                PhotoQuizGame.is_public.is_(True),
+                PhotoQuizGame.preset == request.preset,
+            )
+            .first()
+        )
+        if game is None:
+            raise NotFoundGameActionError("Matchmaking search not found")
+        if clean_guest_id(game.player1_guest_id) != request.guest_id:
+            raise ConflictGameActionError("Cannot cancel another player's search")
+
+        db.delete(game)
+        db.flush()
+        return game
+
+    def _preset_config(self, preset: str) -> PhotoQuizMatchmakingPreset:
+        try:
+            return self._presets[preset]
+        except KeyError as exc:
+            raise InvalidGameActionError("Unknown Photo Quiz matchmaking preset") from exc
+
+    @staticmethod
+    def _validate_preset_config(
+        preset: str,
+        config: PhotoQuizMatchmakingPreset,
+    ) -> None:
+        if config.target_wins not in photo_service.VALID_TARGET_WINS:
+            raise InvalidGameActionError(
+                f"Invalid Photo Quiz target_wins for preset '{preset}'"
+            )
+        if config.wrong_guess_visibility not in photo_service.VALID_WRONG_GUESS_VISIBILITY:
+            raise InvalidGameActionError(
+                f"Invalid Photo Quiz wrong_guess_visibility for preset '{preset}'"
+            )
+        if not isinstance(config.round_seconds, int) or config.round_seconds <= 0:
+            raise InvalidGameActionError(
+                f"Invalid Photo Quiz round_seconds for preset '{preset}'"
             )

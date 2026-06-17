@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -19,6 +20,8 @@ from app.services.game_action_orchestration import (
     GameActionName,
     RealtimeActionOutcome,
 )
+from app.services.matchmaking_adapters import PhotoQuizMatchmakingAdapter
+from app.services.realtime import TurnTimerState
 
 
 _TICTACTOE_ROUND_RESULTS = {"round_won", "round_drawn", "match_won", "board_complete"}
@@ -614,6 +617,9 @@ class PhotoQuizRealtimeAdapter:
     }
     client_actions = websocket_actions
 
+    def __init__(self, matchmaking: PhotoQuizMatchmakingAdapter | None = None):
+        self.matchmaking = matchmaking or PhotoQuizMatchmakingAdapter()
+
     def get_game(self, db: Session, game_id: int) -> Any:
         return photo_service.get_game_or_404(db, game_id)
 
@@ -695,6 +701,8 @@ class PhotoQuizRealtimeAdapter:
                 completed_round_number=(
                     prev_round_number if result in _PHOTO_ROUND_RESULTS else None
                 ),
+                schedule_timer=result == RealtimeResult.ROUND_WON.value,
+                cancel_timer=result == RealtimeResult.MATCH_WON.value,
                 broadcast_to_player=(
                     acting_player
                     if result == RealtimeResult.INCORRECT.value
@@ -729,12 +737,14 @@ class PhotoQuizRealtimeAdapter:
                     data, "no_answer_offer_version"
                 ),
             )
+            accepted = result == "accepted"
             return RealtimeActionOutcome(
                 game=game,
                 result=f"no_answer_{result}",
                 completed_round_number=(
-                    prev_round_number if result == "accepted" else None
+                    prev_round_number if accepted else None
                 ),
+                schedule_timer=accepted and game.status == "active",
             )
 
         raise AssertionError(f"Unhandled Photo Quiz game action: {action}")
@@ -747,7 +757,89 @@ class PhotoQuizRealtimeAdapter:
         expected_player: int,
         expected_round: int,
     ) -> Any:
-        return GAME_ACTION_NOOP
+        if not photo_service.handle_public_round_time_expired(
+            db,
+            game=game,
+            expected_round=expected_round,
+        ):
+            return GAME_ACTION_NOOP
+        return game
+
+    def handle_unattended_time_expired(
+        self,
+        db: Session,
+        game: Any,
+        *,
+        expected_player: int,
+        expected_round: int,
+    ) -> Any:
+        if not photo_service.handle_public_game_unattended_time_expired(
+            db,
+            game=game,
+            expected_round=expected_round,
+        ):
+            return GAME_ACTION_NOOP
+        return game
+
+    def timer_state_from_game(self, game: Any) -> TurnTimerState | None:
+        round_seconds = self._round_seconds_for_preset(getattr(game, "preset", None))
+        if round_seconds is None:
+            return None
+        delay = photo_service.public_round_timer_delay_seconds(
+            game,
+            round_seconds=round_seconds,
+        )
+        if delay is None:
+            return None
+        return TurnTimerState(
+            seconds=delay,
+            current_player=0,
+            round_number=game.round_number,
+        )
+
+    def timer_state_from_state(self, game_state: dict[str, Any]) -> TurnTimerState | None:
+        if (
+            game_state.get("mode") != "online_friend"
+            or game_state.get("status") != "active"
+            or not game_state.get("is_public")
+        ):
+            return None
+        current_round = game_state.get("current_round")
+        if not isinstance(current_round, dict) or current_round.get("status") != "active":
+            return None
+        round_seconds = self._round_seconds_for_preset(game_state.get("preset"))
+        if round_seconds is None:
+            return None
+        round_number = game_state.get("round_number")
+        if not isinstance(round_number, int) or isinstance(round_number, bool):
+            return None
+
+        delay = float(round_seconds)
+        next_round_starts_at = (
+            (game_state.get("latest_completed_round") or {}).get(
+                "next_round_starts_at"
+            )
+            if isinstance(game_state.get("latest_completed_round"), dict)
+            else None
+        )
+        starts_at = _parse_utc_datetime(next_round_starts_at)
+        if starts_at is not None:
+            now = datetime.now(timezone.utc)
+            if now < starts_at:
+                delay += max((starts_at - now).total_seconds(), 0.0)
+        return TurnTimerState(
+            seconds=delay,
+            current_player=0,
+            round_number=round_number,
+        )
+
+    def _round_seconds_for_preset(self, preset: object) -> int | None:
+        if not isinstance(preset, str) or not preset:
+            return None
+        try:
+            return self.matchmaking.round_seconds_for_preset(preset)
+        except InvalidGameActionError:
+            return None
 
     def handle_player_forfeit(
         self,
@@ -758,3 +850,15 @@ class PhotoQuizRealtimeAdapter:
         result: RealtimeResult,
     ) -> Any:
         return GAME_ACTION_NOOP
+
+
+def _parse_utc_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
