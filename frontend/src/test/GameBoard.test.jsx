@@ -146,9 +146,11 @@ describe("GameBoard waiting lobby", () => {
 });
 
 describe("GameBoard online resign", () => {
-  it("resigns through the HTTP give-up endpoint and shows the forfeit outcome", async () => {
+  it("resigns through the HTTP give-up endpoint and shows the self-resign outcome", async () => {
+    // Player 1 resigns, so the backend awards the win to player 2 and the
+    // resigning viewer (player 1) must see the "You resigned." subtitle.
     giveUpGame.mockResolvedValue({
-      state: activeGame({ status: "finished", winner_player: 1 }),
+      state: activeGame({ status: "finished", winner_player: 2 }),
       result: "resigned",
     });
 
@@ -166,6 +168,28 @@ describe("GameBoard online resign", () => {
     fireEvent.click(screen.getByText("Resign"));
 
     await waitFor(() => expect(giveUpGame).toHaveBeenCalledWith(7, 1));
+    expect(await screen.findByText("You resigned.")).toBeInTheDocument();
+  });
+
+  it("renders an opponent resignation delivered over realtime", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 2 }}
+      />
+    );
+
+    // The opponent (player 1) resigned remotely, so player 2 wins and sees the
+    // opponent-perspective subtitle (the iWon branch).
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ status: "finished", winner_player: 2 }),
+        result: "resigned",
+      });
+    });
+
     expect(await screen.findByText("Your opponent resigned.")).toBeInTheDocument();
   });
 
