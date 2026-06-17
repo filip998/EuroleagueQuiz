@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import random
+import secrets
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, or_
@@ -11,7 +13,7 @@ from app.game_actions import (
     InvalidGameActionError,
     NotFoundGameActionError,
 )
-from app.models import Player
+from app.models import PhotoQuizGame, PhotoQuizGuess, PhotoQuizRound, Player
 from app.services.solo_round_token import (
     SoloRoundTokenError,
     create_solo_round_token,
@@ -31,9 +33,31 @@ def create_solo_round(
         db,
         exclude_ids=set((recent_player_ids or [])[-20:]),
     )
+    solo_token_id = _generate_solo_token_id(db)
+    game = PhotoQuizGame(
+        mode="single_player",
+        status="active",
+        target_wins=1,
+        wrong_guess_visibility="private",
+        player1_name="Player 1",
+        player1_score=0,
+        player2_score=0,
+        round_number=1,
+    )
+    db.add(game)
+    db.flush()
+    round_obj = PhotoQuizRound(
+        game_id=game.id,
+        round_number=1,
+        status="active",
+        answer_player_id=player.id,
+        solo_token_id=solo_token_id,
+    )
+    db.add(round_obj)
+    db.flush()
     return {
         "round_token": create_solo_round_token(
-            player_id=player.id,
+            player_id=solo_token_id,
             data_revision=PHOTO_QUIZ_DATA_REVISION,
         ),
         "data_revision": PHOTO_QUIZ_DATA_REVISION,
@@ -42,8 +66,27 @@ def create_solo_round(
 
 
 def submit_solo_guess(db: Session, *, round_token: str, player_id: int) -> dict[str, Any]:
-    answer_id = _validate_solo_answer_id(round_token)
+    round_obj = _solo_round_for_token(db, round_token)
+    if round_obj.status != "active":
+        raise ConflictGameActionError("Photo Quiz round is not active")
+    answer_id = round_obj.answer_player_id
     correct = answer_id == player_id
+    db.add(
+        PhotoQuizGuess(
+            round_id=round_obj.id,
+            player_number=1,
+            guessed_player_id=player_id,
+            is_correct=correct,
+        )
+    )
+    if correct:
+        round_obj.status = "completed"
+        round_obj.winner_player = 1
+        round_obj.completed_at = datetime.utcnow()
+        round_obj.game.status = "finished"
+        round_obj.game.winner_player = 1
+        round_obj.game.player1_score = 1
+        round_obj.game.updated_at = datetime.utcnow()
     response: dict[str, Any] = {"correct": correct}
     if correct:
         response["answer"] = _player_payload(db, answer_id)
@@ -51,8 +94,8 @@ def submit_solo_guess(db: Session, *, round_token: str, player_id: int) -> dict[
 
 
 def reveal_solo_answer(db: Session, *, round_token: str) -> dict[str, Any]:
-    answer_id = _validate_solo_answer_id(round_token)
-    return {"answer": _player_payload(db, answer_id)}
+    round_obj = _solo_round_for_token(db, round_token)
+    return {"answer": _player_payload(db, round_obj.answer_player_id)}
 
 
 def autocomplete_players(
@@ -156,7 +199,7 @@ def _player_display_name(player: Player) -> str:
     ).strip()
 
 
-def _validate_solo_answer_id(round_token: str) -> int:
+def _solo_round_for_token(db: Session, round_token: str) -> PhotoQuizRound:
     try:
         payload = validate_solo_round_token(
             round_token,
@@ -164,4 +207,26 @@ def _validate_solo_answer_id(round_token: str) -> int:
         )
     except SoloRoundTokenError as exc:
         raise InvalidGameActionError(str(exc)) from exc
-    return payload.player_id
+    round_obj = (
+        db.query(PhotoQuizRound)
+        .filter(PhotoQuizRound.solo_token_id == payload.player_id)
+        .first()
+    )
+    if round_obj is None:
+        raise InvalidGameActionError("Invalid solo round token")
+    return round_obj
+
+
+def _generate_solo_token_id(db: Session) -> int:
+    for _ in range(100):
+        token_id = secrets.randbits(63)
+        if token_id == 0:
+            continue
+        exists = (
+            db.query(PhotoQuizRound.id)
+            .filter(PhotoQuizRound.solo_token_id == token_id)
+            .first()
+        )
+        if exists is None:
+            return token_id
+    raise ConflictGameActionError("Unable to create Photo Quiz round")

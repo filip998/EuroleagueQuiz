@@ -53,6 +53,7 @@ def upgrade() -> None:
         sa.Column("round_number", sa.Integer(), nullable=False),
         sa.Column("status", sa.String(), nullable=False),
         sa.Column("answer_player_id", sa.Integer(), nullable=False),
+        sa.Column("solo_token_id", sa.Integer(), nullable=True),
         sa.Column("winner_player", sa.Integer(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("completed_at", sa.DateTime(), nullable=True),
@@ -60,6 +61,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["game_id"], ["photo_quiz_games.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("game_id", "round_number", name="uq_photo_quiz_round"),
+    )
+    op.create_index(
+        op.f("ix_photo_quiz_rounds_solo_token_id"),
+        "photo_quiz_rounds",
+        ["solo_token_id"],
+        unique=True,
     )
     op.create_table(
         "photo_quiz_guesses",
@@ -78,6 +85,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_table("photo_quiz_guesses")
+    op.drop_index(
+        op.f("ix_photo_quiz_rounds_solo_token_id"),
+        table_name="photo_quiz_rounds",
+    )
     op.drop_table("photo_quiz_rounds")
     op.drop_index(op.f("ix_photo_quiz_games_join_code"), table_name="photo_quiz_games")
     op.drop_table("photo_quiz_games")

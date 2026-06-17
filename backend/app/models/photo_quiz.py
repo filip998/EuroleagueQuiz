@@ -55,6 +55,7 @@ class PhotoQuizRound(Base):
     round_number = Column(Integer, nullable=False)
     status = Column(String, nullable=False, default="active")
     answer_player_id = Column(Integer, ForeignKey("players.id"), nullable=False)
+    solo_token_id = Column(Integer, nullable=True, unique=True, index=True)
     winner_player = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
