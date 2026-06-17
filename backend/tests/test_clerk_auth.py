@@ -17,6 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.auth.clerk as clerk_module
 import app.auth.dependencies as auth_dependencies
+import app.auth.users as users_module
 from app.auth.clerk import ClerkAuthConfigurationError, ClerkJWTVerifier, ClerkTokenError, JWKSCache
 from app.auth.users import get_or_create_user_for_claims
 from app.auth_database import Base, get_auth_db, sqlite_connect_args
@@ -165,10 +166,11 @@ def test_jwks_cache_waits_for_in_flight_rotation_refresh():
     assert fetches == [JWKS_URL, JWKS_URL]
 
 
-def test_jwks_cache_allows_rotated_kid_after_different_unknown_kid():
+def test_jwks_cache_allows_rotated_kid_after_multiple_unknown_kids():
     old_key = _new_signing_key("old-key")
     new_key = _new_signing_key("new-key")
     responses: list[Mapping[str, Any]] = [
+        {"keys": [old_key.jwk]},
         {"keys": [old_key.jwk]},
         {"keys": [old_key.jwk]},
         {"keys": [old_key.jwk, new_key.jwk]},
@@ -183,10 +185,12 @@ def test_jwks_cache_allows_rotated_kid_after_different_unknown_kid():
 
     verifier.verify(_make_token(old_key))
     with pytest.raises(ClerkTokenError):
-        verifier.verify(_make_token(old_key, kid="random-unknown"))
+        verifier.verify(_make_token(old_key, kid="random-unknown-one"))
+    with pytest.raises(ClerkTokenError):
+        verifier.verify(_make_token(old_key, kid="random-unknown-two"))
     verifier.verify(_make_token(new_key))
 
-    assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL]
+    assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL, JWKS_URL]
 
 
 def test_jwks_cache_rate_limits_unknown_kid_refreshes(signing_key):
@@ -197,9 +201,9 @@ def test_jwks_cache_rate_limits_unknown_kid_refreshes(signing_key):
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
     with pytest.raises(ClerkTokenError):
-        verifier.verify(_make_token(signing_key, kid="unknown-two"))
+        verifier.verify(_make_token(signing_key, kid="unknown-one"))
     with pytest.raises(ClerkTokenError):
-        verifier.verify(_make_token(signing_key, kid="unknown-three"))
+        verifier.verify(_make_token(signing_key, kid="unknown-two"))
 
     assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL]
 
@@ -219,9 +223,9 @@ def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
     with pytest.raises(ClerkTokenError):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
     with pytest.raises(ClerkTokenError):
-        verifier.verify(_make_token(signing_key, kid="unknown-two"))
+        verifier.verify(_make_token(signing_key, kid="unknown-one"))
     with pytest.raises(ClerkTokenError):
-        verifier.verify(_make_token(signing_key, kid="unknown-three"))
+        verifier.verify(_make_token(signing_key, kid="unknown-two"))
 
     assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL]
 
@@ -368,6 +372,46 @@ def test_jit_provisioning_is_idempotent_with_minimal_claims(auth_session_factory
         assert count == 1
         assert first.username.startswith("user_")
         assert first.email.endswith("@clerk.invalid")
+
+
+def test_jit_provisioning_returns_existing_user_after_clerk_id_race(
+    monkeypatch,
+    auth_session_factory,
+):
+    with auth_session_factory() as db:
+        existing = User(
+            clerk_user_id="user_race",
+            username="winner",
+            email="winner@example.com",
+        )
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+
+        original_find = users_module._find_by_clerk_user_id
+        first_lookup = True
+
+        def simulate_concurrent_insert(db_arg, clerk_user_id):
+            nonlocal first_lookup
+            if first_lookup:
+                first_lookup = False
+                return None
+            return original_find(db_arg, clerk_user_id)
+
+        monkeypatch.setattr(users_module, "_find_by_clerk_user_id", simulate_concurrent_insert)
+
+        user = get_or_create_user_for_claims(
+            db,
+            {
+                "sub": "user_race",
+                "username": "loser",
+                "email": "loser@example.com",
+            },
+        )
+        count = db.scalar(select(func.count()).select_from(User))
+
+        assert user.id == existing.id
+        assert count == 1
 
 
 def test_jit_provisioning_handles_username_collision(auth_session_factory):

@@ -64,7 +64,6 @@ def _default_fetch_jwks(url: str) -> Mapping[str, Any]:
 class _CachedJWKS:
     keys_by_kid: dict[str, Mapping[str, Any]]
     fetched_at: float
-    last_unknown_kid_refresh_at: float
 
 
 @dataclass
@@ -81,17 +80,15 @@ class JWKSCache:
         fetcher: JWKSFetcher = _default_fetch_jwks,
         ttl_seconds: float = 300.0,
         refresh_cooldown_seconds: float = 30.0,
-        unknown_kid_refresh_limit: int = 2,
         clock: Clock = time.monotonic,
     ) -> None:
         self._fetcher = fetcher
         self._ttl_seconds = ttl_seconds
         self._refresh_cooldown_seconds = refresh_cooldown_seconds
-        self._unknown_kid_refresh_limit = max(1, unknown_kid_refresh_limit)
         self._clock = clock
         self._cache: dict[str, _CachedJWKS] = {}
         self._in_flight_fetches: dict[str, _InFlightJWKSFetch] = {}
-        self._unknown_kid_refreshes: dict[str, list[tuple[str, float]]] = {}
+        self._unknown_kid_refreshes: dict[str, dict[str, float]] = {}
         self._lock = threading.RLock()
 
     def get_key(self, jwks_url: str, kid: str) -> Mapping[str, Any]:
@@ -131,18 +128,13 @@ class JWKSCache:
                     return cached
         if wait_for is not None:
             return self._wait_for_fetch(wait_for)
-        return self._fetch_and_store(
-            jwks_url,
-            now=now,
-            last_unknown_kid_refresh_at=now,
-        )
+        return self._fetch_and_store(jwks_url, now=now)
 
     def _fetch_and_store(
         self,
         jwks_url: str,
         *,
         now: float,
-        last_unknown_kid_refresh_at: float | None = None,
         minimum_fetched_at: float | None = None,
     ) -> _CachedJWKS:
         with self._lock:
@@ -151,12 +143,6 @@ class JWKSCache:
                 return cached
             in_flight = self._in_flight_fetches.get(jwks_url)
             if in_flight is None:
-                if last_unknown_kid_refresh_at is not None and cached is not None:
-                    self._cache[jwks_url] = _CachedJWKS(
-                        keys_by_kid=cached.keys_by_kid,
-                        fetched_at=cached.fetched_at,
-                        last_unknown_kid_refresh_at=last_unknown_kid_refresh_at,
-                    )
                 in_flight = _InFlightJWKSFetch(event=threading.Event())
                 self._in_flight_fetches[jwks_url] = in_flight
                 owns_fetch = True
@@ -169,15 +155,9 @@ class JWKSCache:
         try:
             jwks = self._fetcher(jwks_url)
             with self._lock:
-                previous = self._cache.get(jwks_url)
                 cached = _CachedJWKS(
                     keys_by_kid=_keys_by_kid(jwks),
                     fetched_at=now,
-                    last_unknown_kid_refresh_at=(
-                        previous.last_unknown_kid_refresh_at
-                        if last_unknown_kid_refresh_at is None and previous is not None
-                        else last_unknown_kid_refresh_at or 0.0
-                    ),
                 )
                 self._cache[jwks_url] = cached
                 in_flight.result = cached
@@ -200,17 +180,18 @@ class JWKSCache:
         return in_flight.result
 
     def _reserve_unknown_kid_refresh(self, jwks_url: str, kid: str, now: float) -> bool:
-        refreshes = [
-            (refreshed_kid, refreshed_at)
-            for refreshed_kid, refreshed_at in self._unknown_kid_refreshes.get(jwks_url, [])
+        refreshes = {
+            refreshed_kid: refreshed_at
+            for refreshed_kid, refreshed_at in self._unknown_kid_refreshes.get(jwks_url, {}).items()
             if now - refreshed_at < self._refresh_cooldown_seconds
-        ]
+        }
         self._unknown_kid_refreshes[jwks_url] = refreshes
-        if any(refreshed_kid == kid for refreshed_kid, _ in refreshes):
+        if kid in refreshes:
             return False
-        if len(refreshes) >= self._unknown_kid_refresh_limit:
-            return False
-        refreshes.append((kid, now))
+        # Rate-limit only repeated misses for the same kid. A global miss budget lets forged
+        # kids starve a real Clerk key rotation, because random and rotated kids look identical
+        # until the JWKS is refreshed.
+        refreshes[kid] = now
         return True
 
 
