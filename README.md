@@ -30,6 +30,7 @@ Then open `http://localhost:5173` to play.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo and multiplayer.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice and 2-player race modes.
+- **Photo Quiz** — Guess the player from a headshot. The backend core supports Solo rounds from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
 
 ## Backend
 
@@ -95,6 +96,10 @@ Player image/link data lives directly on `players`: EuroLeague CDN headshots are
 `euroleague_image_url`, Wikipedia page URLs in `wikipedia_url`, and future Wikipedia photo
 enrichment in `wikipedia_image_url` / `wikipedia_image_checked_at`. Existing game payloads
 continue to expose the frontend-compatible `image_url` JSON key for the EuroLeague image.
+Photo Quiz uses those same columns for its eligible pool and resolves images CDN-first:
+`euroleague_image_url` wins when present, otherwise `wikipedia_image_url` is used. Solo
+Photo Quiz rounds use signed Solo Round Tokens and expose only the resolved clue image until
+the answer is guessed correctly or revealed.
 Multiplayer Career Quiz resolved-round state includes
 `latest_completed_round.next_round_starts_at` during the three-second reveal lock; the
 backend rejects next-round guesses with `round_locked` until that UTC timestamp elapses.
@@ -188,6 +193,7 @@ pytest tests/test_api.py            # API tests only
 pytest tests/test_tictactoe_api.py  # TicTacToe tests only
 pytest tests/test_higher_lower.py   # Higher or Lower tests only
 pytest tests/test_career_quiz.py    # Career Quiz tests only
+pytest tests/test_photo_quiz.py     # Photo Quiz backend-core tests only
 ```
 
 ### Frontend Unit Tests (Vitest + React Testing Library)
