@@ -218,10 +218,20 @@ def submit_guess(
     if round_obj.status != "active":
         raise ConflictGameActionError("Round is not active")
     _raise_if_current_round_locked(game)
+    _assert_active_game_round(db, game, round_obj, round_number)
     if db.query(Player.id).filter_by(id=player_id).first() is None:
         raise NotFoundGameActionError("Player not found")
 
     correct = player_id == round_obj.answer_player_id
+    if correct:
+        completed_at = datetime.utcnow()
+        _claim_active_round(
+            db,
+            round_obj,
+            status="completed",
+            winner_player=acting_player,
+            completed_at=completed_at,
+        )
     db.add(
         PhotoQuizGuess(
             round_id=round_obj.id,
@@ -233,22 +243,30 @@ def submit_guess(
     if not correct:
         return "incorrect"
 
-    round_obj.status = "completed"
-    round_obj.winner_player = acting_player
-    round_obj.completed_at = datetime.utcnow()
-    if acting_player == 1:
-        game.player1_score += 1
+    player1_score = game.player1_score + (1 if acting_player == 1 else 0)
+    player2_score = game.player2_score + (1 if acting_player == 2 else 0)
+    match_won = player1_score >= game.target_wins or player2_score >= game.target_wins
+    game_values: dict[str, Any] = {
+        "player1_score": player1_score,
+        "player2_score": player2_score,
+        "pending_no_answer_from": None,
+        "pending_no_answer_to": None,
+    }
+    if match_won:
+        game_values["status"] = "finished"
+        game_values["winner_player"] = acting_player
     else:
-        game.player2_score += 1
+        game_values["round_number"] = game.round_number + 1
+    _update_active_game_round(db, game, round_number, game_values)
+
+    game.player1_score = player1_score
+    game.player2_score = player2_score
     game.pending_no_answer_from = None
     game.pending_no_answer_to = None
 
-    if game.player1_score >= game.target_wins or game.player2_score >= game.target_wins:
-        game.status = "finished"
-        game.winner_player = acting_player
+    if match_won:
         return "match_won"
 
-    game.round_number += 1
     _create_next_round(db, game)
     return "round_won"
 
@@ -266,8 +284,19 @@ def offer_no_answer(
         raise ConflictGameActionError("Game is not active")
     _raise_if_round_stale(game, round_number)
     _raise_if_current_round_locked(game)
+    _assert_active_game_round(db, game, _current_round(game), round_number)
+    pending_to = 2 if acting_player == 1 else 1
+    _update_active_game_round(
+        db,
+        game,
+        round_number,
+        {
+            "pending_no_answer_from": acting_player,
+            "pending_no_answer_to": pending_to,
+        },
+    )
     game.pending_no_answer_from = acting_player
-    game.pending_no_answer_to = 2 if acting_player == 1 else 1
+    game.pending_no_answer_to = pending_to
 
 
 def respond_no_answer(
@@ -288,16 +317,40 @@ def respond_no_answer(
     if accept:
         _raise_if_current_round_locked(game)
     if not accept:
+        _update_active_game_round(
+            db,
+            game,
+            round_number,
+            {
+                "pending_no_answer_from": None,
+                "pending_no_answer_to": None,
+            },
+        )
         game.pending_no_answer_from = None
         game.pending_no_answer_to = None
         return "declined"
 
     round_obj = _current_round(game)
-    round_obj.status = "no_answer"
-    round_obj.completed_at = datetime.utcnow()
+    completed_at = datetime.utcnow()
+    _claim_active_round(
+        db,
+        round_obj,
+        status="no_answer",
+        winner_player=None,
+        completed_at=completed_at,
+    )
+    _update_active_game_round(
+        db,
+        game,
+        round_number,
+        {
+            "pending_no_answer_from": None,
+            "pending_no_answer_to": None,
+            "round_number": game.round_number + 1,
+        },
+    )
     game.pending_no_answer_from = None
     game.pending_no_answer_to = None
-    game.round_number += 1
     _create_next_round(db, game)
     return "accepted"
 
@@ -461,6 +514,75 @@ def _round_next_starts_at(round_obj: PhotoQuizRound) -> datetime | None:
     return _as_utc(round_obj.completed_at) + timedelta(
         seconds=PHOTO_REVEAL_COUNTDOWN_SECONDS
     )
+
+
+def _assert_active_game_round(
+    db: Session,
+    game: PhotoQuizGame,
+    round_obj: PhotoQuizRound,
+    round_number: int,
+) -> None:
+    exists = (
+        db.query(PhotoQuizRound.id)
+        .join(PhotoQuizGame, PhotoQuizGame.id == PhotoQuizRound.game_id)
+        .filter(PhotoQuizRound.id == round_obj.id)
+        .filter(PhotoQuizRound.status == "active")
+        .filter(PhotoQuizGame.id == game.id)
+        .filter(PhotoQuizGame.status == "active")
+        .filter(PhotoQuizGame.round_number == round_number)
+        .first()
+    )
+    if exists is None:
+        raise ConflictGameActionError("round_stale")
+
+
+def _claim_active_round(
+    db: Session,
+    round_obj: PhotoQuizRound,
+    *,
+    status: str,
+    winner_player: int | None,
+    completed_at: datetime,
+) -> None:
+    updated = (
+        db.query(PhotoQuizRound)
+        .filter(PhotoQuizRound.id == round_obj.id)
+        .filter(PhotoQuizRound.status == "active")
+        .update(
+            {
+                "status": status,
+                "winner_player": winner_player,
+                "completed_at": completed_at,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated != 1:
+        raise ConflictGameActionError("round_stale")
+    round_obj.status = status
+    round_obj.winner_player = winner_player
+    round_obj.completed_at = completed_at
+
+
+def _update_active_game_round(
+    db: Session,
+    game: PhotoQuizGame,
+    round_number: int,
+    values: dict[str, Any],
+) -> None:
+    update_values = dict(values)
+    update_values.setdefault("updated_at", datetime.utcnow())
+    updated = (
+        db.query(PhotoQuizGame)
+        .filter(PhotoQuizGame.id == game.id)
+        .filter(PhotoQuizGame.status == "active")
+        .filter(PhotoQuizGame.round_number == round_number)
+        .update(update_values, synchronize_session=False)
+    )
+    if updated != 1:
+        raise ConflictGameActionError("round_stale")
+    for key, value in update_values.items():
+        setattr(game, key, value)
 
 
 def _current_round(game: PhotoQuizGame) -> PhotoQuizRound:
