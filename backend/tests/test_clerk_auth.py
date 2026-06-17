@@ -286,6 +286,30 @@ def test_auth_dependencies_do_not_swallow_configuration_errors(monkeypatch, auth
             auth_dependencies.get_optional_user(authorization="Bearer token", db=db)
 
 
+def test_auth_dependencies_do_not_treat_provisioning_errors_as_invalid_tokens(
+    monkeypatch,
+    auth_session_factory,
+    signing_key,
+):
+    verifier = _verifier(signing_key.jwk)
+
+    def raise_provisioning_error(db, claims):
+        raise auth_dependencies.UserProvisioningError("could not provision")
+
+    monkeypatch.setattr(auth_dependencies, "get_clerk_jwt_verifier", lambda: verifier)
+    monkeypatch.setattr(auth_dependencies, "get_or_create_user_for_claims", raise_provisioning_error)
+
+    with auth_session_factory() as db:
+        authorization = f"Bearer {_make_token(signing_key)}"
+        with pytest.raises(HTTPException) as exc_info:
+            auth_dependencies.get_current_user(authorization=authorization, db=db)
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.headers is None
+
+        with pytest.raises(auth_dependencies.UserProvisioningError):
+            auth_dependencies.get_optional_user(authorization=authorization, db=db)
+
+
 def test_get_optional_user_returns_none_for_missing_and_invalid_tokens(
     monkeypatch,
     auth_session_factory,

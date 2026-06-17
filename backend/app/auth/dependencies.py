@@ -15,8 +15,10 @@ def get_current_user(
 ) -> User:
     try:
         return _resolve_authenticated_user(authorization, db)
-    except (ClerkAuthError, UserProvisioningError) as exc:
+    except ClerkAuthError as exc:
         raise _unauthorized() from exc
+    except UserProvisioningError as exc:
+        raise _server_error() from exc
 
 
 def get_optional_user(
@@ -27,7 +29,7 @@ def get_optional_user(
         return None
     try:
         return _resolve_authenticated_user(authorization, db)
-    except (ClerkAuthError, UserProvisioningError):
+    except ClerkAuthError:
         return None
 
 
@@ -42,4 +44,11 @@ def _unauthorized() -> HTTPException:
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid authentication credentials",
         headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _server_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Could not provision authenticated user",
     )
