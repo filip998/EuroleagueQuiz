@@ -350,6 +350,13 @@ def respond_no_answer(
 
     round_obj = _current_round(game)
     completed_at = datetime.utcnow()
+    _claim_active_round(
+        db,
+        round_obj,
+        status="no_answer",
+        winner_player=None,
+        completed_at=completed_at,
+    )
     _update_pending_no_answer_offer(
         db,
         game,
@@ -360,13 +367,6 @@ def respond_no_answer(
             "pending_no_answer_to": None,
             "round_number": game.round_number + 1,
         },
-    )
-    _claim_active_round(
-        db,
-        round_obj,
-        status="no_answer",
-        winner_player=None,
-        completed_at=completed_at,
     )
     game.pending_no_answer_from = None
     game.pending_no_answer_to = None
