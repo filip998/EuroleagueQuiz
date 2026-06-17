@@ -1680,6 +1680,79 @@ def test_photo_quick_match_same_guest_does_not_self_match(
     assert third_game["status"] == "active"
 
 
+def test_photo_quick_match_rejects_cooperative_no_answer_skip(
+    photo_client: TestClient,
+    photo_quick_match_effects,
+):
+    first = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+    assert first.status_code == 200
+    second = photo_client.post(
+        "/quiz/photo/quick-match",
+        json={
+            "preset": "standard",
+            "player_name": "Joiner",
+            "guest_id": "joiner-guest",
+        },
+    )
+    assert second.status_code == 200
+    game = _state_payload(second)["game"]
+
+    offer = photo_client.post(
+        f"/quiz/photo/games/{game['id']}/no-answer-offer?player=1",
+        json={"round_number": game["round_number"]},
+    )
+
+    assert offer.status_code == 409
+    assert offer.json() == {
+        "type": "error",
+        "payload": {
+            "code": "conflict",
+            "message": "No-answer offers are disabled for public games",
+        },
+    }
+
+
+def test_photo_realtime_adapter_rejects_public_no_answer_offer():
+    db = _session()
+    try:
+        for index in range(2):
+            _player(
+                db,
+                "PublicSkip",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/public-skip-{index}",
+                euroleague_image_url=f"https://cdn/public-skip-{index}.png",
+            )
+        db.commit()
+
+        game = photo_quiz.create_game(db, target_wins=3, player1_name="A")
+        game.is_public = True
+        game.preset = "standard"
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+
+        with pytest.raises(
+            ConflictGameActionError,
+            match="No-answer offers are disabled for public games",
+        ):
+            PhotoQuizRealtimeAdapter().handle_client_action(
+                db,
+                game,
+                action="offer_no_answer",
+                data={"round_number": current.round_number},
+                player=1,
+            )
+    finally:
+        db.close()
+
+
 @pytest.mark.asyncio
 async def test_photo_quick_match_public_round_timeout_auto_skips_with_injected_clock(
     tmp_path: Path,
