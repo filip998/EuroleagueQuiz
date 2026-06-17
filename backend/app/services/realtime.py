@@ -108,6 +108,7 @@ class ConnectionManager:
         message: dict[str, Any],
         *,
         only_player: int | None = None,
+        on_disconnect: Callable[[int, WebSocket], None] | None = None,
     ) -> int:
         sent = 0
         if only_player is None:
@@ -120,7 +121,8 @@ class ConnectionManager:
                 await websocket.send_json(message)
                 sent += 1
             except Exception:
-                self.disconnect(game_id, player, websocket)
+                if self.disconnect(game_id, player, websocket) and on_disconnect:
+                    on_disconnect(player, websocket)
         return sent
 
 
@@ -250,6 +252,7 @@ class OnlineGameRealtimeModule:
             if disconnect_grace_seconds is None
             else disconnect_grace_seconds
         )
+        self._broadcast_locks: dict[int, asyncio.Lock] = {}
         self.game_actions = GameActionOrchestrator(adapter, self, log=logger)
 
     async def connect(self, websocket: WebSocket, game_id: int, player: int) -> None:
@@ -348,14 +351,29 @@ class OnlineGameRealtimeModule:
         completed_round: dict[str, Any] | None = None,
         only_player: int | None = None,
     ) -> int:
-        if is_terminal_result(result, game_state):
-            self.cancel_timer(game_id)
-            self.disconnect_grace_timer.cancel_game(game_id)
-        return await self.connections.broadcast(
-            game_id,
-            state_message(game_state, result=result, completed_round=completed_round),
-            only_player=only_player,
-        )
+        terminal = is_terminal_result(result, game_state)
+        lock = self._broadcast_locks.setdefault(game_id, asyncio.Lock())
+        async with lock:
+            if terminal:
+                self.cancel_timer(game_id)
+                self.disconnect_grace_timer.cancel_game(game_id)
+            return await self.connections.broadcast(
+                game_id,
+                state_message(
+                    game_state,
+                    result=result,
+                    completed_round=completed_round,
+                ),
+                only_player=only_player,
+                on_disconnect=(
+                    None
+                    if terminal
+                    else lambda failed_player, _websocket: self._start_disconnect_grace(
+                        game_id,
+                        failed_player,
+                    )
+                ),
+            )
 
     def disconnect(
         self, game_id: int, player: int, websocket: WebSocket | None = None
@@ -389,8 +407,9 @@ class OnlineGameRealtimeModule:
         if not getattr(self.adapter, "disconnect_forfeit_enabled", False):
             return
 
-        db = self.session_factory()
+        db: Session | None = None
         try:
+            db = self.session_factory()
             game = self.adapter.get_game(db, game_id)
             if (
                 getattr(game, "mode", None) != "online_friend"
@@ -404,8 +423,16 @@ class OnlineGameRealtimeModule:
                 player,
             )
             return
+        except Exception:
+            logger.exception(
+                "Error checking disconnect grace eligibility for game %s player %s; "
+                "starting grace timer conservatively",
+                game_id,
+                player,
+            )
         finally:
-            db.close()
+            if db is not None:
+                db.close()
 
         self.disconnect_grace_timer.start(
             game_id,
@@ -492,5 +519,21 @@ class OnlineGameRealtimeModule:
             db.close()
 
         await self.broadcast_state(game_id, state, result=RealtimeResult.TIME_EXPIRED)
-        if state.get("status") == "active":
-            self.start_timer_from_state(state)
+        fresh_state = self._fresh_active_state(game_id)
+        if fresh_state is not None:
+            self.start_timer_from_state(fresh_state)
+
+    def _fresh_active_state(self, game_id: int) -> dict[str, Any] | None:
+        db = self.session_factory()
+        try:
+            game = self.adapter.get_game(db, game_id)
+            if getattr(game, "status", None) != "active":
+                return None
+            return self.adapter.serialize_state(db, game)
+        except GameActionError:
+            return None
+        except Exception:
+            logger.exception("Error checking active state for game %s", game_id)
+            return None
+        finally:
+            db.close()

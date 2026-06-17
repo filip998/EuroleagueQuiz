@@ -4,7 +4,11 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.game_actions import GAME_ACTION_NOOP, InvalidGameActionError
+from app.game_actions import (
+    GAME_ACTION_NOOP,
+    InvalidGameActionError,
+    UnsupportedGameActionError,
+)
 from app.schemas.realtime import RealtimeClientAction, RealtimeResult
 from app.services import career_quiz as career_service
 from app.services import roster_guess as roster_service
@@ -128,6 +132,7 @@ class TicTacToeRealtimeAdapter:
             action=command.action,
             data=data,
             player=command.player,
+            source=command.source,
         )
 
     def _handle_bound_action(
@@ -138,6 +143,7 @@ class TicTacToeRealtimeAdapter:
         action: str,
         data: dict[str, Any],
         player: int | None,
+        source: str = "http",
     ) -> RealtimeActionOutcome:
         if action == GameActionName.MOVE:
             acting_player = _online_actor(game, player)
@@ -199,6 +205,10 @@ class TicTacToeRealtimeAdapter:
                     game=game,
                     result=RealtimeResult.RESIGNED,
                     cancel_timer=True,
+                )
+            if source == "websocket":
+                raise UnsupportedGameActionError(
+                    "Give up over realtime is only available for online games"
                 )
             given_up_round = ttt_service.give_up_round(db, game)
             return RealtimeActionOutcome(

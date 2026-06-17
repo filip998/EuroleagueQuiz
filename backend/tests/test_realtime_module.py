@@ -163,6 +163,25 @@ class FakeWebSocket:
         self.closed = True
 
 
+class PausingWebSocket(FakeWebSocket):
+    def __init__(self, pause_result: str):
+        super().__init__()
+        self.pause_result = pause_result
+        self.paused = asyncio.Event()
+        self.release = asyncio.Event()
+        self._paused_once = False
+
+    async def send_json(self, message: dict[str, Any]):
+        if (
+            message.get("payload", {}).get("result") == self.pause_result
+            and not self._paused_once
+        ):
+            self._paused_once = True
+            self.paused.set()
+            await self.release.wait()
+        await super().send_json(message)
+
+
 class DisconnectingWebSocket(FakeWebSocket):
     def __init__(self, on_close):
         super().__init__()
@@ -210,6 +229,14 @@ class SleepController:
 async def drain_tasks(count: int = 3):
     for _ in range(count):
         await asyncio.sleep(0)
+
+
+async def wait_for_condition(condition, *, message: str):
+    for _ in range(50):
+        if condition():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(message)
 
 
 def make_module(
@@ -359,6 +386,82 @@ async def test_disconnect_grace_forfeits_after_timeout_and_cleans_turn_timer():
     await drain_tasks()
     assert game.status == "finished"
     assert len(opponent.sent) == sent_count
+
+
+@pytest.mark.asyncio
+async def test_broadcast_send_failure_starts_disconnect_grace_forfeit():
+    grace_sleep = SleepController()
+    game = FakeGame()
+    module, _store = make_module(
+        game,
+        disconnect_forfeit_enabled=True,
+        disconnect_grace_sleep=grace_sleep,
+    )
+    opponent = FakeWebSocket()
+    dropped = FakeWebSocket(fail_send=True)
+    await module.connections.connect(1, 1, opponent)
+    await module.connections.connect(1, 2, dropped)
+
+    sent = await module.broadcast_state(
+        1,
+        {
+            "id": 1,
+            "mode": "online_friend",
+            "status": "active",
+            "current_player": 1,
+            "round_number": 1,
+        },
+        result="correct",
+    )
+
+    assert sent == 1
+    assert not module.connections.has_player(1, 2)
+    await grace_sleep.wait_for_call()
+    grace_sleep.release()
+    await drain_tasks()
+
+    assert game.status == "finished"
+    assert game.winner_player == 1
+    assert opponent.sent[-1]["payload"]["result"] == "opponent_left"
+    assert opponent.sent[-1]["payload"]["terminal"] is True
+    assert not module.disconnect_grace_timer.has_game_timer(1)
+
+
+@pytest.mark.asyncio
+async def test_turn_expiry_does_not_rearm_after_grace_forfeit_during_broadcast():
+    turn_sleep = SleepController()
+    grace_sleep = SleepController()
+    game = FakeGame(turn_seconds=10)
+    module, _store = make_module(
+        game,
+        disconnect_forfeit_enabled=True,
+        disconnect_grace_sleep=grace_sleep,
+    )
+    module.timer = TurnTimerManager(module._expire_turn, sleep=turn_sleep)
+    leaving = FakeWebSocket()
+    opponent = PausingWebSocket("time_expired")
+    await module.connections.connect(1, 1, leaving)
+    await module.connections.connect(1, 2, opponent)
+    module.timer.start(1, game.turn_seconds, game.current_player, game.round_number)
+    await turn_sleep.wait_for_call()
+    module.disconnect(1, 1, leaving)
+    await grace_sleep.wait_for_call()
+
+    turn_sleep.release()
+    await opponent.paused.wait()
+    grace_sleep.release()
+    await wait_for_condition(
+        lambda: game.status == "finished",
+        message="Expected grace forfeit to finish while turn broadcast is paused",
+    )
+    opponent.release.set()
+    await drain_tasks(5)
+
+    assert game.winner_player == 2
+    assert not module.timer.has_timer(1)
+    assert not module.disconnect_grace_timer.has_game_timer(1)
+    results = [message["payload"].get("result") for message in opponent.sent]
+    assert results[-2:] == ["time_expired", "opponent_left"]
 
 
 @pytest.mark.asyncio
