@@ -31,6 +31,7 @@ from app.models.photo_quiz import (
     PhotoQuizGuess,
     PhotoQuizRound,
 )
+from app.models.user import User
 
 __all__ = [
     "Season",
@@ -59,4 +60,5 @@ __all__ = [
     "PhotoQuizGame",
     "PhotoQuizGuess",
     "PhotoQuizRound",
+    "User",
 ]

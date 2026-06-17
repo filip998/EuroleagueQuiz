@@ -14,6 +14,7 @@
 cd backend
 pip install -e ".[dev]"
 alembic upgrade head
+alembic -c alembic_auth.ini upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -32,7 +33,7 @@ pytest tests/test_realtime_module.py -v               # shared realtime module t
 pytest tests/smoke/ --base-url http://localhost:8000  # smoke tests against a live API
 ```
 
-`tests/test_api.py` and `tests/test_higher_lower.py` use the tracked SQLite database and Higher or Lower tests create/finish games, so check `git status` after local backend test runs and include `backend/data/euroleague.db` changes only when they are intentional.
+`tests/test_api.py` and `tests/test_higher_lower.py` use the tracked SQLite database and Higher or Lower tests create/finish games, so check `git status` after local backend test runs and include `backend/data/euroleague.db` changes only when they are intentional. Auth datastore tests use temporary SQLite databases; do not create or commit `backend/data/users.db*`.
 
 ### Frontend
 
@@ -71,6 +72,8 @@ python -m ingestion.wikipedia_careers --limit 500 --report data/wikipedia-career
 python -m ingestion.wikipedia_images --report data/wikipedia-image-report.json
 alembic revision --autogenerate -m "description"
 alembic upgrade head
+alembic -c alembic_auth.ini revision --autogenerate -m "description"
+alembic -c alembic_auth.ini upgrade head
 ```
 
 The SQLite database (`backend/data/euroleague.db`) is tracked and included in the backend deployment artifact. After schema changes, migrations, or ingestion changes that update data, include the resulting database change in the PR. For out-of-band production database refreshes, use:
@@ -83,11 +86,12 @@ There is also a Windows helper: `scripts\upload-db.bat`.
 
 ## High-level architecture
 
-The backend has two connected subsystems sharing the same SQLAlchemy model layer and `app.config.Settings`:
+The backend has the tracked EuroLeague content datastore plus a separate auth/user datastore, all configured through `app.config.Settings`:
 
 - `backend/ingestion/` is a CLI pipeline around the `euroleague-api` package. `ingest.py` loops seasons, creates a SQLAlchemy session, applies a `RateLimiter`, runs selected steps (`fetch_seasons`, `fetch_rosters`, `fetch_boxscores`, `aggregate_stats`), and commits once per season.
 - `backend/ingestion/wikipedia_careers.py` populates cached Career Quiz timelines from Wikipedia basketball infobox career rows. EuroLeague data chooses eligible players; gameplay uses the cached Wikipedia timeline and does not call Wikipedia live.
 - `backend/app/` is the FastAPI API. `app/main.py` wires routers for seasons, teams, players, games, and quiz modes. The quiz routers are mounted under `/quiz` and cover TicTacToe, Roster Guess, Higher or Lower, Career Quiz, and Photo Quiz.
+- `backend/app/auth_database.py` defines the dedicated SQLAlchemy engine, `SessionLocal`, declarative Base, and `get_auth_db` dependency for mutable user data. It is controlled by `ELQ_AUTH_DATABASE_URL`, defaults locally to `sqlite:///data/users.db`, and should point at durable Azure storage such as `sqlite:////home/data/users.db` until the planned Postgres cutover. A future managed Postgres URL should use the installed psycopg driver, e.g. `postgresql+psycopg://...`.
 - `backend/app/services/` contains quiz rules and database logic. Mutating quiz operations run through the game action seam in `backend/app/game_actions.py`, so application-layer helpers own commit/rollback and game modules stay HTTP-agnostic.
 - `backend/app/services/realtime.py` is the shared Online Game Realtime Module for online TicTacToe, Roster Guess, Career Quiz, and Photo Quiz. It owns WebSocket connection cleanup, state/error envelopes, server-side turn timers, disconnect-grace timers, timer expiry, targeted broadcasts, and schema-compliant messages. TicTacToe enables disconnect-grace forfeits (`ELQ_ONLINE_DISCONNECT_GRACE_SECONDS`) and terminal `opponent_left`/`resigned` results through `backend/app/services/realtime_adapters.py`; Roster Guess, Career Quiz, and Photo Quiz keep the shared transport/timer interface without disconnect forfeits. Photo Quiz public Quick Match uses the shared timer machinery as a per-round idle timeout that auto-resolves the current public round as a no-answer skip; friend games keep cooperative mutual-skip.
 
@@ -106,7 +110,8 @@ CI runs on pull requests to `main`: backend pytest, frontend Vitest, frontend bu
 
 - Settings belong in `backend/app/config.py` via `pydantic-settings`; environment variables use the `ELQ_` prefix, such as `ELQ_DATABASE_URL`.
 - Use `get_db` from `backend/app/database.py` for request-scoped sessions. Keep manual `SessionLocal` usage to non-request flows such as WebSocket/timer contexts.
-- Add SQLAlchemy models under `backend/app/models/`, inherit from `app.database.Base`, and re-export them from `backend/app/models/__init__.py`.
+- Add content SQLAlchemy models under `backend/app/models/`, inherit from `app.database.Base`, and re-export them from `backend/app/models/__init__.py`. Auth/user models inherit from `app.auth_database.Base` instead and use the dedicated auth Alembic environment.
+- User datastore migrations live under `backend/alembic_auth/` and run with `cd backend && alembic -c alembic_auth.ini upgrade head`; keep them separate from content migrations in `backend/alembic/`. The auth schema should stay Postgres-portable: UUID string primary keys, UTC tz-aware timestamps, cross-dialect types, and no SQLite-only types or PRAGMAs.
 - Add Pydantic v2 schemas under `backend/app/schemas/`; ORM-backed schemas use `model_config = {"from_attributes": True}`.
 - Keep HTTP routing thin: validate request shape in schemas/routers, put quiz rules and DB mutations in services, and translate service/action exceptions to HTTP status codes in routers.
 - Mount new backend domains through `app/main.py`; quiz game endpoints should stay under `/quiz/...` to match the frontend API layer.

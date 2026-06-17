@@ -40,7 +40,17 @@ Then open `http://localhost:5173` to play.
 cd backend
 pip install -e .
 alembic upgrade head
+alembic -c alembic_auth.ini upgrade head
 ```
+
+The backend uses two separate databases. `ELQ_DATABASE_URL` points at the
+tracked EuroLeague content database (`backend/data/euroleague.db`), which ships
+with deployments and may be overwritten. `ELQ_AUTH_DATABASE_URL` points at the
+mutable user datastore and defaults locally to `sqlite:///data/users.db`; set it
+to an absolute durable path such as `sqlite:////home/data/users.db` on Azure App
+Service. A later managed Postgres cutover can use a driver-qualified URL such
+as `postgresql+psycopg://...`. Local `backend/data/users.db*` files are
+gitignored and must not be committed.
 
 ### Run API Server
 
@@ -81,6 +91,13 @@ python -m ingestion.wikipedia_images --report data/wikipedia-image-report.json
 Once the server is running, visit `http://localhost:8000/docs` for the interactive API documentation.
 
 ### Architecture Notes
+
+User account data lives in a dedicated auth datastore with its own SQLAlchemy
+engine/session/Base (`backend/app/auth_database.py`) and its own Alembic
+environment (`backend/alembic_auth/`, run with `alembic -c alembic_auth.ini`).
+The auth schema is kept portable for a later managed Postgres move: UUIDs are
+stored as strings, timestamps are normalized to UTC-aware datetimes in the
+application layer, and migrations avoid SQLite-only types or PRAGMAs.
 
 Mutating quiz operations use a **Game action** seam in `backend/app/game_actions.py`.
 Routers, WebSocket handlers, and timer jobs run game actions through this helper so the
