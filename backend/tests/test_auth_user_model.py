@@ -3,12 +3,15 @@ import time
 from uuid import UUID
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
+import app.auth.guest_links as guest_links_module
+from app.auth.guest_links import GuestIdConflictError, GuestIdValidationError, link_guest_id
 from app.auth_database import Base, sqlite_connect_args
-from app.models.user import User
+from app.models.user import User, UserGuestId
 
 
 @pytest.fixture
@@ -95,3 +98,132 @@ def test_user_clerk_user_id_and_username_are_unique(auth_session_factory):
         )
         with pytest.raises(IntegrityError):
             db.commit()
+
+
+def test_link_guest_id_creates_mapping_and_normalizes_guest_id(auth_session_factory):
+    with auth_session_factory() as db:
+        user = _create_user(db, clerk_user_id="user_clerk_123", username="filip")
+        guest_id = f"  {'g' * 80}  "
+
+        result = link_guest_id(db, user, guest_id)
+
+        assert result.status == "linked"
+        assert result.guest_id == "g" * 64
+        stored = db.execute(select(UserGuestId)).scalar_one()
+        assert stored.user_id == user.id
+        assert stored.guest_id == "g" * 64
+        assert stored.linked_at.tzinfo is timezone.utc
+
+
+def test_link_guest_id_is_idempotent_for_same_user(auth_session_factory):
+    with auth_session_factory() as db:
+        user = _create_user(db, clerk_user_id="user_clerk_123", username="filip")
+
+        first = link_guest_id(db, user, "guest-123")
+        second = link_guest_id(db, user, "guest-123")
+
+        assert first.status == "linked"
+        assert second.status == "already_linked"
+        assert db.scalar(select(func.count()).select_from(UserGuestId)) == 1
+
+
+def test_link_guest_id_first_wins_conflict_rule(auth_session_factory):
+    with auth_session_factory() as db:
+        winner = _create_user(db, clerk_user_id="user_clerk_winner", username="winner")
+        loser = _create_user(db, clerk_user_id="user_clerk_loser", username="loser")
+        link_guest_id(db, winner, "guest-123")
+
+        with pytest.raises(GuestIdConflictError):
+            link_guest_id(db, loser, "guest-123")
+
+        stored = db.execute(
+            select(UserGuestId).where(UserGuestId.guest_id == "guest-123")
+        ).scalar_one()
+        assert stored.user_id == winner.id
+
+
+def test_link_guest_id_handles_same_user_integrity_race(
+    monkeypatch,
+    auth_session_factory,
+):
+    with auth_session_factory() as db:
+        user = _create_user(db, clerk_user_id="user_clerk_123", username="filip")
+        link_guest_id(db, user, "guest-123")
+        original_find = guest_links_module._find_guest_link
+        first_lookup = True
+
+        def miss_once(db_arg, guest_id):
+            nonlocal first_lookup
+            if first_lookup:
+                first_lookup = False
+                return None
+            return original_find(db_arg, guest_id)
+
+        monkeypatch.setattr(guest_links_module, "_find_guest_link", miss_once)
+
+        result = link_guest_id(db, user, "guest-123")
+
+        assert result.status == "already_linked"
+        assert db.scalar(select(func.count()).select_from(UserGuestId)) == 1
+
+
+def test_link_guest_id_handles_different_user_integrity_race(
+    monkeypatch,
+    auth_session_factory,
+):
+    with auth_session_factory() as db:
+        winner = _create_user(db, clerk_user_id="user_clerk_winner", username="winner")
+        loser = _create_user(db, clerk_user_id="user_clerk_loser", username="loser")
+        link_guest_id(db, winner, "guest-123")
+        original_find = guest_links_module._find_guest_link
+        first_lookup = True
+
+        def miss_once(db_arg, guest_id):
+            nonlocal first_lookup
+            if first_lookup:
+                first_lookup = False
+                return None
+            return original_find(db_arg, guest_id)
+
+        monkeypatch.setattr(guest_links_module, "_find_guest_link", miss_once)
+
+        with pytest.raises(GuestIdConflictError):
+            link_guest_id(db, loser, "guest-123")
+
+        stored = db.execute(
+            select(UserGuestId).where(UserGuestId.guest_id == "guest-123")
+        ).scalar_one()
+        assert stored.user_id == winner.id
+
+
+def test_link_guest_id_rejects_blank_guest_id(auth_session_factory):
+    with auth_session_factory() as db:
+        user = _create_user(db, clerk_user_id="user_clerk_123", username="filip")
+
+        with pytest.raises(GuestIdValidationError):
+            link_guest_id(db, user, "   ")
+
+        assert db.scalar(select(func.count()).select_from(UserGuestId)) == 0
+
+
+def test_user_delete_cascades_guest_ids(auth_session_factory):
+    with auth_session_factory() as db:
+        user = _create_user(db, clerk_user_id="user_clerk_123", username="filip")
+        link_guest_id(db, user, "guest-123")
+
+        db.delete(user)
+        db.commit()
+
+        assert db.scalar(select(func.count()).select_from(UserGuestId)) == 0
+
+
+def _create_user(db, *, clerk_user_id: str, username: str) -> User:
+    user = User(
+        clerk_user_id=clerk_user_id,
+        username=username,
+        email=f"{username}@example.com",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user

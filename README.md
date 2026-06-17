@@ -64,6 +64,15 @@ anonymous fallback. `GET /auth/me` requires a valid token and JIT-provisions a
 local user in the auth datastore; existing gameplay endpoints remain open to
 anonymous callers.
 
+Signed-in clients can call `POST /auth/link-guest` with the current opaque
+`guest_id` from `frontend/src/identity.js` to claim pre-login guest activity for
+future account-owned features. The backend strips and clamps the id to 64
+characters, inserts a `user_guest_ids` row, and treats relinking by the same
+user as an idempotent no-op. The conflict rule is **first-wins**: once any user
+has linked a `guest_id`, a different user receives `409 Conflict` and the
+existing link is not moved. This link is additive only; game serializers and
+anonymous gameplay remain unchanged.
+
 ### Run API Server
 
 ```bash
@@ -117,6 +126,10 @@ JWKS, map the Clerk `sub` to `users.clerk_user_id`, JIT-provision missing local
 users, and expose required (`get_current_user`) and additive
 (`get_optional_user`) FastAPI dependencies. Invalid or absent tokens never gate
 anonymous gameplay unless an endpoint explicitly opts into required auth.
+`POST /auth/link-guest` is one such required-auth endpoint; it records
+`guest_id` ownership in `user_guest_ids` for future ratings/history attribution,
+using a first-wins unique `guest_id` rule and delete-orphan cascade from
+`users`.
 
 Mutating quiz operations use a **Game action** seam in `backend/app/game_actions.py`.
 Routers, WebSocket handlers, and timer jobs run game actions through this helper so the
