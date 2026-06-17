@@ -376,3 +376,34 @@ def test_online_game_create_and_join(client: TestClient):
     )
     assert response3.status_code == 409
     assert response3.json()["type"] == "error"
+
+
+def test_online_resign_finishes_game_for_opponent_even_off_turn(client: TestClient):
+    create = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "online_friend",
+            "target_wins": 2,
+            "timer_mode": "40s",
+            "player1_name": "Host",
+        },
+    )
+    assert create.status_code == 200
+    game = _action_payload(create)["game"]
+    join = client.post(
+        "/quiz/tictactoe/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner"},
+    )
+    assert join.status_code == 200
+    joined = _action_payload(join)["game"]
+    assert joined["current_player"] == 1
+
+    resign = client.post(f"/quiz/tictactoe/games/{joined['id']}/give-up?player=2")
+
+    assert resign.status_code == 200
+    payload = _action_payload(resign)
+    assert payload["result"] == "resigned"
+    assert payload["terminal"] is True
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] == 1
+    assert payload["game"]["pending_draw"] is None

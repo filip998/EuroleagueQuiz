@@ -63,6 +63,7 @@ class GameActionCommand:
     payload: dict[str, Any]
     game_id: int | None = None
     player: int | None = None
+    source: str = "http"
 
 
 class HttpGameActionRejected(Exception):
@@ -144,6 +145,7 @@ class GameActionOrchestrator:
                     payload=_payload_dict(payload),
                     game_id=game_id,
                     player=player,
+                    source="http",
                 ),
             )
         except GameActionError as exc:
@@ -182,6 +184,7 @@ class GameActionOrchestrator:
                     payload=_payload_dict(payload),
                     game_id=game_id,
                     player=player,
+                    source="websocket",
                 ),
             )
         except GameActionError as exc:

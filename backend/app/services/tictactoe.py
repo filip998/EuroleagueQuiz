@@ -685,6 +685,31 @@ def give_up_round(db: Session, game: QuizTicTacToeGame) -> int:
     return given_up_round_number
 
 
+def forfeit_online_game(
+    db: Session,
+    game: QuizTicTacToeGame,
+    *,
+    forfeiting_player: int,
+) -> None:
+    if game.mode != "online_friend":
+        raise TicTacToeConflictError("Forfeit is only available in online games")
+    _ensure_game_playable(game)
+    if forfeiting_player not in (1, 2):
+        raise TicTacToeConflictError("Online game actions require player identity")
+
+    winning_player = _other_player(forfeiting_player)
+    round_obj = get_active_round(db, game.id)
+    round_obj.status = "completed"
+    round_obj.winner_player = winning_player
+
+    game.status = "finished"
+    game.winner_player = winning_player
+    game.pending_draw_from = None
+    game.pending_draw_to = None
+    game.updated_at = datetime.utcnow()
+    db.flush()
+
+
 def offer_draw(db: Session, game: QuizTicTacToeGame, *, acting_player: Optional[int] = None) -> None:
     _ensure_game_playable(game)
     if game.pending_draw_from is not None:

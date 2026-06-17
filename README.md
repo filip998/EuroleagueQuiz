@@ -78,9 +78,12 @@ application layer owns commit/rollback and game modules stay HTTP-agnostic.
 
 Online TicTacToe, Roster Guess, and Career Quiz share an **Online Game Realtime Module**. The backend
 Module in `backend/app/services/realtime.py` owns WebSocket connection cleanup,
-broadcast envelopes, server-side turn timers for timer-enabled games, timer expiry, targeted broadcasts, and schema-compliant
-error/result messages. Game-specific Adapters in `backend/app/services/realtime_adapters.py`
-map TicTacToe, Roster Guess, and Career Quiz rules into that shared Interface.
+broadcast envelopes, server-side turn timers for timer-enabled games, disconnect-grace timers,
+timer expiry, targeted broadcasts, and schema-compliant error/result messages. Game-specific
+Adapters in `backend/app/services/realtime_adapters.py` map TicTacToe, Roster Guess, and Career
+Quiz rules into that shared Interface. TicTacToe online disconnects use a configurable
+`ELQ_ONLINE_DISCONNECT_GRACE_SECONDS` window before broadcasting a terminal `opponent_left`
+forfeit; explicit online resign broadcasts a terminal `resigned` result immediately.
 
 Career Quiz adds a **Wikipedia Career Ingestion Module** under `backend/ingestion/`.
 It resolves local EuroLeague players to English Wikipedia pages, parses basketball
