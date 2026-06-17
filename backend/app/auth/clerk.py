@@ -82,6 +82,12 @@ class _InFlightJWKSFetch:
     error: Exception | None = None
 
 
+@dataclass(frozen=True)
+class _UnknownKidRefresh:
+    refreshed_at: float
+    service_error_message: str | None = None
+
+
 class JWKSCache:
     def __init__(
         self,
@@ -99,8 +105,9 @@ class JWKSCache:
         self._clock = clock
         self._cache: dict[str, _CachedJWKS] = {}
         self._in_flight_fetches: dict[str, _InFlightJWKSFetch] = {}
-        self._unknown_kid_refreshes: dict[str, dict[str, float]] = {}
+        self._unknown_kid_refreshes: dict[str, dict[str, _UnknownKidRefresh]] = {}
         self._unknown_kid_last_refresh_at: dict[str, float] = {}
+        self._unknown_kid_last_service_error: dict[str, _UnknownKidRefresh] = {}
         self._lock = threading.RLock()
 
     def get_key(self, jwks_url: str, kid: str) -> Mapping[str, Any]:
@@ -137,10 +144,21 @@ class JWKSCache:
                 if in_flight is not None:
                     wait_for = in_flight
                 elif not self._reserve_unknown_kid_refresh(jwks_url, kid, now):
+                    error = self._suppressed_unknown_kid_service_error(jwks_url, kid, now)
+                    if error is not None:
+                        raise error
                     return cached
         if wait_for is not None:
-            return self._wait_for_fetch(wait_for)
-        return self._fetch_and_store(jwks_url, now=now)
+            try:
+                return self._wait_for_fetch(wait_for)
+            except ClerkJWKSUnavailableError as exc:
+                self._record_unknown_kid_service_error(jwks_url, kid, now, exc)
+                raise
+        try:
+            return self._fetch_and_store(jwks_url, now=now)
+        except ClerkJWKSUnavailableError as exc:
+            self._record_unknown_kid_service_error(jwks_url, kid, now, exc)
+            raise
 
     def _fetch_and_store(
         self,
@@ -172,6 +190,7 @@ class JWKSCache:
                     fetched_at=now,
                 )
                 self._cache[jwks_url] = cached
+                self._clear_unknown_kid_service_errors(jwks_url)
                 in_flight.result = cached
                 return cached
         except Exception as exc:
@@ -193,9 +212,9 @@ class JWKSCache:
 
     def _reserve_unknown_kid_refresh(self, jwks_url: str, kid: str, now: float) -> bool:
         refreshes = {
-            refreshed_kid: refreshed_at
-            for refreshed_kid, refreshed_at in self._unknown_kid_refreshes.get(jwks_url, {}).items()
-            if now - refreshed_at < self._refresh_cooldown_seconds
+            refreshed_kid: refresh
+            for refreshed_kid, refresh in self._unknown_kid_refreshes.get(jwks_url, {}).items()
+            if now - refresh.refreshed_at < self._refresh_cooldown_seconds
         }
         self._unknown_kid_refreshes[jwks_url] = refreshes
         if kid in refreshes:
@@ -206,9 +225,62 @@ class JWKSCache:
             and now - last_refresh_at < self._unknown_kid_min_refresh_interval_seconds
         ):
             return False
-        refreshes[kid] = now
+        refreshes[kid] = _UnknownKidRefresh(refreshed_at=now)
         self._unknown_kid_last_refresh_at[jwks_url] = now
         return True
+
+    def _suppressed_unknown_kid_service_error(
+        self,
+        jwks_url: str,
+        kid: str,
+        now: float,
+    ) -> ClerkJWKSUnavailableError | None:
+        refresh = self._unknown_kid_refreshes.get(jwks_url, {}).get(kid)
+        if refresh is not None and refresh.service_error_message is not None:
+            return ClerkJWKSUnavailableError(refresh.service_error_message)
+        last_error = self._unknown_kid_last_service_error.get(jwks_url)
+        if (
+            last_error is not None
+            and now - last_error.refreshed_at < self._unknown_kid_min_refresh_interval_seconds
+            and last_error.service_error_message is not None
+        ):
+            return ClerkJWKSUnavailableError(last_error.service_error_message)
+        return None
+
+    def _record_unknown_kid_service_error(
+        self,
+        jwks_url: str,
+        kid: str,
+        now: float,
+        error: ClerkJWKSUnavailableError,
+    ) -> None:
+        message = str(error) or "Unable to fetch Clerk JWKS"
+        with self._lock:
+            refreshes = {
+                refreshed_kid: refresh
+                for refreshed_kid, refresh in self._unknown_kid_refreshes.get(jwks_url, {}).items()
+                if now - refresh.refreshed_at < self._refresh_cooldown_seconds
+            }
+            refresh = refreshes.get(kid)
+            refreshes[kid] = _UnknownKidRefresh(
+                refreshed_at=refresh.refreshed_at if refresh is not None else now,
+                service_error_message=message,
+            )
+            self._unknown_kid_refreshes[jwks_url] = refreshes
+            self._unknown_kid_last_service_error[jwks_url] = _UnknownKidRefresh(
+                refreshed_at=now,
+                service_error_message=message,
+            )
+
+    def _clear_unknown_kid_service_errors(self, jwks_url: str) -> None:
+        self._unknown_kid_last_service_error.pop(jwks_url, None)
+        refreshes = self._unknown_kid_refreshes.get(jwks_url)
+        if refreshes is None:
+            return
+        self._unknown_kid_refreshes[jwks_url] = {
+            kid: _UnknownKidRefresh(refreshed_at=refresh.refreshed_at)
+            for kid, refresh in refreshes.items()
+        }
 
 
 def _keys_by_kid(jwks: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:

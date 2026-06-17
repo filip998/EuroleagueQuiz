@@ -248,10 +248,10 @@ def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
     verifier.verify(_make_token(signing_key))
     with pytest.raises(ClerkJWKSUnavailableError):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
-    with pytest.raises(ClerkTokenError):
+    with pytest.raises(ClerkJWKSUnavailableError):
         verifier.verify(_make_token(signing_key, kid="unknown-one"))
     for suffix in range(2, 10):
-        with pytest.raises(ClerkTokenError):
+        with pytest.raises(ClerkJWKSUnavailableError):
             verifier.verify(_make_token(signing_key, kid=f"unknown-{suffix}"))
 
     assert fetches == [JWKS_URL, JWKS_URL]
@@ -259,6 +259,36 @@ def test_jwks_cache_rate_limits_failed_unknown_kid_refreshes(signing_key):
     now += 1.1
     with pytest.raises(ClerkJWKSUnavailableError):
         verifier.verify(_make_token(signing_key, kid="unknown-two"))
+
+    assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL]
+
+
+def test_jwks_cache_successful_refresh_clears_unknown_kid_service_error(signing_key):
+    fetches: list[str] = []
+    now = 0.0
+
+    def fetcher(url: str) -> Mapping[str, Any]:
+        fetches.append(url)
+        if len(fetches) == 2:
+            raise ClerkJWKSUnavailableError("JWKS unavailable")
+        return {"keys": [signing_key.jwk]}
+
+    def clock() -> float:
+        return now
+
+    verifier = _verifier(signing_key.jwk, fetcher=fetcher, clock=clock)
+
+    verifier.verify(_make_token(signing_key))
+    with pytest.raises(ClerkJWKSUnavailableError):
+        verifier.verify(_make_token(signing_key, kid="unknown-one"))
+    with pytest.raises(ClerkJWKSUnavailableError):
+        verifier.verify(_make_token(signing_key, kid="unknown-one"))
+
+    now += 1.1
+    with pytest.raises(ClerkTokenError):
+        verifier.verify(_make_token(signing_key, kid="unknown-two"))
+    with pytest.raises(ClerkTokenError):
+        verifier.verify(_make_token(signing_key, kid="unknown-one"))
 
     assert fetches == [JWKS_URL, JWKS_URL, JWKS_URL]
 
