@@ -8,6 +8,8 @@ import ClubLogo from "./ClubLogo";
 import WaitingLobby from "./WaitingLobby";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import { buildInviteUrl } from "./inviteLink";
+import { clearOnlineInfo } from "./onlineRecovery";
+import { forgetQuickMatchSeat } from "./quickMatchSeats";
 
 function AxisLabel({ axis }) {
   const isTeam = axis.axis_type === "team";
@@ -299,6 +301,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setError(null);
     try {
       await cancelQuickMatchTicTacToe({ preset: game.preset, game_id: game.id });
+      // The backend deletes the waiting row, freeing its id for SQLite to reuse.
+      // Drop this game's recovery data so a later game with the same id can't
+      // recover the stale online seat and connect as the wrong player.
+      clearOnlineInfo(game.id);
+      forgetQuickMatchSeat(game.id);
       onNewGame();
     } catch {
       // The search was likely matched a moment before cancelling (the backend

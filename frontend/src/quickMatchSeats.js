@@ -68,6 +68,18 @@ export function rememberQuickMatchSeat(gameId, playerNumber) {
   return seat;
 }
 
+// Drop a game's recorded seat. Called when a quick-match search is cancelled and
+// the backend deletes the waiting row: SQLite can reuse that id for a later game,
+// and the first-write-wins map would otherwise mis-seat the new game.
+export function forgetQuickMatchSeat(gameId) {
+  if (gameId == null) return;
+  const key = String(gameId);
+  const seats = readSeats();
+  if (!(key in seats)) return;
+  delete seats[key];
+  writeSeats(seats);
+}
+
 // Resolve the seat for a freshly returned quick-match game: prefer a recorded
 // seat, otherwise infer from status, and record the result first-write-wins.
 export function resolveQuickMatchSeat(gameId, status) {

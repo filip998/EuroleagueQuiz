@@ -7,7 +7,7 @@ vi.mock("../quickMatchSeats", () => ({
   recallQuickMatchSeat: (gameId) => recallMock(gameId),
 }));
 
-import { saveOnlineInfo, loadOnlineInfo, recoverOnlineInfo } from "../onlineRecovery";
+import { saveOnlineInfo, loadOnlineInfo, recoverOnlineInfo, clearOnlineInfo } from "../onlineRecovery";
 
 // Node's experimental test globals can ship an inert sessionStorage that shadows
 // jsdom's, so install a working in-memory Storage for these tests.
@@ -52,6 +52,28 @@ describe("saveOnlineInfo / loadOnlineInfo", () => {
     };
     expect(() => saveOnlineInfo(7, { playerNumber: 1, isOnline: true })).not.toThrow();
     expect(loadOnlineInfo(7)).toBeNull();
+  });
+});
+
+describe("clearOnlineInfo", () => {
+  it("removes the stored seat so a reused id is not recovered as online", () => {
+    saveOnlineInfo(7, { playerNumber: 1, isOnline: true });
+    clearOnlineInfo(7);
+    expect(loadOnlineInfo(7)).toBeNull();
+    // A later non-online game that reuses id 7 must not recover online info.
+    expect(recoverOnlineInfo(7, { mode: "single_player" })).toBeNull();
+  });
+
+  it("swallows storage failures instead of throwing", () => {
+    globalThis.sessionStorage = {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {
+        throw new Error("denied");
+      },
+      clear: () => {},
+    };
+    expect(() => clearOnlineInfo(7)).not.toThrow();
   });
 });
 

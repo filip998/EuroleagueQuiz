@@ -30,6 +30,14 @@ export function loadOnlineInfo(gameId) {
   }
 }
 
+export function clearOnlineInfo(gameId) {
+  try {
+    sessionStorage.removeItem(`elq_game_${gameId}`);
+  } catch {
+    // Nothing to clean up if storage is unavailable.
+  }
+}
+
 export function recoverOnlineInfo(gameId, game) {
   const stored = loadOnlineInfo(gameId);
   if (stored) return stored;

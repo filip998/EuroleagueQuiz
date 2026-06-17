@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import GameBoard from "../GameBoard";
 import { giveUpGame, cancelQuickMatchTicTacToe } from "../api";
+import { clearOnlineInfo } from "../onlineRecovery";
+import { forgetQuickMatchSeat } from "../quickMatchSeats";
 import { buildInviteUrl } from "../inviteLink";
 
 // Capture the options GameBoard hands to the realtime hook so tests can drive
@@ -23,6 +25,11 @@ vi.mock("../api", () => ({
   cancelQuickMatchTicTacToe: vi.fn(),
   connectTicTacToeRealtime: vi.fn(),
 }));
+
+// Recovery cleanup on cancel is asserted via these spies; the real behaviour is
+// covered in onlineRecovery.test.js / quickMatchSeats.test.js.
+vi.mock("../onlineRecovery", () => ({ clearOnlineInfo: vi.fn() }));
+vi.mock("../quickMatchSeats", () => ({ forgetQuickMatchSeat: vi.fn() }));
 
 // Stubs that capture the props GameBoard hands to the two waiting screens.
 vi.mock("../WaitingLobby", () => ({
@@ -142,6 +149,38 @@ describe("GameBoard waiting lobby", () => {
       })
     );
     await waitFor(() => expect(onNewGame).toHaveBeenCalled());
+    // The deleted waiting row frees its id for reuse, so recovery data for that
+    // id must be dropped to avoid mis-seating a later game as the wrong player.
+    expect(clearOnlineInfo).toHaveBeenCalledWith(8);
+    expect(forgetQuickMatchSeat).toHaveBeenCalledWith(8);
+  });
+
+  it("keeps recovery data when a cancel fails (search already matched)", async () => {
+    cancelQuickMatchTicTacToe.mockRejectedValue(new Error("already matched"));
+    const onNewGame = vi.fn();
+    render(
+      <GameBoard
+        initialState={{
+          id: 8,
+          status: "waiting_for_opponent",
+          is_public: true,
+          preset: "blitz",
+        }}
+        onNewGame={onNewGame}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getByText("stub-cancel"));
+
+    await waitFor(() => expect(cancelQuickMatchTicTacToe).toHaveBeenCalled());
+    // A rejected cancel means the game still exists (it just matched); staying on
+    // the board lets the realtime hook flip it to active, so we must NOT discard
+    // the recovery data that keeps this client seated correctly.
+    expect(clearOnlineInfo).not.toHaveBeenCalled();
+    expect(forgetQuickMatchSeat).not.toHaveBeenCalled();
+    expect(onNewGame).not.toHaveBeenCalled();
   });
 });
 

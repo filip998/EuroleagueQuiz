@@ -3,6 +3,7 @@ import {
   recallQuickMatchSeat,
   rememberQuickMatchSeat,
   resolveQuickMatchSeat,
+  forgetQuickMatchSeat,
 } from "../quickMatchSeats";
 
 // The Node test runtime ships an inert experimental `localStorage` global that
@@ -56,6 +57,33 @@ describe("quick match seats", () => {
   it("ignores invalid seat values", () => {
     expect(rememberQuickMatchSeat(5, 3)).toBeNull();
     expect(recallQuickMatchSeat(5)).toBeNull();
+  });
+
+  it("forgets a recorded seat so a reused id is not mis-seated", () => {
+    rememberQuickMatchSeat(7, 1);
+    expect(recallQuickMatchSeat(7)).toBe(1);
+
+    forgetQuickMatchSeat(7);
+    expect(recallQuickMatchSeat(7)).toBeNull();
+
+    // A later game that reuses id 7 (e.g. as player 2) now records cleanly
+    // instead of inheriting the stale first-write-wins seat.
+    expect(resolveQuickMatchSeat(7, "active")).toBe(2);
+  });
+
+  it("forgetting an unknown or null game is a no-op and preserves others", () => {
+    rememberQuickMatchSeat(7, 1);
+    forgetQuickMatchSeat(999);
+    forgetQuickMatchSeat(null);
+    expect(recallQuickMatchSeat(7)).toBe(1);
+  });
+
+  it("swallows storage errors when forgetting a seat", () => {
+    rememberQuickMatchSeat(7, 1);
+    globalThis.localStorage.setItem = () => {
+      throw new Error("blocked");
+    };
+    expect(() => forgetQuickMatchSeat(7)).not.toThrow();
   });
 
   it("degrades to inference when storage is unavailable", () => {
