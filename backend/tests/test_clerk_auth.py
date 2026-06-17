@@ -89,6 +89,19 @@ def test_verifier_rejects_alg_confusion_tokens(signing_key):
         verifier.verify(none_token)
 
 
+def test_verifier_wraps_malformed_jwks_key_errors(signing_key):
+    malformed_jwk = {
+        "kty": "RSA",
+        "use": "sig",
+        "alg": "RS256",
+        "kid": signing_key.kid,
+    }
+    verifier = _verifier(malformed_jwk)
+
+    with pytest.raises(ClerkTokenError):
+        verifier.verify(_make_token(signing_key))
+
+
 def test_verifier_validates_authorized_party_when_present(signing_key):
     verifier = _verifier(signing_key.jwk, authorized_parties=("https://app.example.com",))
 

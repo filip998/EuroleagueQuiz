@@ -8,9 +8,8 @@ from typing import Any, Callable, Mapping
 
 import httpx
 import jwt
-from jwt import InvalidTokenError
+from jwt import InvalidTokenError, PyJWTError
 from jwt.algorithms import RSAAlgorithm
-from jwt.exceptions import PyJWKError
 
 from app.config import settings
 
@@ -283,7 +282,7 @@ class ClerkJWTVerifier:
                     "verify_aud": False,
                 },
             )
-        except (InvalidTokenError, PyJWKError, TypeError, ValueError) as exc:
+        except (PyJWTError, TypeError, ValueError) as exc:
             raise ClerkTokenError("Invalid Clerk token") from exc
 
         if not isinstance(claims, Mapping):
