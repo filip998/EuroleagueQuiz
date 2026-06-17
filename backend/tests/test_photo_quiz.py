@@ -1,11 +1,17 @@
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.database import Base
+from app.database import Base, get_db
 from app.game_actions import ConflictGameActionError, InvalidGameActionError
-from app.models import PhotoQuizRound, Player
+from app.main import app
+from app.models import PhotoQuizGame, PhotoQuizRound, Player
 from app.services import photo_quiz
+from app.services.realtime_adapters import PhotoQuizRealtimeAdapter
 from app.services.solo_round_token import create_solo_round_token, validate_solo_round_token
 
 
@@ -253,6 +259,610 @@ def test_autocomplete_returns_only_photo_eligible_players_with_resolved_images()
         db.close()
 
 
+def test_multiplayer_first_correct_answer_wins_match_when_target_is_one():
+    db = _session()
+    try:
+        _player(
+            db,
+            "Answer",
+            "Player",
+            wikipedia_url="https://wiki/answer",
+            euroleague_image_url="https://cdn/answer.png",
+        )
+        wrong = _player(
+            db,
+            "Wrong",
+            "Guess",
+            wikipedia_url="https://wiki/wrong",
+            euroleague_image_url="https://cdn/wrong.png",
+        )
+        db.commit()
+
+        game = photo_quiz.create_game(db, target_wins=1, player1_name="A")
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+        wrong_id = wrong.id
+        if wrong_id == current.answer_player_id:
+            wrong_id = next(
+                player.id
+                for player in db.query(Player).all()
+                if player.id != current.answer_player_id
+            )
+
+        assert (
+            photo_quiz.submit_guess(
+                db,
+                game=game,
+                player_id=wrong_id,
+                acting_player=2,
+                round_number=current.round_number,
+            )
+            == "incorrect"
+        )
+
+        result = photo_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=current.answer_player_id,
+            acting_player=1,
+            round_number=current.round_number,
+        )
+
+        assert result == "match_won"
+        assert game.status == "finished"
+        assert game.winner_player == 1
+        assert photo_quiz.serialize_completed_round(db, game.id, 1)["answer"]["id"] == current.answer_player_id
+    finally:
+        db.close()
+
+
+def test_multiplayer_shared_wrong_guesses_include_safe_image_payloads(monkeypatch):
+    db = _session()
+    try:
+        answer = _player(
+            db,
+            "Shared",
+            "Answer",
+            wikipedia_url="https://wiki/answer",
+            euroleague_image_url="https://cdn/answer.png",
+        )
+        wiki_wrong = _player(
+            db,
+            "Shared",
+            "WikiWrong",
+            wikipedia_url="https://wiki/wrong",
+            wikipedia_image_url="https://wiki/wrong.png",
+        )
+        image_less_wrong = _player(db, "Shared", "NoImage")
+        db.commit()
+
+        game = photo_quiz.create_game(
+            db,
+            target_wins=3,
+            wrong_guess_visibility="shared",
+            player1_name="A",
+        )
+        monkeypatch.setattr(photo_quiz.random, "choice", lambda ids: answer.id)
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+
+        assert current.answer_player_id == answer.id
+        assert (
+            photo_quiz.submit_guess(
+                db,
+                game=game,
+                player_id=wiki_wrong.id,
+                acting_player=1,
+                round_number=current.round_number,
+            )
+            == "incorrect"
+        )
+        assert (
+            photo_quiz.submit_guess(
+                db,
+                game=game,
+                player_id=image_less_wrong.id,
+                acting_player=2,
+                round_number=current.round_number,
+            )
+            == "incorrect"
+        )
+
+        current_round = photo_quiz.serialize_game_state(db, game)["current_round"]
+
+        assert current_round["wrong_guesses"] == [
+            {
+                "player_number": 1,
+                "player": {
+                    "id": wiki_wrong.id,
+                    "name": "Shared WikiWrong",
+                    "image_url": "https://wiki/wrong.png",
+                },
+            },
+            {
+                "player_number": 2,
+                "player": {
+                    "id": image_less_wrong.id,
+                    "name": "Shared NoImage",
+                    "image_url": None,
+                },
+            },
+        ]
+    finally:
+        db.close()
+
+
+def test_multiplayer_private_wrong_guesses_are_not_serialized():
+    db = _session()
+    try:
+        players = [
+            _player(
+                db,
+                "Private",
+                "Answer",
+                wikipedia_url="https://wiki/answer",
+                euroleague_image_url="https://cdn/answer.png",
+            ),
+            _player(
+                db,
+                "Private",
+                "Wrong",
+                wikipedia_url="https://wiki/wrong",
+                euroleague_image_url="https://cdn/wrong.png",
+            ),
+        ]
+        db.commit()
+
+        game = photo_quiz.create_game(
+            db,
+            target_wins=3,
+            wrong_guess_visibility="private",
+            player1_name="A",
+        )
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+        wrong_player = next(
+            player for player in players if player.id != current.answer_player_id
+        )
+
+        assert (
+            photo_quiz.submit_guess(
+                db,
+                game=game,
+                player_id=wrong_player.id,
+                acting_player=2,
+                round_number=current.round_number,
+            )
+            == "incorrect"
+        )
+
+        current_round = photo_quiz.serialize_game_state(db, game)["current_round"]
+
+        assert "wrong_guesses" not in current_round
+        assert wrong_player.last_name not in repr(current_round)
+    finally:
+        db.close()
+
+
+def test_realtime_adapter_targets_private_wrong_guess_to_actor_only():
+    db = _session()
+    try:
+        players = [
+            _player(
+                db,
+                "Private",
+                "RealtimeAnswer",
+                wikipedia_url="https://wiki/answer",
+                euroleague_image_url="https://cdn/answer.png",
+            ),
+            _player(
+                db,
+                "Private",
+                "RealtimeWrong",
+                wikipedia_url="https://wiki/wrong",
+                euroleague_image_url="https://cdn/wrong.png",
+            ),
+        ]
+        db.commit()
+
+        game = photo_quiz.create_game(
+            db,
+            target_wins=3,
+            wrong_guess_visibility="private",
+            player1_name="A",
+        )
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+        wrong_player = next(
+            player for player in players if player.id != current.answer_player_id
+        )
+
+        outcome = PhotoQuizRealtimeAdapter().handle_client_action(
+            db,
+            game,
+            action="guess",
+            data={"player_id": wrong_player.id, "round_number": current.round_number},
+            player=1,
+        )
+
+        assert outcome.result == "incorrect"
+        assert outcome.broadcast_to_player == 1
+        assert outcome.completed_round_number is None
+    finally:
+        db.close()
+
+
+def test_realtime_adapter_broadcasts_shared_wrong_guess_to_both_players():
+    db = _session()
+    try:
+        players = [
+            _player(
+                db,
+                "Shared",
+                "RealtimeAnswer",
+                wikipedia_url="https://wiki/answer",
+                euroleague_image_url="https://cdn/answer.png",
+            ),
+            _player(
+                db,
+                "Shared",
+                "RealtimeWrong",
+                wikipedia_url="https://wiki/wrong",
+                euroleague_image_url="https://cdn/wrong.png",
+            ),
+        ]
+        db.commit()
+
+        game = photo_quiz.create_game(
+            db,
+            target_wins=3,
+            wrong_guess_visibility="shared",
+            player1_name="A",
+        )
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+        wrong_player = next(
+            player for player in players if player.id != current.answer_player_id
+        )
+
+        outcome = PhotoQuizRealtimeAdapter().handle_client_action(
+            db,
+            game,
+            action="guess",
+            data={"player_id": wrong_player.id, "round_number": current.round_number},
+            player=1,
+        )
+
+        assert outcome.result == "incorrect"
+        assert outcome.broadcast_to_player is None
+    finally:
+        db.close()
+
+
+def test_multiplayer_state_exposes_latest_completed_round_after_no_answer_accept():
+    db = _session()
+    try:
+        _player(
+            db,
+            "Answer",
+            "Player",
+            wikipedia_url="https://wiki/answer",
+            euroleague_image_url="https://cdn/answer.png",
+        )
+        _player(
+            db,
+            "Next",
+            "Player",
+            wikipedia_url="https://wiki/next",
+            euroleague_image_url="https://cdn/next.png",
+        )
+        db.commit()
+
+        game = photo_quiz.create_game(db, target_wins=3, player1_name="A")
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+
+        assert photo_quiz.serialize_game_state(db, game)["latest_completed_round"] is None
+
+        photo_quiz.offer_no_answer(
+            db,
+            game=game,
+            acting_player=1,
+            round_number=current.round_number,
+        )
+        result = photo_quiz.respond_no_answer(
+            db,
+            game=game,
+            acting_player=2,
+            accept=True,
+            round_number=current.round_number,
+        )
+
+        assert result == "accepted"
+        completed = photo_quiz.serialize_game_state(db, game)["latest_completed_round"]
+        assert completed["round_number"] == 1
+        assert completed["status"] == "no_answer"
+        assert completed["winner_player"] is None
+        assert completed["answer"]["id"] == current.answer_player_id
+        _assert_player_answer_payload(completed["answer"])
+        _assert_iso_datetime(completed["resolved_at"])
+        _assert_next_round_starts_at(
+            completed["resolved_at"], completed["next_round_starts_at"]
+        )
+    finally:
+        db.close()
+
+
+def test_multiplayer_state_exposes_latest_completed_round_after_correct_guess():
+    db = _session()
+    try:
+        _player(
+            db,
+            "Correct",
+            "Answer",
+            wikipedia_url="https://wiki/correct",
+            euroleague_image_url="https://cdn/correct.png",
+        )
+        _player(
+            db,
+            "Future",
+            "Round",
+            wikipedia_url="https://wiki/future",
+            euroleague_image_url="https://cdn/future.png",
+        )
+        db.commit()
+
+        game = photo_quiz.create_game(db, target_wins=3, player1_name="A")
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+
+        result = photo_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=current.answer_player_id,
+            acting_player=1,
+            round_number=current.round_number,
+        )
+
+        assert result == "round_won"
+        completed = photo_quiz.serialize_game_state(db, game)["latest_completed_round"]
+        assert completed["round_number"] == 1
+        assert completed["status"] == "completed"
+        assert completed["winner_player"] == 1
+        assert completed["answer"]["id"] == current.answer_player_id
+        _assert_player_answer_payload(completed["answer"])
+        _assert_iso_datetime(completed["resolved_at"])
+        _assert_next_round_starts_at(
+            completed["resolved_at"], completed["next_round_starts_at"]
+        )
+    finally:
+        db.close()
+
+
+def test_multiplayer_rejects_guess_during_reveal_lock_then_accepts_after_countdown():
+    db = _session()
+    try:
+        for index in range(3):
+            _player(
+                db,
+                "Reveal",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/reveal-{index}",
+                euroleague_image_url=f"https://cdn/reveal-{index}.png",
+            )
+        db.commit()
+
+        game = photo_quiz.create_game(db, target_wins=3, player1_name="A")
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        completed_round = photo_quiz._current_round(game)
+        result = photo_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=completed_round.answer_player_id,
+            acting_player=1,
+            round_number=completed_round.round_number,
+        )
+
+        assert result == "round_won"
+        locked_round = photo_quiz._current_round(game)
+        with pytest.raises(ConflictGameActionError, match="round_locked"):
+            photo_quiz.submit_guess(
+                db,
+                game=game,
+                player_id=locked_round.answer_player_id,
+                acting_player=2,
+                round_number=locked_round.round_number,
+            )
+
+        completed_round.completed_at = datetime.utcnow() - timedelta(
+            seconds=photo_quiz.PHOTO_REVEAL_COUNTDOWN_SECONDS + 1
+        )
+        db.flush()
+        assert (
+            photo_quiz.serialize_game_state(db, game)["latest_completed_round"][
+                "next_round_starts_at"
+            ]
+            is None
+        )
+
+        result = photo_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=locked_round.answer_player_id,
+            acting_player=2,
+            round_number=locked_round.round_number,
+        )
+
+        assert result == "round_won"
+    finally:
+        db.close()
+
+
+def test_multiplayer_no_answer_accept_locks_next_round_guesses():
+    db = _session()
+    try:
+        _player(
+            db,
+            "No",
+            "Answer",
+            wikipedia_url="https://wiki/no",
+            euroleague_image_url="https://cdn/no.png",
+        )
+        _player(
+            db,
+            "Locked",
+            "Round",
+            wikipedia_url="https://wiki/locked",
+            euroleague_image_url="https://cdn/locked.png",
+        )
+        db.commit()
+
+        game = photo_quiz.create_game(db, target_wins=3, player1_name="A")
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+        photo_quiz.offer_no_answer(
+            db,
+            game=game,
+            acting_player=1,
+            round_number=current.round_number,
+        )
+        result = photo_quiz.respond_no_answer(
+            db,
+            game=game,
+            acting_player=2,
+            accept=True,
+            round_number=current.round_number,
+        )
+
+        assert result == "accepted"
+        locked_round = photo_quiz._current_round(game)
+        with pytest.raises(ConflictGameActionError, match="round_locked"):
+            photo_quiz.submit_guess(
+                db,
+                game=game,
+                player_id=locked_round.answer_player_id,
+                acting_player=1,
+                round_number=locked_round.round_number,
+            )
+    finally:
+        db.close()
+
+
+def test_multiplayer_rejects_stale_round_scoped_actions():
+    db = _session()
+    try:
+        for index in range(3):
+            _player(
+                db,
+                "Stale",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/stale-{index}",
+                euroleague_image_url=f"https://cdn/stale-{index}.png",
+            )
+        db.commit()
+
+        game = photo_quiz.create_game(db, target_wins=3, player1_name="A")
+        photo_quiz.join_game(db, game.join_code, player_name="B")
+        completed_round = photo_quiz._current_round(game)
+        result = photo_quiz.submit_guess(
+            db,
+            game=game,
+            player_id=completed_round.answer_player_id,
+            acting_player=1,
+            round_number=completed_round.round_number,
+        )
+        assert result == "round_won"
+        completed_round.completed_at = datetime.utcnow() - timedelta(
+            seconds=photo_quiz.PHOTO_REVEAL_COUNTDOWN_SECONDS + 1
+        )
+        current_round = photo_quiz._current_round(game)
+
+        with pytest.raises(ConflictGameActionError, match="round_stale"):
+            photo_quiz.submit_guess(
+                db,
+                game=game,
+                player_id=current_round.answer_player_id,
+                acting_player=2,
+                round_number=completed_round.round_number,
+            )
+
+        with pytest.raises(ConflictGameActionError, match="round_stale"):
+            photo_quiz.offer_no_answer(
+                db,
+                game=game,
+                acting_player=2,
+                round_number=completed_round.round_number,
+            )
+
+        with pytest.raises(ConflictGameActionError, match="round_stale"):
+            photo_quiz.respond_no_answer(
+                db,
+                game=game,
+                acting_player=2,
+                accept=True,
+                round_number=completed_round.round_number,
+            )
+    finally:
+        db.close()
+
+
+def test_photo_http_create_join_get_and_guess_envelopes(photo_client: TestClient):
+    create = photo_client.post(
+        "/quiz/photo/games",
+        json={
+            "target_wins": 1,
+            "player1_name": "Host",
+            "guest_id": "host-guest-xyz",
+        },
+    )
+    assert create.status_code == 200
+    create_body = create.json()
+    assert create_body["type"] == "state"
+    game = create_body["payload"]["game"]
+    assert game["status"] == "waiting_for_opponent"
+    assert game["mode"] == "online_friend"
+    assert "guest_id" not in game
+    assert "player1_guest_id" not in game
+
+    join = photo_client.post(
+        "/quiz/photo/games/join",
+        json={
+            "join_code": game["join_code"],
+            "player_name": "Joiner",
+            "guest_id": "joiner-guest-xyz",
+        },
+    )
+    assert join.status_code == 200
+    joined_game = join.json()["payload"]["game"]
+    assert joined_game["status"] == "active"
+    assert joined_game["current_round"]["round_number"] == 1
+    assert joined_game["current_round"]["image_url"]
+
+    get_game = photo_client.get(f"/quiz/photo/games/{game['id']}")
+    assert get_game.status_code == 200
+    plain_state = get_game.json()
+    assert plain_state["id"] == game["id"]
+    assert "type" not in plain_state
+
+    with photo_client.session_local() as db:
+        stored = db.get(PhotoQuizGame, game["id"])
+        assert stored.player1_guest_id == "host-guest-xyz"
+        assert stored.player2_guest_id == "joiner-guest-xyz"
+        current = photo_quiz._current_round(stored)
+        answer_id = current.answer_player_id
+        round_number = current.round_number
+
+    guess = photo_client.post(
+        f"/quiz/photo/games/{game['id']}/guess?player=1",
+        json={"player_id": answer_id, "round_number": round_number},
+    )
+    assert guess.status_code == 200
+    guess_body = guess.json()
+    assert guess_body["type"] == "state"
+    assert guess_body["payload"]["result"] == "match_won"
+    assert guess_body["payload"]["terminal"] is True
+
+
 def _session():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
@@ -279,3 +889,78 @@ def _player(
     db.add(player)
     db.flush()
     return player
+
+
+def _assert_player_answer_payload(answer):
+    assert {
+        "id",
+        "name",
+        "first_name",
+        "last_name",
+        "nationality",
+        "position",
+        "image_url",
+    }.issubset(answer)
+
+
+def _assert_iso_datetime(value):
+    assert value
+    resolved_at = datetime.fromisoformat(value)
+    assert resolved_at.tzinfo is not None
+    assert resolved_at.utcoffset() == timedelta(0)
+    assert resolved_at.tzinfo == timezone.utc
+
+
+def _assert_next_round_starts_at(resolved_at_value, next_round_starts_at_value):
+    assert next_round_starts_at_value.endswith("+00:00")
+    _assert_iso_datetime(next_round_starts_at_value)
+    resolved_at = datetime.fromisoformat(resolved_at_value)
+    next_round_starts_at = datetime.fromisoformat(next_round_starts_at_value)
+    assert next_round_starts_at - resolved_at == timedelta(
+        seconds=photo_quiz.PHOTO_REVEAL_COUNTDOWN_SECONDS
+    )
+
+
+@pytest.fixture()
+def photo_client(tmp_path: Path):
+    db_path = tmp_path / "photo_api_test.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    session = TestingSessionLocal()
+    try:
+        for index in range(5):
+            _player(
+                session,
+                f"First{index}",
+                f"Last{index}",
+                wikipedia_url=f"https://wiki/player-{index}",
+                euroleague_image_url=f"https://cdn/player-{index}.png",
+            )
+        session.commit()
+    finally:
+        session.close()
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    previous_override = app.dependency_overrides.get(get_db)
+    app.dependency_overrides[get_db] = override_get_db
+
+    with TestClient(app) as test_client:
+        test_client.session_local = TestingSessionLocal
+        yield test_client
+
+    if previous_override is None:
+        app.dependency_overrides.pop(get_db, None)
+    else:
+        app.dependency_overrides[get_db] = previous_override
+    engine.dispose()

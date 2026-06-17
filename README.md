@@ -30,7 +30,7 @@ Then open `http://localhost:5173` to play.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo and multiplayer.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice and 2-player race modes.
-- **Photo Quiz** — Guess the player from a headshot. The backend core supports Solo rounds from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
+- **Photo Quiz** — Guess the player from a headshot. The backend supports Solo rounds and 2-player online friend races from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
 
 ## Backend
 
@@ -86,12 +86,12 @@ Mutating quiz operations use a **Game action** seam in `backend/app/game_actions
 Routers, WebSocket handlers, and timer jobs run game actions through this helper so the
 application layer owns commit/rollback and game modules stay HTTP-agnostic.
 
-Online TicTacToe, Roster Guess, and Career Quiz share an **Online Game Realtime Module**. The backend
+Online TicTacToe, Roster Guess, Career Quiz, and Photo Quiz share an **Online Game Realtime Module**. The backend
 Module in `backend/app/services/realtime.py` owns WebSocket connection cleanup,
 broadcast envelopes, server-side turn timers for timer-enabled games, disconnect-grace timers,
 timer expiry, targeted broadcasts, and schema-compliant error/result messages. Game-specific
-Adapters in `backend/app/services/realtime_adapters.py` map TicTacToe, Roster Guess, and Career
-Quiz rules into that shared Interface. TicTacToe online disconnects use a configurable
+Adapters in `backend/app/services/realtime_adapters.py` map TicTacToe, Roster Guess, Career
+Quiz, and Photo Quiz rules into that shared Interface. TicTacToe online disconnects use a configurable
 `ELQ_ONLINE_DISCONNECT_GRACE_SECONDS` window before broadcasting a terminal `opponent_left`
 forfeit; explicit online resign broadcasts a terminal `resigned` result immediately.
 
@@ -108,14 +108,17 @@ continue to expose the frontend-compatible `image_url` JSON key for the EuroLeag
 Photo Quiz uses those same columns for its eligible pool and resolves images CDN-first:
 `euroleague_image_url` wins when present, otherwise `wikipedia_image_url` is used. Solo
 Photo Quiz rounds use signed Solo Round Tokens and expose only the resolved clue image until
-the answer is guessed correctly or revealed.
-Multiplayer Career Quiz resolved-round state includes
+the answer is guessed correctly or revealed. Online Photo Quiz friend games use
+`POST /quiz/photo/games`, `/games/join`, `/games/{id}/guess`, `/no-answer-offer`,
+`/no-answer-response`, `GET /quiz/photo/games/{id}`, and `WS /quiz/photo/ws/{id}`;
+the round clue is the resolved `image_url`.
+Multiplayer Career Quiz and Photo Quiz resolved-round state includes
 `latest_completed_round.next_round_starts_at` during the three-second reveal lock; the
 backend rejects next-round guesses with `round_locked` until that UTC timestamp elapses.
-Multiplayer Career Quiz guess and no-answer mutations must include the client-visible
+Multiplayer Career Quiz and Photo Quiz guess and no-answer mutations must include the client-visible
 `round_number`; stale actions are rejected with `round_stale` so the frontend can resync
-without applying old input to the current round. Career Quiz multiplayer uses WebSocket
-push as its primary sync path, while plain `GET /quiz/career/games/{id}` remains the
+without applying old input to the current round. Career Quiz and Photo Quiz multiplayer use WebSocket
+push as their primary sync path, while plain `GET /quiz/{career|photo}/games/{id}` remains the
 refresh and fallback-sync Interface.
 
 The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
@@ -125,14 +128,14 @@ TicTacToe Quick Match setup screens can poll
 `GET /quiz/tictactoe/quick-match/pools` every 5 seconds for per-preset
 `searching` and `in_progress` presence counts derived from public pool rows.
 
-Mutating TicTacToe, Roster Guess, and Career Quiz HTTP endpoints now use the same realtime
+Mutating TicTacToe, Roster Guess, Career Quiz, and Photo Quiz HTTP endpoints now use the same realtime
 message envelopes as WebSocket broadcasts: successful actions return
 `{ "type": "state", "payload": { "game": ..., "result": ..., "completed_round": ..., "terminal": ... } }`
 and Game action errors return `{ "type": "error", "payload": { "code": ..., "message": ... } }`
 with the corresponding HTTP status. Read-only `GET /games/{id}` endpoints still
 return plain game state for polling and refresh hydration.
 
-Online `create`/`join` requests for TicTacToe, Roster Guess, and Career Quiz accept an
+Online `create`/`join` requests for TicTacToe, Roster Guess, Career Quiz, and Photo Quiz accept an
 optional `guest_id`. The backend treats it as an opaque, untrusted token: services clamp it
 to 64 characters (`None` when blank) and persist it on the player slot
 (`player1_guest_id` / `player2_guest_id`) without ever serializing it into shared game
@@ -209,7 +212,7 @@ pytest tests/test_api.py            # API tests only
 pytest tests/test_tictactoe_api.py  # TicTacToe tests only
 pytest tests/test_higher_lower.py   # Higher or Lower tests only
 pytest tests/test_career_quiz.py    # Career Quiz tests only
-pytest tests/test_photo_quiz.py     # Photo Quiz backend-core tests only
+pytest tests/test_photo_quiz.py     # Photo Quiz tests only
 ```
 
 ### Frontend Unit Tests (Vitest + React Testing Library)
