@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import GameSetup from "../GameSetup";
 import { quickMatchTicTacToe } from "../api";
+import { AuthContext } from "../identityBridge";
 
 vi.mock("../api", () => ({
   createGame: vi.fn(),
@@ -276,5 +277,32 @@ describe("GameSetup", () => {
     expect(screen.getByTestId("quick-pick-standard")).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("ABC123")).not.toBeInTheDocument();
     expect(screen.queryByText("Start Game")).not.toBeInTheDocument();
+  });
+
+  // Signed-in prefill (Clerk mocked via the neutral AuthContext, so GameSetup
+  // stays Clerk-agnostic). The username flows into the "Your name" field over the
+  // guest fallback, and Local 1v1 stays structurally unchanged.
+  function renderSignedIn(user) {
+    return render(
+      <AuthContext.Provider value={{ isLoaded: true, isSignedIn: true, user }}>
+        <GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />
+      </AuthContext.Provider>
+    );
+  }
+
+  it("prefills the name field with the signed-in Clerk username over the guest name", () => {
+    renderSignedIn({ username: "clerk_user" });
+
+    const field = screen.getByPlaceholderText("Your name");
+    expect(field.value).toBe("clerk_user");
+    expect(field.value).not.toMatch(/^Guest \d{4}$/);
+  });
+
+  it("keeps Local 1v1 unchanged when signed in (Player 1 / Player 2 fields intact)", () => {
+    renderSignedIn({ username: "clerk_user" });
+
+    fireEvent.click(screen.getByText("Local 1v1"));
+    expect(screen.getByText("Player 1")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Player 2")).toBeInTheDocument();
   });
 });

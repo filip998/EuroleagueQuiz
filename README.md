@@ -306,10 +306,13 @@ keeps working with zero friction. The integration is isolated to a few modules:
 
 - `frontend/src/auth.jsx` is the **only** module that imports `@clerk/clerk-react`. It exposes
   `AuthProvider` (wraps the app in `<ClerkProvider>` when `VITE_CLERK_PUBLISHABLE_KEY` is set,
-  otherwise renders children unchanged), `AuthMenu` (a fixed header control showing Sign in /
-  Sign up when signed out and `<UserButton/>` when signed in), and a future-use `RequireAuth`
-  stub for protected routes. When the publishable key is missing the whole thing is inert: no
-  provider mounts, no token is issued, and a one-line dev `console.info` notes sign-in is off.
+  otherwise renders children unchanged; when enabled it also wires Clerk's `routerPush`/
+  `routerReplace` to react-router so path-routed surfaces navigate the SPA softly), `AuthMenu`
+  (a fixed header control showing Sign in / Sign up when signed out and `<UserButton/>` with a
+  custom **Profile** menu link when signed in), `ProfileRoute` (the `/profile/*` page — see
+  below), and a future-use `RequireAuth` stub for protected routes. When the publishable key is
+  missing the whole thing is inert: no provider mounts, no token is issued, `AuthMenu` renders
+  nothing, `ProfileRoute` redirects home, and a one-line dev `console.info` notes sign-in is off.
 - `frontend/src/authToken.js` is a tiny, framework-free token registry
   (`setAuthTokenProvider` / `clearAuthTokenProvider` / `getAuthToken`). It decouples `api.js`
   from Clerk: `api.js` simply `await getAuthToken()` in `request()` and adds an
@@ -330,6 +333,17 @@ keeps working with zero friction. The integration is isolated to a few modules:
   first and bails if absent, only marks the pair linked on success (so a transient failure
   retries on a later mount), and swallows all failures so a missing or briefly-unavailable
   endpoint never blocks sign-in.
+
+- The **profile view** lives at the `/profile/*` route (`ProfileRoute` in `auth.jsx`, lazily
+  imported by `App.jsx` so `App` stays Clerk-free). It renders Clerk's prebuilt `<UserProfile/>`
+  (path-routed) inside the app chrome, surfacing username, email, display name, and avatar, and is
+  reachable from the `<UserButton/>` menu's **Profile** link. Signed-out visitors and key-less
+  builds are redirected home, so deep links never strand anyone on an empty page.
+- **Required unique username:** new sign-ups (email **and** social) must set a unique username —
+  this is a Clerk Dashboard setting, and a session-token claim makes the backend mirror it onto the
+  local `User` on first provision. The signed-in username then flows into every setup screen's name
+  field via `useClerkPrefilledName`. See [`docs/clerk-auth.md`](docs/clerk-auth.md) for the exact
+  dashboard steps.
 
 Set `VITE_CLERK_PUBLISHABLE_KEY` in `frontend/.env.development` / `.env.production` (or the
 deploy environment) to enable sign-in; leave it blank for fully anonymous builds.

@@ -8,6 +8,7 @@
 // signed-out users keep playing anonymously with zero friction.
 
 import { useEffect, useMemo, useRef } from "react";
+import { Navigate, useNavigate } from "react-router-dom";
 import {
   ClerkProvider,
   RedirectToSignIn,
@@ -16,6 +17,7 @@ import {
   SignInButton,
   SignUpButton,
   UserButton,
+  UserProfile,
   useAuth,
   useUser,
 } from "@clerk/clerk-react";
@@ -23,6 +25,7 @@ import { AuthContext } from "./identityBridge";
 import { setAuthTokenProvider } from "./authToken";
 import { getGuestId } from "./identity";
 import { linkGuest } from "./api";
+import { LogoMini } from "./Logo";
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY?.trim();
 
@@ -90,11 +93,28 @@ function ClerkAuthBridge({ children }) {
 }
 
 // Wraps the app. When Clerk isn't configured, renders children unchanged so the
-// signed-out AuthContext default applies everywhere (fully anonymous).
+// signed-out AuthContext default applies everywhere (fully anonymous). When
+// configured, mounts <ClerkProvider> wired to react-router navigation so Clerk's
+// path-routed surfaces (the /profile UserProfile, UserButton links,
+// RedirectToSignIn) navigate the SPA softly instead of doing a full reload.
+//
+// Must be rendered under a Router (see main.jsx) so the inner component can call
+// useNavigate. The anonymous early-return keeps that hook out of the no-Clerk
+// path, so a key-less build never needs a Router.
 export function AuthProvider({ children }) {
   if (!clerkEnabled) return children;
+  return <ClerkProviderWithRouter>{children}</ClerkProviderWithRouter>;
+}
+
+function ClerkProviderWithRouter({ children }) {
+  const navigate = useNavigate();
   return (
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">
+    <ClerkProvider
+      publishableKey={PUBLISHABLE_KEY}
+      afterSignOutUrl="/"
+      routerPush={(to) => navigate(to)}
+      routerReplace={(to) => navigate(to, { replace: true })}
+    >
       <ClerkAuthBridge>{children}</ClerkAuthBridge>
     </ClerkProvider>
   );
@@ -105,8 +125,24 @@ const SIGN_IN_BTN_CLASS =
 const SIGN_UP_BTN_CLASS =
   "px-4 py-1.5 rounded-full bg-white text-elq-text text-sm font-semibold border border-elq-border shadow-sm hover:border-elq-orange/40 active:scale-[0.98] transition-all";
 
+// Icon for the custom "Profile" entry in the UserButton menu (labelIcon is
+// required by Clerk).
+function ProfileIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
+      />
+    </svg>
+  );
+}
+
 // Fixed header auth control: Sign in / Sign up when signed out, the Clerk user
-// menu when signed in. Renders nothing when Clerk isn't configured.
+// menu when signed in. The user menu keeps Clerk's built-in "Manage account" /
+// "Sign out" items and adds a "Profile" link to our dedicated /profile route.
+// Renders nothing when Clerk isn't configured.
 export function AuthMenu() {
   if (!clerkEnabled) return null;
   return (
@@ -124,8 +160,50 @@ export function AuthMenu() {
         </SignUpButton>
       </SignedOut>
       <SignedIn>
-        <UserButton afterSignOutUrl="/" />
+        <UserButton afterSignOutUrl="/">
+          <UserButton.MenuItems>
+            <UserButton.Link
+              label="Profile"
+              labelIcon={<ProfileIcon />}
+              href="/profile"
+            />
+          </UserButton.MenuItems>
+        </UserButton>
       </SignedIn>
+    </div>
+  );
+}
+
+// Dedicated profile page mounted at the /profile/* splat route (see App.jsx).
+// Surfaces username, email, display name, and avatar via Clerk's prebuilt
+// <UserProfile/> (path-routed, so its sub-pages live under /profile/*). When
+// Clerk isn't configured, or when the visitor is signed out, it redirects home
+// so anonymous builds and deep links never get stuck on an empty page.
+export function ProfileRoute() {
+  if (!clerkEnabled) return <Navigate to="/" replace />;
+  return <ProfileScreen />;
+}
+
+function ProfileScreen() {
+  const navigate = useNavigate();
+  return (
+    <div className="min-h-screen flex flex-col">
+      <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
+      <div className="flex-1 flex flex-col items-center p-4 py-8 sm:py-10">
+        <div className="w-full max-w-3xl">
+          <div className="mb-6 animate-fade-in-up">
+            <LogoMini onClick={() => navigate("/")} />
+          </div>
+          <SignedIn>
+            <div className="flex justify-center animate-fade-in-up">
+              <UserProfile path="/profile" routing="path" />
+            </div>
+          </SignedIn>
+          <SignedOut>
+            <Navigate to="/" replace />
+          </SignedOut>
+        </div>
+      </div>
     </div>
   );
 }
