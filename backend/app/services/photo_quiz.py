@@ -251,6 +251,8 @@ def submit_guess(
             winner_player=acting_player,
             completed_at=completed_at,
         )
+    else:
+        _guard_active_round_for_guess(db, game, round_obj, round_number)
     db.add(
         PhotoQuizGuess(
             round_id=round_obj.id,
@@ -581,6 +583,29 @@ def _claim_active_round(
     round_obj.status = status
     round_obj.winner_player = winner_player
     round_obj.completed_at = completed_at
+
+
+def _guard_active_round_for_guess(
+    db: Session,
+    game: PhotoQuizGame,
+    round_obj: PhotoQuizRound,
+    round_number: int,
+) -> None:
+    updated = (
+        db.query(PhotoQuizRound)
+        .filter(PhotoQuizRound.id == round_obj.id)
+        .filter(PhotoQuizRound.status == "active")
+        .filter(
+            PhotoQuizRound.game.has(
+                (PhotoQuizGame.id == game.id)
+                & (PhotoQuizGame.status == "active")
+                & (PhotoQuizGame.round_number == round_number)
+            )
+        )
+        .update({"status": "active"}, synchronize_session=False)
+    )
+    if updated != 1:
+        raise ConflictGameActionError("round_stale")
 
 
 def _update_active_game_round(

@@ -984,6 +984,100 @@ def test_multiplayer_stale_correct_guess_from_second_session_is_rejected(tmp_pat
         verify.close()
 
 
+def test_multiplayer_stale_incorrect_guess_after_correct_guess_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        player_ids = [
+            _player(
+                setup,
+                "IncorrectRace",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/incorrect-race-{index}",
+                euroleague_image_url=f"https://cdn/incorrect-race-{index}.png",
+            ).id
+            for index in range(3)
+        ]
+        setup.commit()
+        game = photo_quiz.create_game(setup, target_wins=3, player1_name="A")
+        photo_quiz.join_game(setup, game.join_code, player_name="B")
+        current = photo_quiz._current_round(game)
+        answer_id = current.answer_player_id
+        wrong_player_id = next(
+            player_id for player_id in player_ids if player_id != answer_id
+        )
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    original_assert_active_game_round = photo_quiz._assert_active_game_round
+    raced = False
+
+    def complete_round_after_stale_read(db, game, round_obj, round_number):
+        nonlocal raced
+        original_assert_active_game_round(db, game, round_obj, round_number)
+        if raced:
+            return
+        raced = True
+        winner = SessionLocal()
+        try:
+            winner_game = winner.get(PhotoQuizGame, game_id)
+            winner_round = photo_quiz._current_round(winner_game)
+            assert (
+                photo_quiz.submit_guess(
+                    winner,
+                    game=winner_game,
+                    player_id=winner_round.answer_player_id,
+                    acting_player=2,
+                    round_number=winner_round.round_number,
+                )
+                == "round_won"
+            )
+            winner.commit()
+        finally:
+            winner.close()
+
+    monkeypatch.setattr(
+        photo_quiz,
+        "_assert_active_game_round",
+        complete_round_after_stale_read,
+    )
+
+    stale = SessionLocal()
+    try:
+        stale_game = stale.get(PhotoQuizGame, game_id)
+        stale_round = photo_quiz._current_round(stale_game)
+
+        with pytest.raises(ConflictGameActionError, match="round_stale"):
+            photo_quiz.submit_guess(
+                stale,
+                game=stale_game,
+                player_id=wrong_player_id,
+                acting_player=1,
+                round_number=stale_round.round_number,
+            )
+        stale.rollback()
+    finally:
+        stale.close()
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(PhotoQuizGame, game_id)
+        assert stored.round_number == 2
+        assert stored.player1_score == 0
+        assert stored.player2_score == 1
+        first_round = stored.rounds[0]
+        assert first_round.status == "completed"
+        assert [
+            (guess.player_number, guess.is_correct) for guess in first_round.guesses
+        ] == [(2, True)]
+    finally:
+        verify.close()
+
+
 def test_multiplayer_stale_no_answer_accept_after_correct_guess_is_rejected(tmp_path: Path):
     SessionLocal = _file_session_factory(tmp_path)
     setup = SessionLocal()
