@@ -19,7 +19,19 @@ if (tempDbPath) {
   process.once("exit", () => rmSync(tempDbDir, { recursive: true, force: true }));
 }
 const databaseUrl = process.env.E2E_DATABASE_URL || `sqlite:///${tempDbPath}`;
+if (!process.env.E2E_DATABASE_URL && tempDbPath) {
+  process.env.E2E_DATABASE_URL = databaseUrl;
+}
+const databasePath = tempDbPath || sqlitePathFromUrl(process.env.E2E_DATABASE_URL);
+if (databasePath) {
+  process.env.E2E_DATABASE_PATH = databasePath;
+}
 const reuseExistingServer = process.env.E2E_REUSE_EXISTING_SERVER === "1" && !process.env.CI;
+
+function sqlitePathFromUrl(url) {
+  if (!url?.startsWith("sqlite:///")) return null;
+  return decodeURIComponent(url.slice("sqlite:///".length));
+}
 
 export default defineConfig({
   testDir: "./e2e",
