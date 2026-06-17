@@ -56,8 +56,27 @@ export function respondDraw(gameId, accept) {
   });
 }
 
-export function giveUpGame(gameId) {
-  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/give-up`);
+export function giveUpGame(gameId, player = null) {
+  const query = player != null ? `?player=${player}` : "";
+  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/give-up${query}`);
+}
+
+export function quickMatchTicTacToe(payload) {
+  return actionRequest("POST", "/quiz/tictactoe/quick-match", {
+    ...payload,
+    guest_id: getGuestId(),
+  });
+}
+
+export function cancelQuickMatchTicTacToe(payload) {
+  return actionRequest("POST", "/quiz/tictactoe/quick-match/cancel", {
+    ...payload,
+    guest_id: getGuestId(),
+  });
+}
+
+export function fetchTicTacToeQuickMatchPools() {
+  return request("GET", "/quiz/tictactoe/quick-match/pools");
 }
 
 export function autocompletePlayer(q, teamCode1, teamCode2, limit = 15) {

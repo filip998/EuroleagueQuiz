@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import { getGame, submitMove, offerDraw, respondDraw, giveUpGame, connectTicTacToeRealtime } from "./api";
+import { getGame, submitMove, offerDraw, respondDraw, giveUpGame, cancelQuickMatchTicTacToe, connectTicTacToeRealtime } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import PlayerSearch from "./PlayerSearch";
 import { LogoMini } from "./Logo";
 import ClubLogo from "./ClubLogo";
 import WaitingLobby from "./WaitingLobby";
+import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import { buildInviteUrl } from "./inviteLink";
 
 function AxisLabel({ axis }) {
@@ -69,6 +70,8 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const [loading, setLoading] = useState(false);
   const [timeLeft, setTimeLeft] = useState(null);
   const [roundTransition, setRoundTransition] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [resignConfirm, setResignConfirm] = useState(false);
 
   const isOnline = onlineInfo?.isOnline;
   const myPlayer = onlineInfo?.playerNumber;
@@ -273,8 +276,49 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     }
   }
 
+  // Online resign forfeits the whole match. Use the HTTP give-up endpoint as the
+  // primary path (reliable request/response that also broadcasts the terminal
+  // state to the opponent) rather than fire-and-forget over the WebSocket.
+  async function handleResign() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await giveUpGame(game.id, myPlayer);
+      handleRealtimeState(res);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+      setResignConfirm(false);
+    }
+  }
+
+  async function handleQuickCancel() {
+    if (cancelling) return;
+    setCancelling(true);
+    setError(null);
+    try {
+      await cancelQuickMatchTicTacToe({ preset: game.preset, game_id: game.id });
+      onNewGame();
+    } catch {
+      // The search was likely matched a moment before cancelling (the backend
+      // rejects cancelling a game that is no longer waiting). Stay on the board;
+      // the realtime hook will flip to the active game. No scary error.
+      setCancelling(false);
+    }
+  }
+
   // Waiting for opponent screen
   if (game?.status === "waiting_for_opponent") {
+    if (game.is_public && game.preset) {
+      return (
+        <QuickMatchSearchingLobby
+          preset={game.preset}
+          onCancel={handleQuickCancel}
+          cancelling={cancelling}
+        />
+      );
+    }
     return (
       <WaitingLobby
         joinCode={game.join_code}
@@ -314,6 +358,18 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     draw_declined: "Draw declined \u2014 game continues.",
     time_expired: isSolo ? "\u23f0 Time\u2019s up!" : "\u23f0 Time\u2019s up! Turn switches.",
   };
+
+  // Perspective-aware subtitle for terminal forfeit outcomes. The plain
+  // GET /games response carries no terminal reason, so this only renders when we
+  // observed the realtime result (resign/disconnect); otherwise we fall back to
+  // the generic "<winner> WINS!" headline.
+  const iWon = isOnline && myPlayer != null && game.winner_player === myPlayer;
+  let finishedReason = null;
+  if (lastResult === "resigned") {
+    finishedReason = iWon ? "Your opponent resigned." : "You resigned.";
+  } else if (lastResult === "opponent_left") {
+    finishedReason = iWon ? "Your opponent left the game." : "You left the game.";
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -413,7 +469,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         )}
 
         {/* Result banner */}
-        {lastResult && (
+        {lastResult && !["resigned", "opponent_left"].includes(lastResult) && (
           <div className="w-full mb-4 animate-slide-down">
             <div
               className={`p-3 rounded-xl text-center text-sm font-medium ${
@@ -622,16 +678,57 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           </div>
         )}
 
+        {/* Resign control for online games */}
+        {isOnline && game.status === "active" && !inTransition && (
+          <div className="mt-4 text-center">
+            {resignConfirm ? (
+              <div className="inline-flex flex-col items-center gap-2 bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
+                <p className="text-sm text-elq-text">Resign the match? Your opponent wins.</p>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={handleResign}
+                    disabled={loading}
+                    className="px-5 py-2 bg-red-500 text-white font-medium rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
+                  >
+                    Resign
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setResignConfirm(false)}
+                    disabled={loading}
+                    className="px-5 py-2 bg-white border border-elq-border text-elq-text font-medium rounded-lg hover:bg-elq-bg transition-colors disabled:opacity-50"
+                  >
+                    Keep playing
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setResignConfirm(true)}
+                disabled={loading}
+                className="text-sm text-elq-muted hover:text-red-500 transition-colors underline underline-offset-2"
+              >
+                Resign
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Match finished */}
         {!isSolo && game.status === "finished" && !inTransition && (
           <div className="mt-8 text-center animate-fade-in-up">
             <div className="text-4xl mb-2">{"\ud83c\udfc6"}</div>
-            <h2 className="font-display text-3xl text-elq-dark mb-4">
+            <h2 className="font-display text-3xl text-elq-dark mb-2">
               {game.winner_player === 1 ? game.player1_name : game.player2_name} WINS!
             </h2>
+            {finishedReason && (
+              <p className="text-sm text-elq-muted mb-4">{finishedReason}</p>
+            )}
             <button
               onClick={onNewGame}
-              className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all text-lg"
+              className="mt-2 px-8 py-3 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all text-lg"
             >
               New Game
             </button>

@@ -36,6 +36,8 @@ export const REALTIME_RESULTS = {
   TIME_EXPIRED: "time_expired",
   GAVE_UP: "gave_up",
   GIVEN_UP: "given_up",
+  RESIGNED: "resigned",
+  OPPONENT_LEFT: "opponent_left",
 };
 
 export function parseRealtimeMessage(raw) {

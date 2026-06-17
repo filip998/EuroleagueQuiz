@@ -11,6 +11,7 @@ import CareerQuizBoard from "./CareerQuizBoard";
 import { LogoFull } from "./Logo";
 import { getCareerGame, getGame, getRosterGame } from "./api";
 import { parseJoinCode } from "./inviteLink";
+import { recallQuickMatchSeat } from "./quickMatchSeats";
 
 // ---------------------------------------------------------------------------
 // Helpers for persisting online game info across page refreshes
@@ -32,6 +33,20 @@ function loadOnlineInfo(gameId) {
   } catch {
     return null;
   }
+}
+
+// Recover a TicTacToe game's online seat after a refresh or in a fresh tab.
+// Per-tab sessionStorage is the primary source; when it's missing (e.g. the game
+// URL was opened in a new tab), fall back to the durable Quick Match seat map so
+// quick-matched games resume as the correct player instead of as a local game.
+function recoverOnlineInfo(gameId, game) {
+  const stored = loadOnlineInfo(gameId);
+  if (stored) return stored;
+  if (game?.mode === "online_friend") {
+    const seat = recallQuickMatchSeat(gameId);
+    if (seat) return { playerNumber: seat, isOnline: true };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +210,7 @@ function TicTacToeGamePage() {
     getGame(gameId)
       .then((data) => {
         setGame(data);
-        setOnlineInfo(loadOnlineInfo(gameId));
+        setOnlineInfo(recoverOnlineInfo(gameId, data));
       })
       .catch(() => navigate("/tictactoe", { replace: true }))
       .finally(() => setLoading(false));
