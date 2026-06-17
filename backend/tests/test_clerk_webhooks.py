@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.auth.clerk_webhooks as clerk_webhooks
 from app.auth.guest_links import link_guest_id
+from app.auth.users import UserProvisioningError
 from app.auth_database import Base, get_auth_db, sqlite_connect_args
 from app.main import app
 from app.models.user import User, UserGuestId
@@ -121,9 +122,13 @@ def test_clerk_user_created_upserts_profile(auth_client, auth_session_factory):
 
 
 def test_clerk_user_updated_updates_existing_idempotently(auth_client, auth_session_factory):
-    assert _post_signed(auth_client, _user_event("user.created")).status_code == 200
+    assert (
+        _post_signed(auth_client, _user_event("user.created", event_timestamp=1_700_000_001_000)).status_code
+        == 200
+    )
     updated = _user_event(
         "user.updated",
+        event_timestamp=1_700_000_002_000,
         first_name="Updated",
         last_name="User",
         image_url="https://example.com/updated.png",
@@ -150,7 +155,14 @@ def test_clerk_user_updated_updates_existing_idempotently(auth_client, auth_sess
 
 
 def test_clerk_user_updated_before_created_creates_user(auth_client, auth_session_factory):
-    response = _post_signed(auth_client, _user_event("user.updated", user_id="user_out_of_order"))
+    response = _post_signed(
+        auth_client,
+        _user_event(
+            "user.updated",
+            user_id="user_out_of_order",
+            event_timestamp=1_700_000_002_000,
+        ),
+    )
 
     assert response.status_code == 200
     with auth_session_factory() as db:
@@ -181,6 +193,36 @@ def test_clerk_user_updated_username_collision_falls_back(auth_client, auth_sess
         assert user.username.startswith("user_")
 
 
+def test_clerk_stale_created_event_does_not_overwrite_newer_update(auth_client, auth_session_factory):
+    updated = _user_event(
+        "user.updated",
+        event_timestamp=1_700_000_002_000,
+        username="updated",
+        first_name="Updated",
+        last_name="User",
+        primary_email_address_id="email_updated",
+        email_addresses=[{"id": "email_updated", "email_address": "updated@example.com"}],
+    )
+    stale_created = _user_event(
+        "user.created",
+        event_timestamp=1_700_000_001_000,
+        username="created",
+        first_name="Created",
+        last_name="User",
+        primary_email_address_id="email_created",
+        email_addresses=[{"id": "email_created", "email_address": "created@example.com"}],
+    )
+
+    assert _post_signed(auth_client, updated).status_code == 200
+    assert _post_signed(auth_client, stale_created).status_code == 200
+
+    with auth_session_factory() as db:
+        user = db.execute(select(User).where(User.clerk_user_id == "user_clerk_123")).scalar_one()
+        assert user.username == "updated"
+        assert user.email == "updated@example.com"
+        assert user.display_name == "Updated User"
+
+
 def test_clerk_user_deleted_removes_user_and_guest_ids(auth_client, auth_session_factory):
     with auth_session_factory() as db:
         user = User(
@@ -193,14 +235,51 @@ def test_clerk_user_deleted_removes_user_and_guest_ids(auth_client, auth_session
         db.refresh(user)
         link_guest_id(db, user, "guest-123")
 
-    first = _post_signed(auth_client, _user_event("user.deleted"))
-    second = _post_signed(auth_client, _user_event("user.deleted"))
+    first = _post_signed(
+        auth_client,
+        _user_event("user.deleted", event_timestamp=1_700_000_003_000),
+    )
+    second = _post_signed(
+        auth_client,
+        _user_event("user.deleted", event_timestamp=1_700_000_003_000),
+    )
 
     assert first.status_code == 200
     assert second.status_code == 200
     with auth_session_factory() as db:
         assert db.scalar(select(func.count()).select_from(User)) == 0
         assert db.scalar(select(func.count()).select_from(UserGuestId)) == 0
+
+
+def test_clerk_stale_update_after_delete_does_not_recreate_user(auth_client, auth_session_factory):
+    created = _user_event("user.created", event_timestamp=1_700_000_001_000)
+    deleted = _user_event("user.deleted", event_timestamp=1_700_000_003_000)
+    stale_update = _user_event(
+        "user.updated",
+        event_timestamp=1_700_000_002_000,
+        first_name="Stale",
+        last_name="Update",
+    )
+
+    assert _post_signed(auth_client, created).status_code == 200
+    assert _post_signed(auth_client, deleted).status_code == 200
+    assert _post_signed(auth_client, stale_update).status_code == 200
+
+    with auth_session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(User)) == 0
+        assert db.scalar(select(func.count()).select_from(UserGuestId)) == 0
+
+
+def test_clerk_webhook_maps_provisioning_errors_to_retryable_status(auth_client, monkeypatch):
+    def fail_provisioning(db, claims):
+        raise UserProvisioningError("could not provision")
+
+    monkeypatch.setattr(clerk_webhooks, "upsert_user_for_claims", fail_provisioning)
+
+    response = _post_signed(auth_client, _user_event("user.created"))
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Could not sync Clerk user"}
 
 
 def test_clerk_webhook_ignores_unsupported_events(auth_client, auth_session_factory):
@@ -246,7 +325,13 @@ def _event_body(payload: Mapping[str, Any]) -> bytes:
     return json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
 
 
-def _user_event(event_type: str, user_id: str = "user_clerk_123", **data_overrides) -> dict[str, Any]:
+def _user_event(
+    event_type: str,
+    user_id: str = "user_clerk_123",
+    *,
+    event_timestamp: int | None = None,
+    **data_overrides,
+) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": user_id,
         "username": "filip",
@@ -260,4 +345,9 @@ def _user_event(event_type: str, user_id: str = "user_clerk_123", **data_overrid
         ],
     }
     data.update(data_overrides)
-    return {"type": event_type, "data": data}
+    return {
+        "object": "event",
+        "timestamp": event_timestamp or int(time.time() * 1000),
+        "type": event_type,
+        "data": data,
+    }

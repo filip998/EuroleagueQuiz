@@ -65,3 +65,11 @@ class UserGuestId(Base):
     linked_at = Column(UTCDateTime(), nullable=False, default=utc_now)
 
     user = relationship("User", back_populates="guest_ids")
+
+
+class ClerkUserSyncState(Base):
+    __tablename__ = "clerk_user_sync_states"
+
+    clerk_user_id = Column(String(255), primary_key=True)
+    last_event_at = Column(UTCDateTime(), nullable=False, default=utc_now)
+    deleted_at = Column(UTCDateTime(), nullable=True)

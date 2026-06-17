@@ -9,6 +9,7 @@ from app.auth.clerk_webhooks import (
     handle_clerk_webhook,
 )
 from app.auth.guest_links import GuestIdConflictError, GuestIdValidationError, link_guest_id
+from app.auth.users import UserProvisioningError
 from app.auth_database import get_auth_db
 from app.models.user import User
 from app.schemas.auth import AuthUser, LinkGuestRequest, LinkGuestResponse
@@ -64,5 +65,10 @@ async def clerk_webhook(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
+        ) from exc
+    except UserProvisioningError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not sync Clerk user",
         ) from exc
     return {"type": result.event_type, "status": result.status}
