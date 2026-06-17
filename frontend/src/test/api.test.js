@@ -4,6 +4,10 @@ import {
   getGame,
   joinGame,
   submitMove,
+  giveUpGame,
+  quickMatchTicTacToe,
+  cancelQuickMatchTicTacToe,
+  fetchTicTacToeQuickMatchPools,
   autocompletePlayer,
   createRosterGame,
   joinRosterGame,
@@ -125,6 +129,95 @@ describe("TicTacToe API", () => {
     expect(calledUrl).toContain("team_code_1=BAR");
     expect(calledUrl).toContain("team_code_2=RMB");
     expect(calledUrl).toContain("limit=10");
+  });
+});
+
+describe("TicTacToe Quick Match API", () => {
+  it("quickMatchTicTacToe posts the preset and guest_id and parses the state envelope", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(stateEnvelope({ id: 31, status: "waiting_for_opponent" }))
+    );
+
+    const result = await quickMatchTicTacToe({ preset: "blitz", player_name: "Ace" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/tictactoe/quick-match",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          preset: "blitz",
+          player_name: "Ace",
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+    expect(result.state.id).toBe(31);
+    expect(result.state.status).toBe("waiting_for_opponent");
+  });
+
+  it("cancelQuickMatchTicTacToe posts the game_id, preset and guest_id", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(stateEnvelope({ id: 31, status: "cancelled" }))
+    );
+
+    await cancelQuickMatchTicTacToe({ preset: "blitz", game_id: 31 });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/tictactoe/quick-match/cancel",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          preset: "blitz",
+          game_id: 31,
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+  });
+
+  it("fetchTicTacToeQuickMatchPools GETs the presence counts", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse({
+        pools: { blitz: { searching: 2, in_progress: 1 } },
+        poll_interval_seconds: 5,
+      })
+    );
+
+    const result = await fetchTicTacToeQuickMatchPools();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/tictactoe/quick-match/pools",
+      expect.objectContaining({ method: "GET" })
+    );
+    expect(result.pools.blitz.searching).toBe(2);
+    expect(result.poll_interval_seconds).toBe(5);
+  });
+
+  it("giveUpGame appends ?player=N when a player is provided", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(stateEnvelope({ id: 7, status: "finished" }, "resigned"))
+    );
+
+    const result = await giveUpGame(7, 2);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/tictactoe/games/7/give-up?player=2",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(result.result).toBe("resigned");
+  });
+
+  it("giveUpGame omits the player query when no player is provided", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(stateEnvelope({ id: 7, status: "finished" }, "gave_up"))
+    );
+
+    await giveUpGame(7);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/tictactoe/games/7/give-up",
+      expect.objectContaining({ method: "POST" })
+    );
   });
 });
 

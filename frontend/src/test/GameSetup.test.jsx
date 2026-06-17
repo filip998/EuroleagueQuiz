@@ -1,10 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import GameSetup from "../GameSetup";
+import { quickMatchTicTacToe } from "../api";
 
 vi.mock("../api", () => ({
   createGame: vi.fn(),
   joinGame: vi.fn(),
+  quickMatchTicTacToe: vi.fn(),
+  fetchTicTacToeQuickMatchPools: vi.fn(),
+}));
+
+// Keep the real presets/labels but stub the polling hook so setup renders
+// deterministic presence counts without touching the network.
+vi.mock("../quickMatch", async () => {
+  const actual = await vi.importActual("../quickMatch");
+  return {
+    ...actual,
+    useQuickMatchPools: () => ({
+      pools: {
+        blitz: { searching: 1, in_progress: 0 },
+        standard: { searching: 2, in_progress: 1 },
+        long: { searching: 0, in_progress: 0 },
+      },
+      error: false,
+    }),
+  };
+});
+
+// Deterministic seat inference (the seat map itself is covered separately).
+vi.mock("../quickMatchSeats", () => ({
+  resolveQuickMatchSeat: (id, status) => (status === "active" ? 2 : 1),
 }));
 
 vi.mock("../Logo", () => ({
@@ -47,9 +72,84 @@ describe("GameSetup", () => {
     expect(screen.getByPlaceholderText("Player 2")).toBeInTheDocument();
   });
 
-  it("shows join code input when Online then Join is selected", () => {
+  it("defaults Online to the Quick Match preset picker", () => {
     render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
     fireEvent.click(screen.getByText("Online"));
+
+    expect(screen.getByText("Quick Match")).toBeInTheDocument();
+    expect(screen.getByText("Play a Friend")).toBeInTheDocument();
+    expect(screen.getByText("Blitz")).toBeInTheDocument();
+    expect(screen.getByText("Standard")).toBeInTheDocument();
+    expect(screen.getByText("Long")).toBeInTheDocument();
+    expect(screen.getByText("Find Match")).toBeInTheDocument();
+  });
+
+  it("shows live presence counts on each preset", () => {
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+    fireEvent.click(screen.getByText("Online"));
+
+    expect(screen.getByTestId("presence-blitz")).toHaveTextContent(
+      "1 searching · 0 in progress"
+    );
+    expect(screen.getByTestId("presence-standard")).toHaveTextContent(
+      "2 searching · 1 in progress"
+    );
+  });
+
+  it("finds a quick match and hands back the inferred seat (waiting -> player 1)", async () => {
+    quickMatchTicTacToe.mockResolvedValue({
+      state: { id: 99, status: "waiting_for_opponent" },
+    });
+
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+    fireEvent.click(screen.getByText("Online"));
+    fireEvent.change(screen.getByPlaceholderText("Your name"), {
+      target: { value: "Ace" },
+    });
+    fireEvent.click(screen.getByText("Find Match"));
+
+    await waitFor(() => expect(mockOnGameCreated).toHaveBeenCalled());
+    expect(quickMatchTicTacToe).toHaveBeenCalledWith({
+      preset: "standard",
+      player_name: "Ace",
+    });
+    expect(mockOnGameCreated).toHaveBeenCalledWith(
+      { state: { id: 99, status: "waiting_for_opponent" } },
+      { playerNumber: 1, isOnline: true }
+    );
+  });
+
+  it("uses the chosen preset and seats player 2 when matched immediately", async () => {
+    quickMatchTicTacToe.mockResolvedValue({
+      state: { id: 100, status: "active" },
+    });
+
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+    fireEvent.click(screen.getByText("Online"));
+    fireEvent.click(screen.getByText("Blitz"));
+    fireEvent.click(screen.getByText("Find Match"));
+
+    await waitFor(() => expect(mockOnGameCreated).toHaveBeenCalled());
+    expect(quickMatchTicTacToe).toHaveBeenCalledWith(
+      expect.objectContaining({ preset: "blitz" })
+    );
+    expect(mockOnGameCreated).toHaveBeenCalledWith(
+      { state: { id: 100, status: "active" } },
+      { playerNumber: 2, isOnline: true }
+    );
+  });
+
+  it("shows the Create Online Game button under Play a Friend", () => {
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+    fireEvent.click(screen.getByText("Online"));
+    fireEvent.click(screen.getByText("Play a Friend"));
+    expect(screen.getByText("Create Online Game")).toBeInTheDocument();
+  });
+
+  it("shows join code input when Online -> Play a Friend -> Join is selected", () => {
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+    fireEvent.click(screen.getByText("Online"));
+    fireEvent.click(screen.getByText("Play a Friend"));
     fireEvent.click(screen.getByText("Join"));
     expect(screen.getByPlaceholderText("ABC123")).toBeInTheDocument();
     expect(screen.getByText("Join Game")).toBeInTheDocument();
@@ -67,13 +167,7 @@ describe("GameSetup", () => {
     expect(screen.getByText("Turn timer")).toBeInTheDocument();
   });
 
-  it("shows 'Create Online Game' button when online mode selected", () => {
-    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
-    fireEvent.click(screen.getByText("Online"));
-    expect(screen.getByText("Create Online Game")).toBeInTheDocument();
-  });
-
-  it("prefills Online → Join with a valid initialJoinCode", () => {
+  it("prefills Online -> Play a Friend -> Join with a valid initialJoinCode", () => {
     render(
       <GameSetup
         onGameCreated={mockOnGameCreated}

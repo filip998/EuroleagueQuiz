@@ -13,6 +13,11 @@ const LEGACY_NICKNAME_KEY = "hol_nickname";
 export const NICKNAME_MAX_LENGTH = 30;
 const GUEST_ID_MAX_LENGTH = 64;
 
+// Fallback used only when localStorage cannot retain the guest id (private mode,
+// quota, disabled storage). Keeps the id stable for the page lifetime so calls
+// that must agree on it — Quick Match create then cancel — use the same token.
+let memoryGuestId = null;
+
 function readStorage(key) {
   try {
     return globalThis.localStorage?.getItem(key) ?? null;
@@ -56,8 +61,16 @@ export function getGuestId() {
   ) {
     return stored;
   }
+  // Storage couldn't supply a usable id. If a previous call already minted one
+  // that storage refused to retain, reuse it so the id stays stable for the page
+  // lifetime — Quick Match cancel and self-match prevention key on a consistent
+  // guest_id, so a token that changes per call would break them.
+  if (memoryGuestId) return memoryGuestId;
   const guestId = generateGuestId();
   writeStorage(GUEST_ID_KEY, guestId);
+  if (readStorage(GUEST_ID_KEY) !== guestId) {
+    memoryGuestId = guestId;
+  }
   return guestId;
 }
 

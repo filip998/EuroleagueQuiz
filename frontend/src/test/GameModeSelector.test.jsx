@@ -93,4 +93,28 @@ describe("GameModeSelector", () => {
     expect(screen.getByText("Online").closest("button")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Solo").closest("button")).toHaveAttribute("aria-pressed", "false");
   });
+
+  it("renders custom sub-mode labels supplied via subModes", () => {
+    const onSubChange = vi.fn();
+    render(
+      <GameModeSelector
+        modes={["solo", "local", "online"]}
+        mode="online"
+        onModeChange={() => {}}
+        sub="quick"
+        onSubChange={onSubChange}
+        subModes={[
+          ["quick", "Quick Match"],
+          ["friend", "Play a Friend"],
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Quick Match")).toBeInTheDocument();
+    expect(screen.getByText("Play a Friend")).toBeInTheDocument();
+    expect(screen.queryByText("Create")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Play a Friend"));
+    expect(onSubChange).toHaveBeenCalledWith("friend");
+  });
 });

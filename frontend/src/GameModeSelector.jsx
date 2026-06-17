@@ -30,15 +30,18 @@ const MODE_META = {
   },
 };
 
-const SUB_MODES = [
+const DEFAULT_SUB_MODES = [
   ["create", "Create"],
   ["join", "Join"],
 ];
 
 /**
  * Shared mode picker: a row of mode cards (Solo / Local 1v1 / Online) plus, when
- * Online is selected, a slim Create / Join sub-toggle. Fully controlled — the
- * parent owns `mode` and `sub`. Renders nothing for single-mode games.
+ * Online is selected, a slim sub-toggle. Fully controlled — the parent owns
+ * `mode` and `sub`. Renders nothing for single-mode games.
+ *
+ * `subModes` lets a game customise the Online sub-toggle (e.g. TicTacToe uses
+ * Quick Match / Play a Friend); it defaults to Create / Join.
  */
 export default function GameModeSelector({
   modes = ["solo", "local", "online"],
@@ -46,6 +49,7 @@ export default function GameModeSelector({
   onModeChange,
   sub,
   onSubChange,
+  subModes = DEFAULT_SUB_MODES,
 }) {
   if (!modes || modes.length < 2) return null;
 
@@ -82,8 +86,11 @@ export default function GameModeSelector({
       </div>
 
       {mode === "online" && (
-        <div className="grid grid-cols-2 gap-1 p-1 mb-6 bg-elq-bg rounded-xl border border-elq-border">
-          {SUB_MODES.map(([value, label]) => (
+        <div
+          className={`grid gap-1 p-1 mb-6 bg-elq-bg rounded-xl border border-elq-border`}
+          style={{ gridTemplateColumns: `repeat(${subModes.length}, minmax(0, 1fr))` }}
+        >
+          {subModes.map(([value, label]) => (
             <button
               key={value}
               type="button"

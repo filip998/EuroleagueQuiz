@@ -11,28 +11,7 @@ import CareerQuizBoard from "./CareerQuizBoard";
 import { LogoFull } from "./Logo";
 import { getCareerGame, getGame, getRosterGame } from "./api";
 import { parseJoinCode } from "./inviteLink";
-
-// ---------------------------------------------------------------------------
-// Helpers for persisting online game info across page refreshes
-// ---------------------------------------------------------------------------
-
-function saveOnlineInfo(gameId, online) {
-  if (online) {
-    sessionStorage.setItem(
-      `elq_game_${gameId}`,
-      JSON.stringify({ playerNumber: online.playerNumber, isOnline: true })
-    );
-  }
-}
-
-function loadOnlineInfo(gameId) {
-  try {
-    const stored = sessionStorage.getItem(`elq_game_${gameId}`);
-    return stored ? JSON.parse(stored) : null;
-  } catch {
-    return null;
-  }
-}
+import { saveOnlineInfo, loadOnlineInfo, recoverOnlineInfo } from "./onlineRecovery";
 
 // ---------------------------------------------------------------------------
 // Loading screen shown while recovering game state after a page refresh
@@ -195,7 +174,7 @@ function TicTacToeGamePage() {
     getGame(gameId)
       .then((data) => {
         setGame(data);
-        setOnlineInfo(loadOnlineInfo(gameId));
+        setOnlineInfo(recoverOnlineInfo(gameId, data));
       })
       .catch(() => navigate("/tictactoe", { replace: true }))
       .finally(() => setLoading(false));

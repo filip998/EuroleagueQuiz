@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { getGuestId, getNickname, setNickname, NICKNAME_MAX_LENGTH } from "../identity";
 
 // The Node 25 test runtime ships an inert experimental `localStorage` global
@@ -54,6 +54,27 @@ describe("guest id", () => {
     const id = getGuestId();
     expect(id.trim().length).toBeGreaterThan(0);
     expect(localStorage.getItem("elq_guest_id")).toBe(id);
+  });
+
+  it("stays stable across calls when storage cannot persist", async () => {
+    // Fully unavailable storage: reads return null and writes throw. getGuestId
+    // must fall back to a single in-memory id rather than minting a new one on
+    // every call — Quick Match cancel/self-match prevention depend on a stable
+    // guest_id. Use a fresh module instance so the in-memory fallback is isolated.
+    globalThis.localStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("storage disabled");
+      },
+      removeItem: () => {},
+      clear: () => {},
+    };
+    vi.resetModules();
+    const { getGuestId: freshGetGuestId } = await import("../identity");
+    const first = freshGetGuestId();
+    const second = freshGetGuestId();
+    expect(first).toBeTruthy();
+    expect(second).toBe(first);
   });
 });
 
