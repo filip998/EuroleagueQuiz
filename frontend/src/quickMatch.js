@@ -45,13 +45,16 @@ export function formatPresence(counts) {
 }
 
 /**
- * Polls the per-preset presence counts while `enabled`. Uses a self-scheduling
- * timeout chain (honouring the server's poll_interval_seconds) rather than a
- * fixed interval, and is cleanup-safe: it never calls setState after unmount and
- * always clears its pending timer. On error it keeps the last counts and retries
- * at the default cadence.
+ * Polls the per-preset presence counts while `enabled`, using `fetchPools` as the
+ * data source. Uses a self-scheduling timeout chain (honouring the server's
+ * poll_interval_seconds) rather than a fixed interval, and is cleanup-safe: it
+ * never calls setState after unmount and always clears its pending timer. On
+ * error it keeps the last counts and retries at the default cadence.
+ *
+ * `fetchPools` must be a stable module-level reference (it is an effect
+ * dependency) so swapping it doesn't restart polling on every render.
  */
-export function useQuickMatchPools(enabled) {
+export function useQuickMatchPoolsFrom(enabled, fetchPools) {
   const [pools, setPools] = useState(null);
   const [error, setError] = useState(false);
 
@@ -69,7 +72,7 @@ export function useQuickMatchPools(enabled) {
 
     async function poll() {
       try {
-        const data = await fetchTicTacToeQuickMatchPools();
+        const data = await fetchPools();
         if (cancelled) return;
         setPools(data?.pools || {});
         setError(false);
@@ -87,7 +90,11 @@ export function useQuickMatchPools(enabled) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [enabled]);
+  }, [enabled, fetchPools]);
 
   return { pools, error };
+}
+
+export function useQuickMatchPools(enabled) {
+  return useQuickMatchPoolsFrom(enabled, fetchTicTacToeQuickMatchPools);
 }
