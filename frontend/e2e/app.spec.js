@@ -41,40 +41,21 @@ async function apiJson(path, options = {}) {
   return body;
 }
 
-async function autocompleteAnyPlayerForCell(cell) {
-  const params = new URLSearchParams({ q: "", limit: "25" });
-  if (cell.row_team_code) params.set("team_code_1", cell.row_team_code);
-  if (cell.col_team_code) {
-    if (cell.row_team_code) params.set("team_code_2", cell.col_team_code);
-    else params.set("team_code_1", cell.col_team_code);
-  }
-  const data = await apiJson(`/quiz/tictactoe/players/autocomplete?${params}`);
-  return data.players?.[0]?.player_id ?? null;
+async function currentTurnPage(gameId, playerA, playerB) {
+  const state = await apiJson(`/quiz/tictactoe/games/${gameId}`);
+  return state.current_player === 1 ? playerA : playerB;
 }
 
-async function submitApiMove(gameId) {
-  const state = await apiJson(`/quiz/tictactoe/games/${gameId}`);
-  const openCells = state.round.cells.filter((cell) => !cell.claimed_by_player);
-
-  for (const cell of openCells) {
-    const playerId = await autocompleteAnyPlayerForCell(cell);
-    if (!playerId) continue;
-
-    const move = await apiJson(
-      `/quiz/tictactoe/games/${gameId}/moves?player=${state.current_player}`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          row_index: cell.row_index,
-          col_index: cell.col_index,
-          player_id: playerId,
-        }),
-      },
-    );
-    return move.payload?.result || move.payload?.game?.status || "move";
-  }
-
-  throw new Error(`No playable TicTacToe cell found for game ${gameId}`);
+async function playVisibleMove(gameId, playerA, playerB) {
+  const page = await currentTurnPage(gameId, playerA, playerB);
+  await page.getByRole("button", { name: "+" }).first().click();
+  await page.getByPlaceholder("Type player name...").fill("a");
+  const firstResult = page.locator("ul button").first();
+  await expect(firstResult).toBeVisible({ timeout: 10000 });
+  await firstResult.click();
+  await expect(page.getByText(/Correct|Incorrect|Turn switches/)).toBeVisible({
+    timeout: 15000,
+  });
 }
 
 async function cleanupQuickMatchPage(page) {
@@ -180,7 +161,7 @@ test.describe("TicTacToe Flow", () => {
 });
 
 test.describe.serial("TicTacToe Quick Match Flow", () => {
-  test("pairs two clients on Standard, plays API-backed moves, and resigns", async ({ browser }) => {
+  test("pairs two clients on Standard, plays visible moves, and resigns", async ({ browser }) => {
     const contextA = await browser.newContext();
     const contextB = await browser.newContext();
     const playerA = await contextA.newPage();
@@ -212,12 +193,8 @@ test.describe.serial("TicTacToe Quick Match Flow", () => {
       const gameId = gameIdFromUrl(playerA);
       expect(gameIdFromUrl(playerB)).toBe(gameId);
 
-      await submitApiMove(gameId);
-      await expect(playerA.getByText(/Correct|Incorrect|Turn switches/)).toBeVisible({
-        timeout: 15000,
-      });
-
-      await submitApiMove(gameId);
+      await playVisibleMove(gameId, playerA, playerB);
+      await playVisibleMove(gameId, playerA, playerB);
 
       await playerA.getByRole("button", { name: "Resign" }).click();
       await playerA.getByText("Resign the match? Your opponent wins.").waitFor();
