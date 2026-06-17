@@ -250,3 +250,75 @@ export function connectCareerRealtime({ gameId, playerNumber, onMessage, onClose
     { onMessage, onClose, WebSocketImpl }
   );
 }
+
+// ---------------------------------------------------------------------------
+// Photo Quiz API
+// ---------------------------------------------------------------------------
+
+export function createPhotoSoloRound(recentPlayerIds = []) {
+  return request("POST", "/quiz/photo/solo/round", {
+    recent_player_ids: recentPlayerIds,
+  });
+}
+
+export function submitPhotoSoloGuess(roundToken, playerId) {
+  return request("POST", "/quiz/photo/solo/guess", {
+    round_token: roundToken,
+    player_id: playerId,
+  });
+}
+
+export function revealPhotoSoloAnswer(roundToken) {
+  return request("POST", "/quiz/photo/solo/reveal", {
+    round_token: roundToken,
+  });
+}
+
+export function autocompletePhotoPlayer(q, limit = 15) {
+  const params = new URLSearchParams({ q, limit });
+  return request("GET", `/quiz/photo/players/autocomplete?${params}`);
+}
+
+export function createPhotoGame(payload) {
+  return actionRequest("POST", "/quiz/photo/games", { ...payload, guest_id: getGuestId() });
+}
+
+export function getPhotoGame(gameId) {
+  return request("GET", `/quiz/photo/games/${gameId}`);
+}
+
+export function joinPhotoGame(joinCode, playerName) {
+  return actionRequest("POST", "/quiz/photo/games/join", {
+    join_code: joinCode,
+    player_name: playerName,
+    guest_id: getGuestId(),
+  });
+}
+
+export function submitPhotoGuess(gameId, playerNumber, playerId, roundNumber) {
+  return actionRequest("POST", `/quiz/photo/games/${gameId}/guess?player=${playerNumber}`, {
+    player_id: playerId,
+    round_number: roundNumber,
+  });
+}
+
+export function offerPhotoNoAnswer(gameId, playerNumber, roundNumber) {
+  return actionRequest("POST", `/quiz/photo/games/${gameId}/no-answer-offer?player=${playerNumber}`, {
+    round_number: roundNumber,
+  });
+}
+
+export function respondPhotoNoAnswer(gameId, playerNumber, accept, roundNumber, offerVersion) {
+  return actionRequest("POST", `/quiz/photo/games/${gameId}/no-answer-response?player=${playerNumber}`, {
+    accept,
+    round_number: roundNumber,
+    no_answer_offer_version: offerVersion,
+  });
+}
+
+export function connectPhotoRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
+  return connectRealtimeWebSocket(
+    `/quiz/photo/ws/${gameId}?player=${playerNumber}`,
+    { onMessage, onClose, WebSocketImpl }
+  );
+}

@@ -23,6 +23,17 @@ import {
   respondCareerNoAnswer,
   submitCareerGuess,
   connectCareerRealtime,
+  createPhotoSoloRound,
+  submitPhotoSoloGuess,
+  revealPhotoSoloAnswer,
+  autocompletePhotoPlayer,
+  createPhotoGame,
+  getPhotoGame,
+  joinPhotoGame,
+  submitPhotoGuess,
+  offerPhotoNoAnswer,
+  respondPhotoNoAnswer,
+  connectPhotoRealtime,
 } from "../api";
 
 // Identity is mocked so request bodies carry a deterministic guest_id.
@@ -446,6 +457,199 @@ describe("Career Quiz API", () => {
     expect(connection.isOpen()).toBe(true);
     expect(FakeWebSocket.lastUrl).toBe("ws://localhost:8000/quiz/career/ws/7?player=2");
     expect(messages).toEqual([{ action: "offer_no_answer", round_number: 1 }]);
+  });
+});
+
+describe("Photo Quiz API", () => {
+  it("createPhotoSoloRound sends recent player ids", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse({
+      round_token: "round-token",
+      image_url: "https://example.com/p.png",
+    }));
+
+    const result = await createPhotoSoloRound([1, 2]);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/solo/round",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ recent_player_ids: [1, 2] }),
+      })
+    );
+    expect(result.round_token).toBe("round-token");
+  });
+
+  it("submitPhotoSoloGuess sends round token and player id", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse({ correct: false }));
+
+    await submitPhotoSoloGuess("round-token", 99);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/solo/guess",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ round_token: "round-token", player_id: 99 }),
+      })
+    );
+  });
+
+  it("revealPhotoSoloAnswer sends the round token", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse({ answer: { id: 1, name: "Player" } }));
+
+    await revealPhotoSoloAnswer("round-token");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/solo/reveal",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ round_token: "round-token" }),
+      })
+    );
+  });
+
+  it("autocompletePhotoPlayer hits the photo autocomplete path", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse({ players: [] }));
+
+    await autocompletePhotoPlayer("luka");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/players/autocomplete?q=luka&limit=15",
+      expect.objectContaining({ method: "GET" })
+    );
+  });
+
+  it("createPhotoGame parses the realtime state envelope", async () => {
+    const payload = { target_wins: 3, wrong_guess_visibility: "private" };
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 })));
+
+    const result = await createPhotoGame(payload);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/games",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ...payload, guest_id: "test-guest-id" }),
+      })
+    );
+    expect(result.state.id).toBe(7);
+  });
+
+  it("getPhotoGame fetches plain game state for polling", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse({ id: 7, status: "active" }));
+
+    const result = await getPhotoGame(7);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/games/7",
+      expect.objectContaining({ method: "GET" })
+    );
+    expect(result.id).toBe(7);
+  });
+
+  it("joinPhotoGame parses the realtime state envelope", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 8 })));
+
+    const result = await joinPhotoGame("ABC123", "Player 2");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/games/join",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          join_code: "ABC123",
+          player_name: "Player 2",
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+    expect(result.state.id).toBe(8);
+  });
+
+  it("submitPhotoGuess sends player_id and round_number", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "incorrect")));
+
+    const result = await submitPhotoGuess(7, 1, 99, 3);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/games/7/guess?player=1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ player_id: 99, round_number: 3 }),
+      })
+    );
+    expect(result.result).toBe("incorrect");
+  });
+
+  it("offerPhotoNoAnswer sends round_number", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "no_answer_offered")));
+
+    const result = await offerPhotoNoAnswer(7, 2, 4);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/games/7/no-answer-offer?player=2",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ round_number: 4 }),
+      })
+    );
+    expect(result.result).toBe("no_answer_offered");
+  });
+
+  it("respondPhotoNoAnswer sends accept, round_number and offer version", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 7 }, "no_answer_accepted")));
+
+    const result = await respondPhotoNoAnswer(7, 1, true, 4, 2);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/games/7/no-answer-response?player=1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          accept: true,
+          round_number: 4,
+          no_answer_offer_version: 2,
+        }),
+      })
+    );
+    expect(result.result).toBe("no_answer_accepted");
+  });
+
+  it("connectPhotoRealtime opens the Photo websocket path", () => {
+    const messages = [];
+    class FakeWebSocket {
+      static OPEN = 1;
+      constructor(url) {
+        FakeWebSocket.lastUrl = url;
+        this.url = url;
+        this.readyState = FakeWebSocket.OPEN;
+      }
+      send(message) {
+        messages.push(JSON.parse(message));
+      }
+      close() {}
+    }
+
+    const connection = connectPhotoRealtime({
+      gameId: 7,
+      playerNumber: 2,
+      onMessage: vi.fn(),
+      WebSocketImpl: FakeWebSocket,
+    });
+    connection.send({
+      action: "respond_no_answer",
+      accept: true,
+      round_number: 1,
+      no_answer_offer_version: 3,
+    });
+
+    expect(connection.isOpen()).toBe(true);
+    expect(FakeWebSocket.lastUrl).toBe("ws://localhost:8000/quiz/photo/ws/7?player=2");
+    expect(messages).toEqual([{
+      action: "respond_no_answer",
+      accept: true,
+      round_number: 1,
+      no_answer_offer_version: 3,
+    }]);
   });
 });
 
