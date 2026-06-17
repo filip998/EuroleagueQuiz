@@ -45,8 +45,8 @@ vi.mock("../CareerQuizBoard", () => ({
   default: () => <div data-testid="career-board" />,
 }));
 vi.mock("../PhotoQuizSetup", () => ({
-  default: ({ onBack }) => (
-    <div data-testid="photo-setup">
+  default: ({ onBack, initialMode }) => (
+    <div data-testid="photo-setup" data-initial-mode={initialMode || ""}>
       <button onClick={onBack}>Back</button>
     </div>
   ),
@@ -74,11 +74,26 @@ describe("App", () => {
 
   it("renders a Quick Match CTA on the TicTacToe card that opens setup", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
-    const cta = screen.getByTestId("home-quick-match-cta");
-    expect(cta).toBeInTheDocument();
+    const cta = screen
+      .getAllByTestId("home-quick-match-cta")
+      .find((el) => el.getAttribute("href") === "/tictactoe");
+    expect(cta).toBeDefined();
     expect(cta).toHaveTextContent("Quick Match");
     fireEvent.click(cta);
     expect(screen.getByTestId("game-setup")).toBeInTheDocument();
+  });
+
+  it("renders a Quick Match CTA on the Photo Quiz card that opens setup on Online", () => {
+    render(<MemoryRouter><App /></MemoryRouter>);
+    const cta = screen
+      .getAllByTestId("home-quick-match-cta")
+      .find((el) => el.getAttribute("href") === "/photo?quick=1");
+    expect(cta).toBeDefined();
+    expect(cta).toHaveTextContent("Quick Match");
+    fireEvent.click(cta);
+    const setup = screen.getByTestId("photo-setup");
+    expect(setup).toBeInTheDocument();
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
   });
 
   it("navigates to Roster Guess setup when clicking the card", () => {

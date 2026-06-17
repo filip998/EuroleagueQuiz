@@ -52,13 +52,14 @@ describe("PhotoQuizSetup", () => {
   const mockOnGameJoined = vi.fn();
   const mockOnBack = vi.fn();
 
-  function renderSetup() {
+  function renderSetup(props = {}) {
     return render(
       <PhotoQuizSetup
         onSoloRound={mockOnSoloRound}
         onGameCreated={mockOnGameCreated}
         onGameJoined={mockOnGameJoined}
         onBack={mockOnBack}
+        {...props}
       />
     );
   }
@@ -78,6 +79,13 @@ describe("PhotoQuizSetup", () => {
     renderSetup();
     expect(screen.getByText("Start Game")).toBeInTheDocument();
     expect(screen.queryByText("Quick Match")).not.toBeInTheDocument();
+  });
+
+  it("starts on the Quick Match pool grid when initialMode is 'online'", () => {
+    renderSetup({ initialMode: "online" });
+    expect(screen.getByText("Find Match")).toBeInTheDocument();
+    expect(screen.getByText("First to 1")).toBeInTheDocument();
+    expect(screen.queryByText("Start Game")).not.toBeInTheDocument();
   });
 
   it("starts a solo round on submit", async () => {

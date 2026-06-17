@@ -35,8 +35,8 @@ const FRIEND_SUB_MODES = [
   ["join", "Join"],
 ];
 
-export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack }) {
-  const [mode, setMode] = useState("solo");
+export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack, initialMode = "solo" }) {
+  const [mode, setMode] = useState(initialMode === "online" ? "online" : "solo");
   // Online sub-mode: "quick" (matchmaking pool) | "friend" (private game).
   const [onlineSub, setOnlineSub] = useState("quick");
   // Friend sub-mode: "create" | "join".
