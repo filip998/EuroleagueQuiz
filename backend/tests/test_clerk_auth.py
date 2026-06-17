@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
+import app.auth.clerk as clerk_module
 import app.auth.dependencies as auth_dependencies
 from app.auth.clerk import ClerkAuthConfigurationError, ClerkJWTVerifier, ClerkTokenError, JWKSCache
 from app.auth.users import get_or_create_user_for_claims
@@ -217,6 +218,35 @@ def test_jwks_cache_fetches_without_holding_lock(signing_key):
         release_fetch.set()
         assert future.result(timeout=2.0) == signing_key.jwk
     assert fetches == [JWKS_URL]
+
+
+def test_default_verifier_initializes_once_under_concurrent_cold_start(monkeypatch, signing_key):
+    clerk_module.reset_clerk_jwt_verifier()
+    build_count = 0
+    build_started = threading.Event()
+    release_build = threading.Event()
+    verifier = _verifier(signing_key.jwk)
+
+    def build_verifier():
+        nonlocal build_count
+        build_count += 1
+        build_started.set()
+        assert release_build.wait(timeout=2.0)
+        return verifier
+
+    monkeypatch.setattr(ClerkJWTVerifier, "from_settings", staticmethod(build_verifier))
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(clerk_module.get_clerk_jwt_verifier)
+            assert build_started.wait(timeout=2.0)
+            second = executor.submit(clerk_module.get_clerk_jwt_verifier)
+            release_build.set()
+
+            assert first.result(timeout=2.0) is verifier
+            assert second.result(timeout=2.0) is verifier
+        assert build_count == 1
+    finally:
+        clerk_module.reset_clerk_jwt_verifier()
 
 
 def test_get_current_user_401s_and_jit_provisions(monkeypatch, auth_session_factory, signing_key):

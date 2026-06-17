@@ -302,15 +302,19 @@ class ClerkJWTVerifier:
 
 
 _default_verifier: ClerkJWTVerifier | None = None
+_default_verifier_lock = threading.Lock()
 
 
 def get_clerk_jwt_verifier() -> ClerkJWTVerifier:
     global _default_verifier
     if _default_verifier is None:
-        _default_verifier = ClerkJWTVerifier.from_settings()
+        with _default_verifier_lock:
+            if _default_verifier is None:
+                _default_verifier = ClerkJWTVerifier.from_settings()
     return _default_verifier
 
 
 def reset_clerk_jwt_verifier() -> None:
     global _default_verifier
-    _default_verifier = None
+    with _default_verifier_lock:
+        _default_verifier = None
