@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Routes, Route, useNavigate, useParams, useLocation, Link } from "react-router-dom";
 import GameSetup from "./GameSetup";
 import GameBoard from "./GameBoard";
@@ -15,6 +15,14 @@ import { LogoFull } from "./Logo";
 import { getCareerGame, getGame, getPhotoGame, getRosterGame } from "./api";
 import { parseJoinCode } from "./inviteLink";
 import { saveOnlineInfo, loadOnlineInfo, recoverOnlineInfo, recoverPhotoOnlineInfo } from "./onlineRecovery";
+
+// Lazy-loaded so the Clerk-backed profile page (the only thing that pulls in
+// `@clerk/clerk-react` via auth.jsx) is code-split out of the main bundle and,
+// crucially, never imported when App is rendered in tests without a Router/Clerk
+// — the /profile route is the only place that evaluates it.
+const ProfileRoute = lazy(() =>
+  import("./auth").then((m) => ({ default: m.ProfileRoute }))
+);
 
 // ---------------------------------------------------------------------------
 // Loading screen shown while recovering game state after a page refresh
@@ -471,6 +479,14 @@ function App() {
       <Route path="/photo" element={<PhotoSetupPage />} />
       <Route path="/photo/play" element={<PhotoSoloPage />} />
       <Route path="/photo/:gameId" element={<PhotoGamePage />} />
+      <Route
+        path="/profile/*"
+        element={
+          <Suspense fallback={<LoadingScreen />}>
+            <ProfileRoute />
+          </Suspense>
+        }
+      />
     </Routes>
   );
 }
