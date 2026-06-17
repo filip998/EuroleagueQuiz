@@ -506,7 +506,7 @@ def _player_payload(db: Session, player_id: int) -> dict[str, Any]:
         "last_name": player.last_name,
         "nationality": player.nationality,
         "position": player.position,
-        "image_url": player.image_url,
+        "image_url": player.euroleague_image_url,
     }
 
 
@@ -514,7 +514,7 @@ def _wrong_guess_player_payload(player: Player) -> dict[str, Any]:
     return {
         "id": player.id,
         "name": _player_display_name(player),
-        "image_url": player.image_url,
+        "image_url": player.euroleague_image_url,
     }
 
 

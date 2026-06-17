@@ -13,11 +13,12 @@ vi.mock("../api", () => ({
   submitCareerSoloGuess: vi.fn(),
 }));
 
-import CareerQuizBoard, {
+import CareerQuizBoard from "../CareerQuizBoard";
+import {
   formatSeasonRange,
   getRevealCountdownRemaining,
   shouldRevealCompletedRound,
-} from "../CareerQuizBoard";
+} from "../careerQuizUtils";
 import {
   autocompleteCareerPlayer,
   connectCareerRealtime,
