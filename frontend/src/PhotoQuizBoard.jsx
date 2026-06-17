@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   autocompletePhotoPlayer,
+  cancelPhotoQuickMatch,
   connectPhotoRealtime,
   createPhotoSoloRound,
   getPhotoGame,
@@ -13,6 +14,15 @@ import {
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import WaitingLobby from "./WaitingLobby";
+import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
+import { clearOnlineInfo } from "./onlineRecovery";
+import { forgetQuickMatchSeat } from "./quickMatchSeats";
+import {
+  PHOTO_QUICK_MATCH_ROUND_SECONDS,
+  photoPresetLabel,
+  photoSeatKey,
+  usePhotoQuickMatchPools,
+} from "./photoQuickMatch";
 import {
   getRevealCountdownRemaining,
   shouldRevealCompletedRound,
@@ -64,6 +74,8 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
   const [message, setMessage] = useState("");
   const [noAnswerOfferMessageRoundNumber, setNoAnswerOfferMessageRoundNumber] = useState(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [cancelling, setCancelling] = useState(false);
+  const [roundTimerAnchor, setRoundTimerAnchor] = useState(null);
 
   const solo = Boolean(soloRound);
   const isOnline = !solo && Boolean(onlineInfo);
@@ -78,18 +90,40 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
   const roundLocked = revealCountdownRemaining > 0;
   const sharedWrongGuesses = solo ? [] : game?.current_round?.wrong_guesses || [];
   const offerVersion = game?.pending_no_answer_offer_version;
+  // Public Quick Match games disable the cooperative no-answer flow (the backend
+  // rejects offers/responses); their rounds auto-resolve on the server timer.
+  const isPublicQuickMatch = isOnline && Boolean(game?.is_public) && Boolean(game?.preset);
   const canRespondNoAnswer = (
     !solo
+    && !isPublicQuickMatch
     && game?.pending_no_answer_to === playerNumber
     && Number.isInteger(offerVersion)
     && offerVersion > 0
   );
 
+  // Per-round countdown affordance for public Quick Match. The realtime layer
+  // does not push a deadline, so we anchor a fresh 60s window each time a round
+  // becomes active and unlocked. It is display-only: it never disables guessing
+  // or posts on expiry — the server owns the authoritative timer and broadcasts
+  // the auto-skip, which the board reflects through the normal reveal flow.
+  const timerEligible = isPublicQuickMatch && game?.status === "active" && !roundLocked;
+  const showRoundTimer = (
+    timerEligible
+    && roundTimerAnchor != null
+    && roundTimerAnchor.round === currentRoundNumber
+  );
+  const timerRemaining = showRoundTimer
+    ? Math.min(
+        PHOTO_QUICK_MATCH_ROUND_SECONDS,
+        Math.max(0, Math.ceil((roundTimerAnchor.deadlineMs - nowMs) / 1000))
+      )
+    : null;
+
   useEffect(() => {
-    if (!revealNextRoundStartsAt) return undefined;
+    if (!revealNextRoundStartsAt && !showRoundTimer) return undefined;
     const timer = setInterval(() => setNowMs(Date.now()), 250);
     return () => clearInterval(timer);
-  }, [revealNextRoundStartsAt]);
+  }, [revealNextRoundStartsAt, showRoundTimer]);
 
   useEffect(() => {
     if (!completedRound) return undefined;
@@ -97,16 +131,27 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
     return () => clearTimeout(timer);
   }, [completedRound]);
 
-  /* eslint-disable react-hooks/set-state-in-effect --
-     These mirror CareerQuizBoard's proven state-sync effects: they reconcile
-     React state with inbound realtime/poll game updates. The React Compiler
-     lint rule bails on that larger component but analyzes this one. */
+  /* These mirror CareerQuizBoard's proven state-sync effects: they reconcile
+     React state with inbound realtime/poll game updates. */
   useEffect(() => {
     const latestRound = game?.latest_completed_round;
     if (!shouldRevealCompletedRound(latestRound, lastRevealedRoundNumber)) return;
     setCompletedRound(latestRound);
     setLastRevealedRoundNumber(latestRound.round_number);
   }, [game?.latest_completed_round, lastRevealedRoundNumber]);
+
+  useEffect(() => {
+    if (!timerEligible) {
+      if (roundTimerAnchor !== null) setRoundTimerAnchor(null);
+      return;
+    }
+    if (roundTimerAnchor?.round !== currentRoundNumber) {
+      setRoundTimerAnchor({
+        round: currentRoundNumber,
+        deadlineMs: Date.now() + PHOTO_QUICK_MATCH_ROUND_SECONDS * 1000,
+      });
+    }
+  }, [timerEligible, currentRoundNumber, roundTimerAnchor]);
 
   useEffect(() => {
     if (message !== NO_ANSWER_OFFER_SENT_MESSAGE || solo) return;
@@ -132,7 +177,6 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
       setNoAnswerOfferMessageRoundNumber(null);
     }
   }, [game, message, noAnswerOfferMessageRoundNumber, playerNumber, solo]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   function handleRealtimeState(result) {
     if (!result?.state) return;
@@ -313,7 +357,37 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
     }
   }
 
+  async function handleQuickCancel() {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await cancelPhotoQuickMatch({ preset: game.preset, game_id: game.id });
+      // The backend deletes the waiting row, freeing its id for SQLite to reuse.
+      // Drop this game's recovery data so a later game with the same id can't
+      // recover the stale online seat and connect as the wrong player.
+      clearOnlineInfo(game.id);
+      forgetQuickMatchSeat(photoSeatKey(game.id));
+      onNewGame();
+    } catch {
+      // The search was likely matched a moment before cancelling (the backend
+      // rejects cancelling a game that is no longer waiting). Stay on the board;
+      // the realtime hook will flip to the active game.
+      setCancelling(false);
+    }
+  }
+
   if (game?.status === "waiting_for_opponent") {
+    if (game.is_public && game.preset) {
+      return (
+        <QuickMatchSearchingLobby
+          preset={game.preset}
+          onCancel={handleQuickCancel}
+          cancelling={cancelling}
+          usePools={usePhotoQuickMatchPools}
+          getPresetLabel={photoPresetLabel}
+        />
+      );
+    }
     return <WaitingLobby joinCode={game.join_code} onCancel={onNewGame} />;
   }
 
@@ -367,6 +441,20 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
           </div>
 
           <div>
+            {showRoundTimer && (
+              <div
+                data-testid="photo-round-timer"
+                className="mb-3 inline-flex items-center gap-2 rounded-full border border-elq-border bg-elq-bg px-3 py-1 text-sm font-semibold text-elq-text"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full animate-pulse ${
+                    timerRemaining > 0 ? "bg-emerald-500" : "bg-elq-warning"
+                  }`}
+                />
+                {timerRemaining > 0 ? `${timerRemaining}s left` : "Time's up — skipping…"}
+              </div>
+            )}
+
             <PhotoGuessBox onGuess={handleGuess} disabled={Boolean(answer) || roundLocked} />
 
             <PhotoFeedbackMessage message={message} />
@@ -417,7 +505,7 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
                     </button>
                   </>
                 )}
-                {!solo && !game?.pending_no_answer_to && (
+                {!solo && !isPublicQuickMatch && !game?.pending_no_answer_to && (
                   <button
                     onClick={offerNoAnswer}
                     disabled={roundLocked}

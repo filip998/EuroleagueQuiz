@@ -13,7 +13,7 @@ import PhotoQuizBoard from "./PhotoQuizBoard";
 import { LogoFull } from "./Logo";
 import { getCareerGame, getGame, getPhotoGame, getRosterGame } from "./api";
 import { parseJoinCode } from "./inviteLink";
-import { saveOnlineInfo, loadOnlineInfo, recoverOnlineInfo } from "./onlineRecovery";
+import { saveOnlineInfo, loadOnlineInfo, recoverOnlineInfo, recoverPhotoOnlineInfo } from "./onlineRecovery";
 
 // ---------------------------------------------------------------------------
 // Loading screen shown while recovering game state after a page refresh
@@ -432,7 +432,7 @@ function PhotoGamePage() {
     getPhotoGame(gameId)
       .then((data) => {
         setGame(data);
-        setOnlineInfo(loadOnlineInfo(gameId));
+        setOnlineInfo(recoverPhotoOnlineInfo(gameId, data));
       })
       .catch(() => navigate("/photo", { replace: true }))
       .finally(() => setLoading(false));

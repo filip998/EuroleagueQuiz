@@ -1,16 +1,39 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../api", () => ({
   autocompletePhotoPlayer: vi.fn(),
+  cancelPhotoQuickMatch: vi.fn(),
   connectPhotoRealtime: vi.fn(),
   createPhotoSoloRound: vi.fn(),
   getPhotoGame: vi.fn(),
+  getPhotoQuickMatchPools: vi.fn(),
   offerPhotoNoAnswer: vi.fn(),
   revealPhotoSoloAnswer: vi.fn(),
   respondPhotoNoAnswer: vi.fn(),
   submitPhotoGuess: vi.fn(),
   submitPhotoSoloGuess: vi.fn(),
+}));
+
+// Recovery cleanup on cancel is asserted via these spies; the real behaviour is
+// covered in onlineRecovery.test.js / quickMatchSeats.test.js.
+vi.mock("../onlineRecovery", () => ({ clearOnlineInfo: vi.fn() }));
+vi.mock("../quickMatchSeats", () => ({ forgetQuickMatchSeat: vi.fn() }));
+
+// Stub the searching lobby so the board's pool-polling hook never runs; the
+// lobby itself is covered in QuickMatchSearchingLobby.test.jsx.
+vi.mock("../QuickMatchSearchingLobby", () => ({
+  default: ({ preset, cancelling, onCancel }) => (
+    <div
+      data-testid="searching-lobby"
+      data-preset={preset}
+      data-cancelling={String(cancelling)}
+    >
+      <button type="button" onClick={onCancel}>
+        stub-cancel
+      </button>
+    </div>
+  ),
 }));
 
 import PhotoQuizBoard from "../PhotoQuizBoard";
@@ -20,6 +43,7 @@ import {
 } from "../photoQuizUtils";
 import {
   autocompletePhotoPlayer,
+  cancelPhotoQuickMatch,
   connectPhotoRealtime,
   createPhotoSoloRound,
   getPhotoGame,
@@ -27,6 +51,8 @@ import {
   submitPhotoGuess,
   submitPhotoSoloGuess,
 } from "../api";
+import { clearOnlineInfo } from "../onlineRecovery";
+import { forgetQuickMatchSeat } from "../quickMatchSeats";
 
 let photoRealtimeConnections = [];
 
@@ -626,6 +652,134 @@ describe("PhotoQuizBoard search keyboard submit", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(submitPhotoGuess).not.toHaveBeenCalled();
+  });
+});
+
+describe("PhotoQuizBoard Quick Match", () => {
+  function publicQuickMatchGame(overrides = {}) {
+    return activePhotoGame({ is_public: true, preset: "standard", ...overrides });
+  }
+
+  it("shows the Quick Match searching lobby for a public preset waiting game", () => {
+    render(
+      <PhotoQuizBoard
+        initialState={publicQuickMatchGame({ status: "waiting_for_opponent" })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("searching-lobby")).toHaveAttribute("data-preset", "standard");
+  });
+
+  it("renders the private WaitingLobby (not the searching lobby) for friend games", () => {
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame({ status: "waiting_for_opponent" })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTestId("searching-lobby")).not.toBeInTheDocument();
+    expect(screen.getByText("ABC123")).toBeInTheDocument();
+  });
+
+  it("cancels a quick match search via the cancel endpoint and clears recovery data", async () => {
+    cancelPhotoQuickMatch.mockResolvedValue({ state: { id: 7, status: "cancelled" } });
+    const onNewGame = vi.fn();
+    render(
+      <PhotoQuizBoard
+        initialState={publicQuickMatchGame({ status: "waiting_for_opponent" })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={onNewGame}
+      />
+    );
+
+    fireEvent.click(screen.getByText("stub-cancel"));
+
+    await waitFor(() =>
+      expect(cancelPhotoQuickMatch).toHaveBeenCalledWith({ preset: "standard", game_id: 7 })
+    );
+    await waitFor(() => expect(onNewGame).toHaveBeenCalled());
+    expect(clearOnlineInfo).toHaveBeenCalledWith(7);
+    expect(forgetQuickMatchSeat).toHaveBeenCalledWith("photo:7");
+  });
+
+  it("keeps recovery data and stays put when a cancel fails (already matched)", async () => {
+    cancelPhotoQuickMatch.mockRejectedValue(new Error("already matched"));
+    const onNewGame = vi.fn();
+    render(
+      <PhotoQuizBoard
+        initialState={publicQuickMatchGame({ status: "waiting_for_opponent" })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={onNewGame}
+      />
+    );
+
+    fireEvent.click(screen.getByText("stub-cancel"));
+
+    await waitFor(() => expect(cancelPhotoQuickMatch).toHaveBeenCalled());
+    expect(clearOnlineInfo).not.toHaveBeenCalled();
+    expect(forgetQuickMatchSeat).not.toHaveBeenCalled();
+    expect(onNewGame).not.toHaveBeenCalled();
+  });
+
+  it("counts down a per-round timer and shows the auto-skip affordance at expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T16:00:00Z"));
+    getPhotoGame.mockResolvedValue(publicQuickMatchGame());
+
+    render(
+      <PhotoQuizBoard
+        initialState={publicQuickMatchGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const timer = screen.getByTestId("photo-round-timer");
+    expect(timer).toHaveTextContent("60s left");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(screen.getByTestId("photo-round-timer")).toHaveTextContent("55s left");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(56000);
+    });
+    expect(screen.getByTestId("photo-round-timer")).toHaveTextContent("Time's up");
+  });
+
+  it("hides the per-round timer and the no-answer flow for public Quick Match games", () => {
+    render(
+      <PhotoQuizBoard
+        initialState={publicQuickMatchGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+    expect(screen.queryByText("Nobody knows")).not.toBeInTheDocument();
+
+    cleanup();
+
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+    expect(screen.queryByTestId("photo-round-timer")).not.toBeInTheDocument();
+    expect(screen.getByText("Nobody knows")).toBeInTheDocument();
   });
 });
 

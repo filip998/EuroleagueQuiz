@@ -6,13 +6,19 @@ import { presetLabel, formatPresence, useQuickMatchPools } from "./quickMatch";
  * instead of a join code, surfaces the chosen preset and live presence counts
  * and lets the player cancel the search. The board's realtime hook flips this
  * screen to the active board automatically once an opponent is matched.
+ *
+ * `usePools`/`getPresetLabel` default to the TicTacToe pool source but let other
+ * games (e.g. Photo Quiz) reuse this lobby with their own pool feed and labels.
+ * Both must be stable module-level references so the hook order stays constant.
  */
 export default function QuickMatchSearchingLobby({
   preset,
   onCancel,
   cancelling = false,
+  usePools = useQuickMatchPools,
+  getPresetLabel = presetLabel,
 }) {
-  const { pools } = useQuickMatchPools(true);
+  const { pools } = usePools(true);
   const counts = preset && pools ? pools[preset] : null;
 
   return (
@@ -28,7 +34,7 @@ export default function QuickMatchSearchingLobby({
           <h2 className="font-display text-4xl text-elq-dark mb-3">SEARCHING THE POOL…</h2>
           <p className="text-elq-muted mb-6">
             Looking for an opponent in{" "}
-            <strong className="text-elq-text">{presetLabel(preset)}</strong>
+            <strong className="text-elq-text">{getPresetLabel(preset)}</strong>
           </p>
 
           <div className="inline-flex items-center gap-2 bg-elq-bg border border-elq-border rounded-full px-4 py-2 mb-8">

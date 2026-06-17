@@ -7,7 +7,13 @@ vi.mock("../quickMatchSeats", () => ({
   recallQuickMatchSeat: (gameId) => recallMock(gameId),
 }));
 
-import { saveOnlineInfo, loadOnlineInfo, recoverOnlineInfo, clearOnlineInfo } from "../onlineRecovery";
+import {
+  saveOnlineInfo,
+  loadOnlineInfo,
+  recoverOnlineInfo,
+  recoverPhotoOnlineInfo,
+  clearOnlineInfo,
+} from "../onlineRecovery";
 
 // Node's experimental test globals can ship an inert sessionStorage that shadows
 // jsdom's, so install a working in-memory Storage for these tests.
@@ -101,5 +107,46 @@ describe("recoverOnlineInfo", () => {
   it("returns null when neither source has a seat", () => {
     recallMock.mockReturnValue(null);
     expect(recoverOnlineInfo(7, { mode: "online_friend" })).toBeNull();
+  });
+});
+
+describe("recoverPhotoOnlineInfo", () => {
+  const publicQuickMatch = {
+    mode: "online_friend",
+    is_public: true,
+    preset: "standard",
+  };
+
+  it("prefers the per-tab sessionStorage seat", () => {
+    saveOnlineInfo(7, { playerNumber: 1, isOnline: true });
+    const info = recoverPhotoOnlineInfo(7, publicQuickMatch);
+    expect(info).toEqual({ playerNumber: 1, isOnline: true });
+    expect(recallMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the photo-namespaced seat map for public Quick Match games", () => {
+    recallMock.mockReturnValue(2);
+    const info = recoverPhotoOnlineInfo(7, publicQuickMatch);
+    expect(info).toEqual({ playerNumber: 2, isOnline: true });
+    expect(recallMock).toHaveBeenCalledWith("photo:7");
+  });
+
+  it("does not fall back for private friend games (no preset / not public)", () => {
+    recallMock.mockReturnValue(2);
+    expect(recoverPhotoOnlineInfo(7, { mode: "online_friend" })).toBeNull();
+    expect(recallMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back for non-online_friend games", () => {
+    recallMock.mockReturnValue(2);
+    expect(
+      recoverPhotoOnlineInfo(7, { mode: "single_player", is_public: true, preset: "standard" })
+    ).toBeNull();
+    expect(recallMock).not.toHaveBeenCalled();
+  });
+
+  it("returns null when neither source has a seat", () => {
+    recallMock.mockReturnValue(null);
+    expect(recoverPhotoOnlineInfo(7, publicQuickMatch)).toBeNull();
   });
 });

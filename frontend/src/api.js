@@ -316,6 +316,24 @@ export function respondPhotoNoAnswer(gameId, playerNumber, accept, roundNumber, 
   });
 }
 
+export function photoQuickMatch(payload) {
+  return actionRequest("POST", "/quiz/photo/quick-match", {
+    ...payload,
+    guest_id: getGuestId(),
+  });
+}
+
+export function cancelPhotoQuickMatch(payload) {
+  return actionRequest("POST", "/quiz/photo/quick-match/cancel", {
+    ...payload,
+    guest_id: getGuestId(),
+  });
+}
+
+export function getPhotoQuickMatchPools() {
+  return request("GET", "/quiz/photo/quick-match/pools");
+}
+
 export function connectPhotoRealtime({ gameId, playerNumber, onMessage, onClose, WebSocketImpl }) {
   return connectRealtimeWebSocket(
     `/quiz/photo/ws/${gameId}?player=${playerNumber}`,

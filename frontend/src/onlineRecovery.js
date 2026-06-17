@@ -7,6 +7,7 @@
 // local game (which would mishandle the disconnect forfeit).
 
 import { recallQuickMatchSeat } from "./quickMatchSeats";
+import { photoSeatKey } from "./photoQuickMatch";
 
 export function saveOnlineInfo(gameId, online) {
   if (!online) return;
@@ -43,6 +44,20 @@ export function recoverOnlineInfo(gameId, game) {
   if (stored) return stored;
   if (game?.mode === "online_friend") {
     const seat = recallQuickMatchSeat(gameId);
+    if (seat) return { playerNumber: seat, isOnline: true };
+  }
+  return null;
+}
+
+// Photo Quiz recovery. Per-tab sessionStorage is authoritative; only public
+// Quick Match games fall back to the durable seat map (under a photo-namespaced
+// key). Private friend games never fall back — a fresh tab joins via the URL —
+// so they can't be mis-seated from a stale namespaced entry.
+export function recoverPhotoOnlineInfo(gameId, game) {
+  const stored = loadOnlineInfo(gameId);
+  if (stored) return stored;
+  if (game?.mode === "online_friend" && game?.is_public && game?.preset) {
+    const seat = recallQuickMatchSeat(photoSeatKey(gameId));
     if (seat) return { playerNumber: seat, isOnline: true };
   }
   return null;
