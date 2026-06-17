@@ -171,7 +171,7 @@ def _get_played_with_candidates(db: Session) -> list[dict]:
         db.query(
             Player.id,
             (Player.first_name + " " + Player.last_name).label("name"),
-            Player.image_url,
+            Player.euroleague_image_url,
             func.sum(PlayerSeasonStats.pir).label("career_pir"),
             func.count(distinct(PlayerSeasonTeam.team_id)).label("team_count"),
             func.max(Season.year).label("last_season_year"),
@@ -202,8 +202,8 @@ def _get_played_with_candidates(db: Session) -> list[dict]:
             "display_label": r.name,
             "_score": score,
         }
-        if r.image_url:
-            candidate["image_url"] = r.image_url
+        if r.euroleague_image_url:
+            candidate["image_url"] = r.euroleague_image_url
         scored.append(candidate)
 
     scored.sort(key=lambda c: -c["_score"])
@@ -1020,9 +1020,13 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
                         info["team_code"] = t.euroleague_code
                         info["team_name"] = t.short_name or t.name
             elif a.axis_type == "played_with":
-                p = db.query(Player.image_url).filter(Player.id == int(a.value)).first()
-                if p and p.image_url:
-                    info["image_url"] = p.image_url
+                p = (
+                    db.query(Player.euroleague_image_url)
+                    .filter(Player.id == int(a.value))
+                    .first()
+                )
+                if p and p.euroleague_image_url:
+                    info["image_url"] = p.euroleague_image_url
             elif a.axis_type == "nationality":
                 code = NATIONALITY_TO_COUNTRY_CODE.get(a.value)
                 if code:
@@ -1056,7 +1060,9 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
                     f"{cell.claimed_player.first_name or ''} {cell.claimed_player.last_name or ''}"
                 ).strip()
 
-            claimed_player_image_url = cell.claimed_player.image_url if cell.claimed_player else None
+            claimed_player_image_url = (
+                cell.claimed_player.euroleague_image_url if cell.claimed_player else None
+            )
             cell_data = {
                 "row_index": row_index,
                 "col_index": col_index,

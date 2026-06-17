@@ -654,8 +654,8 @@ def _serialize_slot(slot, round_over: bool) -> dict:
         if code:
             data["country_code"] = code
     # Include player image when answer is revealed
-    if show_answer and slot.player and slot.player.image_url:
-        data["image_url"] = slot.player.image_url
+    if show_answer and slot.player and slot.player.euroleague_image_url:
+        data["image_url"] = slot.player.euroleague_image_url
     return data
 
 

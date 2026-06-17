@@ -88,6 +88,10 @@ infobox career-history rows, resolves team labels to stable keys, merges local E
 roster stints as validation/fill data, stores cached Career Timelines, and records a
 Career Data Revision. Solo Career Quiz rounds use signed Solo Round Tokens so the answer
 is not stored in browser state or persisted as a solo game row.
+Player image/link data lives directly on `players`: EuroLeague CDN headshots are stored in
+`euroleague_image_url`, Wikipedia page URLs in `wikipedia_url`, and future Wikipedia photo
+enrichment in `wikipedia_image_url` / `wikipedia_image_checked_at`. Existing game payloads
+continue to expose the frontend-compatible `image_url` JSON key for the EuroLeague image.
 Multiplayer Career Quiz resolved-round state includes
 `latest_completed_round.next_round_starts_at` during the three-second reveal lock; the
 backend rejects next-round guesses with `round_locked` until that UTC timestamp elapses.

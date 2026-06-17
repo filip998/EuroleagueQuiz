@@ -1,4 +1,13 @@
-from sqlalchemy import Column, Integer, String, Date, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -15,7 +24,10 @@ class Player(Base):
     nationality = Column(String, nullable=True)
     height_cm = Column(Integer, nullable=True)
     position = Column(String, nullable=True)
-    image_url = Column(String, nullable=True)
+    euroleague_image_url = Column(String, nullable=True)
+    wikipedia_url = Column(String, nullable=True)
+    wikipedia_image_url = Column(String, nullable=True)
+    wikipedia_image_checked_at = Column(DateTime, nullable=True)
 
     player_season_teams = relationship("PlayerSeasonTeam", back_populates="player")
 
