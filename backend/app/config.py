@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     career_quiz_min_eligible_players: int = 200
     solo_round_token_secret: str = "dev-career-quiz-secret"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    tictactoe_timing_enabled: bool = False
 
     model_config = {"env_prefix": "ELQ_"}
 
