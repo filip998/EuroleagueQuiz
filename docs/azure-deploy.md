@@ -8,13 +8,15 @@ This guide walks you through deploying the app on Azure for **~$13/month**.
 |-----------|---------------|------|
 | Frontend (React SPA) | Azure Static Web Apps — Free tier | $0 |
 | Backend (FastAPI) | Azure App Service — B1 Linux | ~$13/mo |
-| Database (SQLite) | File on App Service disk | $0 |
+| Content database (SQLite) | `backend/data/euroleague.db` in the deploy artifact | $0 |
+| Auth/user database (SQLite) | Durable file under App Service `/home` | $0 |
 
 ## Prerequisites
 
 - An Azure subscription (the $75/month free credits work perfectly)
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) installed
 - GitHub repository (for CI/CD)
+- Clerk application configured for the production domain if you want sign-in enabled
 
 ## Step 1: Create Azure Resources
 
@@ -55,16 +57,40 @@ az webapp config set --name euroleague-quiz-backend-app --resource-group eurolea
 ### Set the Startup Command
 
 ```bash
-az webapp config set --name euroleague-quiz-backend-app --resource-group euroleague-quiz-rg --startup-file "pip install . && alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+az webapp config set --name euroleague-quiz-backend-app --resource-group euroleague-quiz-rg --startup-file "sh startup.sh"
 ```
+
+`backend/startup.sh` is included in the zip deployment. It installs the backend package,
+creates SQLite parent directories, runs both content and auth Alembic migrations, then starts
+Uvicorn on Azure's `PORT`. Keep this as the App Service startup command so the auth schema is
+migrated on each deployment.
 
 ### Configure Environment Variables
 
 ```bash
-az webapp config appsettings set --name euroleague-quiz-backend-app --resource-group euroleague-quiz-rg --settings ELQ_DATABASE_URL="sqlite:///data/euroleague.db" ELQ_CORS_ORIGINS="https://your-frontend.azurestaticapps.net"
+az webapp config appsettings set \
+  --name euroleague-quiz-backend-app \
+  --resource-group euroleague-quiz-rg \
+  --settings \
+    WEBSITES_ENABLE_APP_SERVICE_STORAGE="true" \
+    ELQ_DATABASE_URL="sqlite:///data/euroleague.db" \
+    ELQ_AUTH_DATABASE_URL="sqlite:////home/data/users.db" \
+    ELQ_CORS_ORIGINS="https://your-frontend.azurestaticapps.net" \
+    ELQ_CLERK_ISSUER="https://<your-clerk-domain>" \
+    ELQ_CLERK_JWKS_URL="https://<your-clerk-domain>/.well-known/jwks.json" \
+    ELQ_CLERK_SECRET_KEY="<set-in-app-service-settings>" \
+    ELQ_CLERK_WEBHOOK_SECRET="<set-in-app-service-settings>"
 ```
 
 > **Note:** Update `ELQ_CORS_ORIGINS` after you create the Static Web App and know the frontend URL.
+> Store Clerk values as App Service application settings or portal secrets only; do not commit
+> real keys to git. `ELQ_CLERK_AUTHORIZED_PARTIES` is optional if you want to restrict accepted
+> JWT `azp` values to your production frontend origin.
+
+The auth database uses `sqlite:////home/data/users.db` because App Service Linux persists and
+shares `/home` across restarts and zip deployments when `WEBSITES_ENABLE_APP_SERVICE_STORAGE` is
+`true` (or left at the default enabled setting). Paths outside `/home` are ephemeral; the tracked
+content database remains in the deployed app directory and can be replaced by deploys.
 
 ### Create the Static Web App (Frontend)
 
@@ -94,9 +120,9 @@ az account show --query id -o tsv
 Then enable basic auth (replace `<SUB_ID>` with the output above):
 
 ```bash
-az resource update --ids "/subscriptions/1da9f61a-0317-4368-bc96-d2371dc650a1/resourceGroups/euroleague-quiz-rg/providers/Microsoft.Web/sites/euroleague-quiz-backend-app/basicPublishingCredentialsPolicies/ftp" --set properties.allow=true
+az resource update --ids "/subscriptions/<SUB_ID>/resourceGroups/euroleague-quiz-rg/providers/Microsoft.Web/sites/euroleague-quiz-backend-app/basicPublishingCredentialsPolicies/ftp" --set properties.allow=true
 
-az resource update --ids "/subscriptions/1da9f61a-0317-4368-bc96-d2371dc650a1/resourceGroups/euroleague-quiz-rg/providers/Microsoft.Web/sites/euroleague-quiz-backend-app/basicPublishingCredentialsPolicies/scm" --set properties.allow=true
+az resource update --ids "/subscriptions/<SUB_ID>/resourceGroups/euroleague-quiz-rg/providers/Microsoft.Web/sites/euroleague-quiz-backend-app/basicPublishingCredentialsPolicies/scm" --set properties.allow=true
 ```
 
 > **Note:** Replace `euroleague-quiz-backend-app` with your actual App Service name in both commands.
@@ -107,6 +133,7 @@ Now configure GitHub secrets. In your GitHub repo → **Settings** → **Secrets
 |--------|---------------|
 | `AZURE_WEBAPP_PUBLISH_PROFILE` | Azure Portal → your Web App → **Download publish profile** (download XML, paste entire file contents) |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | Azure Portal → your Static Web App → **Manage deployment token** |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → **API keys** → publishable key for this environment; leave unset to ship an anonymous-only frontend |
 
 ## Step 3: Update Configuration
 
@@ -119,13 +146,11 @@ env:
   AZURE_WEBAPP_NAME: your-actual-app-name
 ```
 
-### Frontend production URL
+### Frontend production URL and Clerk key
 
-Edit `frontend/.env.production` and set your backend URL:
-
-```
-VITE_API_URL=https://your-actual-app-name.azurewebsites.net
-```
+The deploy workflow injects `VITE_API_URL` from `AZURE_WEBAPP_NAME` and
+`VITE_CLERK_PUBLISHABLE_KEY` from the GitHub secret. If the Clerk publishable key is unset, the
+frontend builds successfully with sign-in disabled and anonymous gameplay unchanged.
 
 ### CORS origins
 
@@ -135,9 +160,19 @@ Update the App Service env var with your actual frontend URL:
 az webapp config appsettings set --name euroleague-quiz-backend-app --resource-group euroleague-quiz-rg --settings ELQ_CORS_ORIGINS="https://your-frontend-name.azurestaticapps.net"
 ```
 
-## Step 4: Upload the Database
+### Clerk OAuth and webhook prerequisites
 
-The SQLite database needs to be uploaded to the App Service. Use SSH or Kudu:
+In the Clerk Dashboard, enable the production sign-in methods you want to offer. The accounts
+epic assumes email/passwordless, Google, Apple, Microsoft, and passkeys; Google/Apple/Microsoft
+each require their provider-side OAuth application or service registration before they work in
+production. Also configure the webhook endpoint for your backend and copy its Svix signing secret
+into `ELQ_CLERK_WEBHOOK_SECRET`.
+
+## Step 4: Refresh the Content Database
+
+The tracked EuroLeague content database is included in the backend deployment artifact. Use this
+step only for out-of-band refreshes after running ingestion locally. The auth/user database should
+never be uploaded from git; it is created and migrated at `/home/data/users.db` by startup.
 
 ### Option A: Via Kudu (browser)
 

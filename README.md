@@ -55,14 +55,14 @@ gitignored and must not be committed.
 Clerk-backed account auth is configured with `ELQ_CLERK_ISSUER` and
 `ELQ_CLERK_JWKS_URL` so the backend can verify `Authorization: Bearer <token>`
 session JWTs against Clerk's cached JWKS. `ELQ_CLERK_SECRET_KEY` is reserved for
-Clerk Backend API operations, and `ELQ_CLERK_AUTHORIZED_PARTIES` can restrict
-accepted token `azp` values. Unknown JWT `kid` refreshes are per-key cached and
-globally throttled by `ELQ_CLERK_JWKS_UNKNOWN_KID_MIN_REFRESH_INTERVAL_SECONDS`
-to avoid JWKS fetch amplification while still recovering from Clerk key
-rotation. JWKS fetch/parse failures surface as service errors rather than
-anonymous fallback. `GET /auth/me` requires a valid token and JIT-provisions a
-local user in the auth datastore; existing gameplay endpoints remain open to
-anonymous callers.
+Clerk Backend API operations, `ELQ_CLERK_WEBHOOK_SECRET` verifies Clerk/Svix
+webhooks, and `ELQ_CLERK_AUTHORIZED_PARTIES` can restrict accepted token `azp`
+values. Unknown JWT `kid` refreshes are per-key cached and globally throttled
+by `ELQ_CLERK_JWKS_UNKNOWN_KID_MIN_REFRESH_INTERVAL_SECONDS` to avoid JWKS fetch
+amplification while still recovering from Clerk key rotation. JWKS fetch/parse
+failures surface as service errors rather than anonymous fallback.
+`GET /auth/me` requires a valid token and JIT-provisions a local user in the
+auth datastore; existing gameplay endpoints remain open to anonymous callers.
 
 Signed-in clients can call `POST /auth/link-guest` with the current opaque
 `guest_id` from `frontend/src/identity.js` to claim pre-login guest activity for
@@ -72,6 +72,36 @@ user as an idempotent no-op. The conflict rule is **first-wins**: once any user
 has linked a `guest_id`, a different user receives `409 Conflict` and the
 existing link is not moved. This link is additive only; game serializers and
 anonymous gameplay remain unchanged.
+
+### Production auth deployment
+
+Azure App Service should keep mutable account data outside the zip-deployed app
+directory. Set `ELQ_AUTH_DATABASE_URL=sqlite:////home/data/users.db` and keep
+`WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` (or the default enabled setting) so
+the `/home` mount survives restarts and deployments. Paths outside `/home` are
+ephemeral on App Service Linux; the tracked content database can be redeployed,
+but `users.db` must not be committed or shipped.
+
+The backend artifact includes `backend/startup.sh`. Configure the App Service
+startup command as `sh startup.sh`; it runs `pip install .`, creates SQLite
+parent directories, applies both Alembic heads (`alembic upgrade head` and
+`alembic -c alembic_auth.ini upgrade head`), and starts Uvicorn on Azure's
+`PORT`. Running SQLite migrations at startup assumes a single App Service
+instance. JWT verification is stateless, but the SQLite auth DB is the
+single-instance limit; a future scale-out cutover should point
+`ELQ_AUTH_DATABASE_URL` at managed Postgres, for example
+`postgresql+psycopg://...`.
+
+Set backend auth values only through App Service application settings:
+`ELQ_CLERK_SECRET_KEY`, `ELQ_CLERK_WEBHOOK_SECRET`, `ELQ_CLERK_ISSUER`,
+`ELQ_CLERK_JWKS_URL`, optional `ELQ_CLERK_AUTHORIZED_PARTIES`, plus
+`ELQ_CORS_ORIGINS` for the Static Web App origin. The frontend deploy workflow
+injects `VITE_CLERK_PUBLISHABLE_KEY` from a GitHub secret at build time; leaving
+it unset intentionally ships a fully anonymous build. Before enabling production
+sign-in, configure the Clerk Dashboard for required unique usernames, session
+token claims, passkeys, and the OAuth applications for Google, Apple, and
+Microsoft. See [`docs/clerk-auth.md`](docs/clerk-auth.md) and
+[`docs/azure-deploy.md`](docs/azure-deploy.md).
 
 ### Run API Server
 
@@ -345,8 +375,8 @@ keeps working with zero friction. The integration is isolated to a few modules:
   field via `useClerkPrefilledName`. See [`docs/clerk-auth.md`](docs/clerk-auth.md) for the exact
   dashboard steps.
 
-Set `VITE_CLERK_PUBLISHABLE_KEY` in `frontend/.env.development` / `.env.production` (or the
-deploy environment) to enable sign-in; leave it blank for fully anonymous builds.
+Set `VITE_CLERK_PUBLISHABLE_KEY` in `frontend/.env.development` for local sign-in or as the
+GitHub Actions secret consumed by `deploy.yml`; leave it blank for fully anonymous builds.
 
 
 ## Testing
@@ -392,6 +422,6 @@ pytest tests/smoke/ --base-url https://euroleague-quiz-backend-app.azurewebsites
 The project uses GitHub Actions for continuous integration and deployment:
 
 1. **PR to `main`** → `ci.yml` runs: backend tests, frontend unit tests, build check, E2E tests. All must pass before merging.
-2. **Merge to `main`** → `deploy.yml` runs: tests again as a gate → deploys backend to Azure App Service + frontend to Azure Static Web Apps → post-deploy smoke tests verify the live API.
+2. **Merge to `main`** → `deploy.yml` runs: tests again as a gate → deploys backend to Azure App Service + frontend to Azure Static Web Apps → App Service startup applies content/auth migrations → post-deploy smoke tests verify the live API.
 
 **Do not push directly to `main`.** Always use a pull request so CI checks run first.
