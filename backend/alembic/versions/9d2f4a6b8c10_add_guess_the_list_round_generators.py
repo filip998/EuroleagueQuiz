@@ -87,6 +87,47 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.execute(
+        """
+        DELETE FROM guess_the_list_slots
+        WHERE player_season_team_id IS NULL
+           OR round_id IN (
+                SELECT rounds.id
+                FROM guess_the_list_rounds AS rounds
+                JOIN guess_the_list_games AS games ON games.id = rounds.game_id
+                WHERE COALESCE(rounds.category_type, 'roster') <> 'roster'
+                   OR COALESCE(games.category_type, 'roster') <> 'roster'
+                   OR rounds.team_id IS NULL
+                   OR rounds.season_id IS NULL
+                   OR rounds.team_code IS NULL
+                   OR rounds.team_name IS NULL
+                   OR rounds.season_year IS NULL
+           )
+        """
+    )
+    op.execute(
+        """
+        DELETE FROM guess_the_list_rounds
+        WHERE COALESCE(category_type, 'roster') <> 'roster'
+           OR team_id IS NULL
+           OR season_id IS NULL
+           OR team_code IS NULL
+           OR team_name IS NULL
+           OR season_year IS NULL
+           OR game_id IN (
+                SELECT id
+                FROM guess_the_list_games
+                WHERE COALESCE(category_type, 'roster') <> 'roster'
+           )
+        """
+    )
+    op.execute(
+        """
+        DELETE FROM guess_the_list_games
+        WHERE COALESCE(category_type, 'roster') <> 'roster'
+        """
+    )
+
     with op.batch_alter_table("guess_the_list_slots") as batch_op:
         batch_op.drop_column("stat_value_label")
         batch_op.drop_column("stat_value")
