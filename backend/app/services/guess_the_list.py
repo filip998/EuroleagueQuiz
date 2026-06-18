@@ -25,7 +25,15 @@ from app.game_actions import (
     InvalidGameActionError,
     NotFoundGameActionError,
 )
-from app.models import Player, PlayerSeasonTeam, Season, Team, TeamSeason
+from app.models import (
+    Game,
+    GamePlayerStats,
+    Player,
+    PlayerSeasonTeam,
+    Season,
+    Team,
+    TeamSeason,
+)
 from app.models.guess_the_list import GuessTheListGame, GuessTheListRound, GuessTheListSlot
 from app.services.race_rounds import normalize_utc, parse_utc_datetime, reveal_window_starts_at
 
@@ -48,7 +56,7 @@ CATEGORY_ROSTER = "roster"
 CATEGORY_ALL_TIME = "all_time"
 CATEGORY_SINGLE_SEASON = "single_season"
 DEFAULT_CATEGORY_TYPE = CATEGORY_ROSTER
-LEADERBOARD_METRICS = {"points", "rebounds", "assists", "pir"}
+LEADERBOARD_METRICS = ("points", "rebounds", "assists", "pir")
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +116,25 @@ class RankedBoundaryItem(Generic[T]):
     item: T
     rank: int
     stat_value: float
+
+
+@dataclass(frozen=True)
+class LeaderboardMetricConfig:
+    column: Any
+    display_name: str
+    unit: str
+
+
+LEADERBOARD_METRIC_CONFIGS: Mapping[str, LeaderboardMetricConfig] = {
+    "points": LeaderboardMetricConfig(GamePlayerStats.points, "points", "pts"),
+    "rebounds": LeaderboardMetricConfig(
+        GamePlayerStats.total_rebounds,
+        "rebounds",
+        "reb",
+    ),
+    "assists": LeaderboardMetricConfig(GamePlayerStats.assists, "assists", "ast"),
+    "pir": LeaderboardMetricConfig(GamePlayerStats.pir, "PIR", "PIR"),
+}
 
 
 def ranked_items_with_boundary_ties(
@@ -319,7 +346,106 @@ class RosterGenerator:
         )
 
 
+class AllTimeLeadersGenerator:
+    def __init__(self, metric: str | None = None):
+        if metric is not None and metric not in LEADERBOARD_METRIC_CONFIGS:
+            raise GuessTheListError(f"Unsupported all-time leaderboard metric: {metric}")
+        self._metric = metric
+
+    def build_round(
+        self,
+        db: Session,
+        game: GuessTheListGame,
+        round_number: int,
+    ) -> RoundSpec:
+        metric = self._metric or random.choice(LEADERBOARD_METRICS)
+        metric_config = LEADERBOARD_METRIC_CONFIGS[metric]
+        total_value = func.coalesce(func.sum(metric_config.column), 0)
+        last_name_order = func.coalesce(Player.last_name, "")
+        first_name_order = func.coalesce(Player.first_name, "")
+
+        rows = (
+            db.query(
+                Player.id.label("player_id"),
+                Player.first_name,
+                Player.last_name,
+                Player.position,
+                Player.nationality,
+                Player.height_cm,
+                total_value.label("total_value"),
+            )
+            .select_from(GamePlayerStats)
+            .join(Game, Game.id == GamePlayerStats.game_id)
+            .join(Season, Season.id == Game.season_id)
+            .join(Player, Player.id == GamePlayerStats.player_id)
+            .filter(
+                Season.year >= game.season_range_start,
+                Season.year <= game.season_range_end,
+            )
+            .group_by(
+                Player.id,
+                Player.first_name,
+                Player.last_name,
+                Player.position,
+                Player.nationality,
+                Player.height_cm,
+            )
+            .having(total_value > 0)
+            .order_by(
+                total_value.desc(),
+                last_name_order.asc(),
+                first_name_order.asc(),
+                Player.id.asc(),
+            )
+            .all()
+        )
+
+        if not rows:
+            raise GuessTheListError(
+                "No all-time leaderboard stats found in the selected range"
+            )
+
+        ranked_rows = ranked_items_with_boundary_ties(
+            rows,
+            limit=10,
+            stat_value=lambda row: row.total_value,
+        )
+        slots = []
+        for ranked_row in ranked_rows:
+            row = ranked_row.item
+            player_name = f"{row.first_name or ''} {row.last_name or ''}".strip()
+            total = int(ranked_row.stat_value)
+            slots.append(
+                RoundSlotSpec(
+                    player_id=row.player_id,
+                    position=row.position,
+                    nationality=row.nationality,
+                    height_cm=row.height_cm,
+                    player_name=player_name or "Unknown",
+                    rank=ranked_row.rank,
+                    stat_value=ranked_row.stat_value,
+                    stat_value_label=f"{total:,} {metric_config.unit}",
+                )
+            )
+
+        return RoundSpec(
+            category_type=CATEGORY_ALL_TIME,
+            metric=metric,
+            scope_label=(
+                f"All-time {metric_config.display_name} leaders "
+                f"({game.season_range_start}-{game.season_range_end})"
+            ),
+            team_id=None,
+            season_id=None,
+            team_code=None,
+            team_name=None,
+            season_year=None,
+            slots=tuple(slots),
+        )
+
+
 ROUND_GENERATOR_REGISTRY: dict[str, GuessTheListRoundGenerator] = {
+    CATEGORY_ALL_TIME: AllTimeLeadersGenerator(),
     CATEGORY_ROSTER: RosterGenerator(),
 }
 
@@ -1538,8 +1664,14 @@ def _slots_for_serialization(
     return sorted(slots, key=lambda slot: _hidden_slot_order_key(round_obj.id, slot.id))
 
 
-def _revealed_slot_order_key(slot: GuessTheListSlot) -> tuple[bool, int, int]:
-    return (slot.rank is None, slot.rank or 0, slot.id or 0)
+def _revealed_slot_order_key(slot: GuessTheListSlot) -> tuple[bool, int, str, int, int]:
+    return (
+        slot.rank is None,
+        slot.rank or 0,
+        (slot.player_name or "").casefold(),
+        slot.player_id or 0,
+        slot.id or 0,
+    )
 
 
 def _hidden_slot_order_key(round_id: int, slot_id: int) -> str:
