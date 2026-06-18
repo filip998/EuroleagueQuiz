@@ -1528,3 +1528,128 @@ async def test_career_disconnect_grace_does_not_forfeit_reconnected_player(tmp_p
         assert stored.winner_player is None
     finally:
         verify.close()
+
+
+def test_career_stale_correct_guess_cannot_overwrite_disconnect_forfeit(
+    tmp_path: Path,
+):
+    """A correct guess on a stale session loses to a forfeit that already finished the game."""
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        for index in range(3):
+            _eligible_player(setup, "Stale", f"Player{index}")
+        _active_revision(setup)
+        setup.commit()
+
+        game = career_quiz.create_game(setup, target_wins=1, player1_name="Host")
+        career_quiz.join_game(setup, game.join_code, player_name="Joiner")
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    stale = SessionLocal()
+    try:
+        stale_game = stale.get(CareerQuizGame, game_id)
+        stale_round = career_quiz._current_round(stale_game)
+        answer_player_id = stale_round.answer_player_id
+        round_number = stale_game.round_number
+
+        fresh = SessionLocal()
+        try:
+            fresh_game = fresh.get(CareerQuizGame, game_id)
+            career_quiz.forfeit_online_game(
+                fresh,
+                fresh_game,
+                forfeiting_player=1,
+            )
+            fresh.commit()
+        finally:
+            fresh.close()
+
+        with pytest.raises(ConflictGameActionError, match="round_stale"):
+            career_quiz.submit_guess(
+                stale,
+                game=stale_game,
+                player_id=answer_player_id,
+                acting_player=1,
+                round_number=round_number,
+            )
+        stale.rollback()
+    finally:
+        stale.close()
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(CareerQuizGame, game_id)
+        assert stored.status == "finished"
+        assert stored.winner_player == 2
+        assert stored.player1_score == 0
+        assert stored.player2_score == 0
+    finally:
+        verify.close()
+
+
+def test_career_stale_disconnect_forfeit_cannot_overwrite_correct_guess(
+    tmp_path: Path,
+):
+    """A stale forfeit handler returns False and does not overwrite a legitimately finished game."""
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        for index in range(3):
+            _eligible_player(setup, "StaleForfeit", f"Player{index}")
+        _active_revision(setup)
+        setup.commit()
+
+        game = career_quiz.create_game(setup, target_wins=1, player1_name="Host")
+        career_quiz.join_game(setup, game.join_code, player_name="Joiner")
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    stale = SessionLocal()
+    try:
+        stale_game = stale.get(CareerQuizGame, game_id)
+
+        fresh = SessionLocal()
+        try:
+            fresh_game = fresh.get(CareerQuizGame, game_id)
+            fresh_round = career_quiz._current_round(fresh_game)
+            assert (
+                career_quiz.submit_guess(
+                    fresh,
+                    game=fresh_game,
+                    player_id=fresh_round.answer_player_id,
+                    acting_player=1,
+                    round_number=fresh_round.round_number,
+                )
+                == "match_won"
+            )
+            fresh.commit()
+        finally:
+            fresh.close()
+
+        assert (
+            career_quiz.forfeit_online_game(
+                stale,
+                stale_game,
+                forfeiting_player=1,
+            )
+            is False
+        )
+        stale.commit()
+    finally:
+        stale.close()
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(CareerQuizGame, game_id)
+        assert stored.status == "finished"
+        assert stored.winner_player == 1
+        assert stored.player1_score == 1
+        assert stored.player2_score == 0
+    finally:
+        verify.close()
