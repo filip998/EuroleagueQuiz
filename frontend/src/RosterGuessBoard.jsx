@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useListKeyboardNav } from "./useListKeyboardNav";
 import { getRosterGame, submitRosterGuess, offerEndRound, respondEndRound, connectRosterGuessRealtime, autocompleteRosterPlayer, giveUpRosterRound } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
@@ -171,9 +172,16 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 
+  const { activeIndex, activeItemRef, handleKeyDown: handleNavKeyDown } =
+    useListKeyboardNav(
+      searchResults,
+      handlePlayerSelect,
+      searchFocused && searchQuery.length >= 1 && !searchLoading
+    );
+
   function handleSearchKeyDown(e) {
-    if (e.key === "Escape") { setSearchQuery(""); setSearchResults([]); searchInputRef.current?.blur(); }
-    if (e.key === "Enter" && searchResults.length === 1) handlePlayerSelect(searchResults[0]);
+    if (e.key === "Escape") { setSearchQuery(""); setSearchResults([]); searchInputRef.current?.blur(); return; }
+    handleNavKeyDown(e);
   }
 
   const resultMessages = { correct: "\u2705 Correct!", incorrect: "\u274c Wrong player.", round_won: "\ud83c\udfc6 Round over!", round_complete: "\ud83c\udfc6 Round over!", match_won: "\ud83c\udf89 Match won!", board_complete: "\u2705 Roster complete!", end_offered: "\ud83e\udd1d End offered.", end_accepted: "\ud83e\udd1d Round ended!", end_declined: "Declined.", time_expired: "\u23f0 Time\u2019s up!", given_up: "\ud83c\udff3\ufe0f Gave up \u2014 full roster revealed." };
@@ -240,7 +248,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
               {searchFocused && searchQuery.length >= 1 && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-elq-border shadow-xl max-h-56 overflow-y-auto z-40">
                   {searchLoading && <div className="px-4 py-3 text-sm text-elq-muted text-center">Searching...</div>}
-                  {!searchLoading && searchResults.length > 0 && searchResults.map(p => (<button key={p.player_id} type="button" onMouseDown={e => e.preventDefault()} onClick={() => handlePlayerSelect(p)} className="w-full text-left px-4 py-2 text-sm hover:bg-elq-orange/5 hover:text-elq-orange transition-colors border-b border-elq-border/50 last:border-0">{p.full_name}</button>))}
+                  {!searchLoading && searchResults.length > 0 && searchResults.map((p, index) => (<button key={p.player_id} type="button" ref={index === activeIndex ? activeItemRef : undefined} aria-selected={index === activeIndex} onMouseDown={e => e.preventDefault()} onClick={() => handlePlayerSelect(p)} className={`w-full text-left px-4 py-2 text-sm hover:bg-elq-orange/5 hover:text-elq-orange transition-colors border-b border-elq-border/50 last:border-0 ${index === activeIndex ? "bg-elq-orange/5 text-elq-orange" : ""}`}>{p.full_name}</button>))}
                   {!searchLoading && searchQuery.length >= 1 && searchResults.length === 0 && <div className="px-4 py-3 text-sm text-elq-muted text-center">No players found</div>}
                 </div>
               )}
