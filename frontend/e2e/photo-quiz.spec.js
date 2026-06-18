@@ -47,12 +47,13 @@ async function joinPhotoFriend(page, { nickname, joinCode }) {
   await page.getByRole("button", { name: "Join Game" }).click();
 }
 
-async function startPhotoQuickMatch(page, { nickname, preset = "First to 1" }) {
+async function startPhotoQuickMatch(page, { nickname, preset = "quick" }) {
   await page.goto("/photo");
   await page.getByRole("button", { name: "Online" }).click();
-  await page.getByRole("button", { name: preset }).click();
+  // Online defaults to Quick Match. Set the optional name, then a single tap on
+  // the pool card enters the pool (no Find Match button).
   await page.getByPlaceholder("Your name").fill(nickname);
-  await page.getByRole("button", { name: "Find Match" }).click();
+  await page.getByTestId(`quick-pick-${preset}`).click();
 }
 
 async function waitForOnlineRace(page, { ownName, opponentName }) {
@@ -255,13 +256,13 @@ test.describe.serial("Photo Quiz Flow", () => {
     try {
       await startPhotoQuickMatch(playerA, {
         nickname: "Quick Photo Alice",
-        preset: "First to 1",
+        preset: "quick",
       });
       await expect(playerA.getByText("SEARCHING THE POOL")).toBeVisible({ timeout: 10000 });
 
       await startPhotoQuickMatch(playerB, {
         nickname: "Quick Photo Bob",
-        preset: "First to 1",
+        preset: "quick",
       });
 
       await waitForOnlineRace(playerA, {
