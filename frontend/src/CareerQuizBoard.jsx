@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   autocompleteCareerPlayer,
+  cancelCareerQuickMatch,
   connectCareerRealtime,
   createCareerSoloRound,
   fetchCareerSoloHint,
@@ -14,6 +15,15 @@ import {
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import WaitingLobby from "./WaitingLobby";
+import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
+import { clearOnlineInfo } from "./onlineRecovery";
+import { forgetQuickMatchSeat } from "./quickMatchSeats";
+import {
+  CAREER_QUICK_MATCH_ROUND_SECONDS,
+  careerPresetLabel,
+  careerSeatKey,
+  useCareerQuickMatchPools,
+} from "./careerQuickMatch";
 import {
   formatSeasonRange,
   getRevealCountdownRemaining,
@@ -73,6 +83,8 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const [soloHintLoading, setSoloHintLoading] = useState(false);
   const [soloHintError, setSoloHintError] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [cancelling, setCancelling] = useState(false);
+  const [roundTimerAnchor, setRoundTimerAnchor] = useState(null);
   const soloRoundTokenRef = useRef(soloInitialRound?.round_token || null);
 
   const solo = Boolean(soloRound);
@@ -87,23 +99,49 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const revealCountdownRemaining = getRevealCountdownRemaining(revealNextRoundStartsAt, nowMs);
   const roundLocked = revealCountdownRemaining > 0;
   const sharedWrongGuesses = solo ? [] : game?.current_round?.wrong_guesses || [];
+  const isPublicQuickMatch = !solo && Boolean(game?.is_public) && Boolean(game?.preset);
+  const finishedWinnerName = finishedGameWinnerName(game);
+  const timerEligible = isPublicQuickMatch && game?.status === "active" && !roundLocked;
+  const showRoundTimer = (
+    timerEligible
+    && roundTimerAnchor != null
+    && roundTimerAnchor.round === currentRoundNumber
+  );
+  const timerRemaining = showRoundTimer
+    ? Math.min(
+        CAREER_QUICK_MATCH_ROUND_SECONDS,
+        Math.max(0, Math.ceil((roundTimerAnchor.deadlineMs - nowMs) / 1000))
+      )
+    : null;
 
   useEffect(() => {
     soloRoundTokenRef.current = soloRound?.round_token || null;
   }, [soloRound?.round_token]);
 
   useEffect(() => {
-    if (!revealNextRoundStartsAt) return undefined;
-    setNowMs(Date.now());
+    if (!revealNextRoundStartsAt && !showRoundTimer) return undefined;
     const timer = setInterval(() => setNowMs(Date.now()), 250);
     return () => clearInterval(timer);
-  }, [revealNextRoundStartsAt]);
+  }, [revealNextRoundStartsAt, showRoundTimer]);
 
   useEffect(() => {
     if (!completedRound) return undefined;
     const timer = setTimeout(() => setCompletedRound(null), 3000);
     return () => clearTimeout(timer);
   }, [completedRound]);
+
+  useEffect(() => {
+    if (!timerEligible) {
+      if (roundTimerAnchor !== null) setRoundTimerAnchor(null);
+      return;
+    }
+    if (roundTimerAnchor?.round !== currentRoundNumber) {
+      setRoundTimerAnchor({
+        round: currentRoundNumber,
+        deadlineMs: Date.now() + CAREER_QUICK_MATCH_ROUND_SECONDS * 1000,
+      });
+    }
+  }, [timerEligible, currentRoundNumber, roundTimerAnchor]);
 
   useEffect(() => {
     const latestRound = game?.latest_completed_round;
@@ -328,7 +366,37 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     }
   }
 
+  async function handleQuickCancel() {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await cancelCareerQuickMatch({ preset: game.preset, game_id: game.id });
+      // The backend deletes the waiting row, freeing its id for SQLite to reuse.
+      // Drop this game's recovery data so a later game with the same id can't
+      // recover the stale online seat and connect as the wrong player.
+      clearOnlineInfo(game.id);
+      forgetQuickMatchSeat(careerSeatKey(game.id));
+      onNewGame();
+    } catch {
+      // The search was likely matched a moment before cancelling (the backend
+      // rejects cancelling a game that is no longer waiting). Stay on the board;
+      // the realtime hook will flip to the active game.
+      setCancelling(false);
+    }
+  }
+
   if (game?.status === "waiting_for_opponent") {
+    if (game.is_public && game.preset) {
+      return (
+        <QuickMatchSearchingLobby
+          preset={game.preset}
+          onCancel={handleQuickCancel}
+          cancelling={cancelling}
+          usePools={useCareerQuickMatchPools}
+          getPresetLabel={careerPresetLabel}
+        />
+      );
+    }
     return <WaitingLobby joinCode={game.join_code} onCancel={onNewGame} />;
   }
 
@@ -342,7 +410,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
           />
           <div className="text-5xl mb-3">🏆</div>
           <h1 className="font-display text-4xl text-elq-dark mb-3">
-            {(game.winner_player === 1 ? game.player1_name : game.player2_name) || "Player"} wins!
+            {finishedWinnerName ? `${finishedWinnerName} wins!` : "No winner"}
           </h1>
           <p className="text-elq-muted mb-6">{game.player1_score} - {game.player2_score}</p>
           <button onClick={onNewGame} className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl">
@@ -382,6 +450,20 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
           </div>
 
           <div>
+            {showRoundTimer && (
+              <div
+                data-testid="career-round-timer"
+                className="mb-3 inline-flex items-center gap-2 rounded-full border border-elq-border bg-elq-bg px-3 py-1 text-sm font-semibold text-elq-text"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full animate-pulse ${
+                    timerRemaining > 0 ? "bg-emerald-500" : "bg-elq-warning"
+                  }`}
+                />
+                {timerRemaining > 0 ? `${timerRemaining}s left` : "Time's up — skipping…"}
+              </div>
+            )}
+
             <CareerGuessBox
               onGuess={handleGuess}
               disabled={Boolean(answer) || roundLocked}
@@ -428,7 +510,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
                     Reveal answer
                   </button>
                 )}
-                {!solo && game?.pending_no_answer_to === playerNumber && (
+                {!solo && !isPublicQuickMatch && game?.pending_no_answer_to === playerNumber && (
                   <>
                     <button
                       onClick={() => respondNoAnswer(true)}
@@ -446,7 +528,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
                     </button>
                   </>
                 )}
-                {!solo && !game?.pending_no_answer_to && (
+                {!solo && !isPublicQuickMatch && !game?.pending_no_answer_to && (
                   <button
                     onClick={offerNoAnswer}
                     disabled={roundLocked}
@@ -867,6 +949,12 @@ function Timeline({ timeline }) {
 
 function getCareerGameRoundNumber(game) {
   return game?.current_round?.round_number ?? game?.round_number ?? null;
+}
+
+function finishedGameWinnerName(game) {
+  if (game?.winner_player === 1) return game.player1_name || "Player 1";
+  if (game?.winner_player === 2) return game.player2_name || "Player 2";
+  return null;
 }
 
 function isCareerActionSyncConflict(error) {

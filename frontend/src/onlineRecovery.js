@@ -7,6 +7,7 @@
 // local game (which would mishandle the disconnect forfeit).
 
 import { recallQuickMatchSeat } from "./quickMatchSeats";
+import { careerSeatKey } from "./careerQuickMatch";
 import { photoSeatKey } from "./photoQuickMatch";
 import { rosterRaceSeatKey } from "./rosterRaceQuickMatch";
 
@@ -59,6 +60,16 @@ export function recoverPhotoOnlineInfo(gameId, game) {
   if (stored) return stored;
   if (game?.mode === "online_friend" && game?.is_public && game?.preset) {
     const seat = recallQuickMatchSeat(photoSeatKey(gameId));
+    if (seat) return { playerNumber: seat, isOnline: true };
+  }
+  return null;
+}
+
+export function recoverCareerOnlineInfo(gameId, game) {
+  const stored = loadOnlineInfo(gameId);
+  if (stored) return stored;
+  if (game?.mode === "online_friend" && game?.is_public && game?.preset) {
+    const seat = recallQuickMatchSeat(careerSeatKey(gameId));
     if (seat) return { playerNumber: seat, isOnline: true };
   }
   return null;

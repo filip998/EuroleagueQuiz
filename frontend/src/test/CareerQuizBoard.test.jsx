@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../api", () => ({
   autocompleteCareerPlayer: vi.fn(),
+  cancelCareerQuickMatch: vi.fn(),
   connectCareerRealtime: vi.fn(),
   createCareerSoloRound: vi.fn(),
   fetchCareerSoloHint: vi.fn(),
   getCareerGame: vi.fn(),
+  getCareerQuickMatchPools: vi.fn(),
   offerCareerNoAnswer: vi.fn(),
   revealCareerSoloAnswer: vi.fn(),
   respondCareerNoAnswer: vi.fn(),
@@ -22,10 +24,12 @@ import {
 } from "../careerQuizUtils";
 import {
   autocompleteCareerPlayer,
+  cancelCareerQuickMatch,
   connectCareerRealtime,
   createCareerSoloRound,
   fetchCareerSoloHint,
   getCareerGame,
+  getCareerQuickMatchPools,
   submitCareerGuess,
   submitCareerSoloGuess,
 } from "../api";
@@ -35,6 +39,13 @@ let careerRealtimeConnections = [];
 beforeEach(() => {
   vi.clearAllMocks();
   careerRealtimeConnections = [];
+  getCareerQuickMatchPools.mockResolvedValue({
+    pools: { standard: { searching: 1, in_progress: 0 } },
+    poll_interval_seconds: 5,
+  });
+  cancelCareerQuickMatch.mockResolvedValue({
+    state: { id: 10, status: "cancelled" },
+  });
   connectCareerRealtime.mockImplementation(({ onMessage, onClose }) => {
     const connection = {
       open: true,
@@ -148,6 +159,97 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     );
 
     expect(screen.queryByLabelText("Career Quiz multiplayer scoreboard")).not.toBeInTheDocument();
+  });
+
+  it("renders the Career Quick Match searching lobby and cancels the search", async () => {
+    const onNewGame = vi.fn();
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({
+          status: "waiting_for_opponent",
+          join_code: null,
+          is_public: true,
+          preset: "standard",
+          current_round: null,
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={onNewGame}
+      />
+    );
+
+    expect(screen.getByText("SEARCHING THE POOL…")).toBeInTheDocument();
+    expect(screen.getByText("First to 3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Cancel search"));
+
+    await waitFor(() => expect(cancelCareerQuickMatch).toHaveBeenCalledWith({
+      preset: "standard",
+      game_id: 7,
+    }));
+    expect(onNewGame).toHaveBeenCalled();
+  });
+
+  it("shows a display-only 20s timer for public Quick Match active rounds", async () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({
+          is_public: true,
+          preset: "standard",
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const timer = await screen.findByTestId("career-round-timer");
+    expect(timer).toHaveTextContent("20s left");
+  });
+
+  it("hides cooperative no-answer controls in public Quick Match games", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({
+          is_public: true,
+          preset: "standard",
+          pending_no_answer_to: 1,
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Accept no answer")).not.toBeInTheDocument();
+    expect(screen.queryByText("Decline")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nobody knows")).not.toBeInTheDocument();
+  });
+
+  it("does not show Player 2 as the winner when an unattended public game has no winner", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({
+          status: "finished",
+          is_public: true,
+          preset: "standard",
+          winner_player: null,
+          current_round: null,
+          latest_completed_round: completedRound({
+            round_number: 1,
+            name: "Skipped Player",
+            status: "no_answer",
+            winner_player: null,
+          }),
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "No winner" })).toBeInTheDocument();
+    expect(screen.queryByText("B wins!")).not.toBeInTheDocument();
   });
 
   it("renders shared wrong guesses for the active round", () => {

@@ -1,30 +1,58 @@
+import logging
+
 from fastapi import APIRouter, Depends, Query, WebSocket
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.game_actions import GameActionError, raise_http_game_action_error, run_http_game_action
+from app.game_actions import (
+    GameActionError,
+    http_exception_for_game_action_error,
+    raise_http_game_action_error,
+    run_http_game_action,
+    websocket_error_payload,
+)
 from app.schemas.career_quiz import (
     CareerQuizCreateRequest,
     CareerQuizGuessRequest,
     CareerQuizJoinRequest,
     CareerQuizNoAnswerOfferRequest,
     CareerQuizNoAnswerResponseRequest,
+    CareerQuizQuickMatchCancelRequest,
+    CareerQuizQuickMatchPoolCounts,
+    CareerQuizQuickMatchPoolsResponse,
+    CareerQuizQuickMatchRequest,
     CareerSoloGuessRequest,
     CareerSoloHintRequest,
     CareerSoloRevealRequest,
     CareerSoloRoundRequest,
 )
+from app.schemas.realtime import state_message
 from app.services import career_quiz as career_service
 from app.services.game_action_orchestration import (
     GameActionName,
     HttpGameActionRejected,
 )
+from app.services.matchmaking import (
+    MatchmakingCancelRequest,
+    MatchmakingRequest,
+    MatchmakingStatus,
+    cancel_search,
+    find_or_create_match,
+)
+from app.services.matchmaking_adapters import (
+    CAREER_QUIZ_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS,
+    CareerQuizMatchmakingAdapter,
+)
 from app.services.realtime import OnlineGameRealtimeModule
 from app.services.realtime_adapters import CareerQuizRealtimeAdapter
 
 router = APIRouter()
-career_quiz_realtime = OnlineGameRealtimeModule(CareerQuizRealtimeAdapter())
+logger = logging.getLogger(__name__)
+career_quiz_matchmaking = CareerQuizMatchmakingAdapter()
+career_quiz_realtime = OnlineGameRealtimeModule(
+    CareerQuizRealtimeAdapter(career_quiz_matchmaking)
+)
 
 
 async def _career_quiz_http_action(
@@ -45,6 +73,55 @@ async def _career_quiz_http_action(
         )
     except HttpGameActionRejected as exc:
         return JSONResponse(status_code=exc.status_code, content=exc.envelope)
+
+
+def _game_action_error_response(exc: GameActionError) -> JSONResponse:
+    http_exc = http_exception_for_game_action_error(exc)
+    return JSONResponse(
+        status_code=http_exc.status_code,
+        content=websocket_error_payload(exc),
+    )
+
+
+async def _apply_quick_match_pair_effects(
+    result,
+    game_state: dict,
+) -> None:
+    if result.status != MatchmakingStatus.MATCHED or result.starting_player is None:
+        return
+    try:
+        career_quiz_realtime.start_timer_from_state(game_state)
+    except Exception:
+        logger.exception("Post-commit career quick-match side effect failed: start timer")
+
+    try:
+        await career_quiz_realtime.broadcast_state(game_state["id"], game_state)
+    except Exception:
+        logger.exception("Post-commit career quick-match side effect failed: broadcast state")
+
+
+def _cancelled_quick_match_state(result) -> dict:
+    game = result.game
+    return {
+        "id": game.id,
+        "mode": "online_friend",
+        "status": "cancelled",
+        "join_code": None,
+        "is_public": True,
+        "preset": result.preset,
+        "target_wins": game.target_wins,
+        "wrong_guess_visibility": game.wrong_guess_visibility,
+        "player1_name": game.player1_name,
+        "player2_name": game.player2_name,
+        "player1_score": game.player1_score,
+        "player2_score": game.player2_score,
+        "round_number": game.round_number,
+        "winner_player": game.winner_player,
+        "pending_no_answer_from": None,
+        "pending_no_answer_to": None,
+        "current_round": None,
+        "latest_completed_round": None,
+    }
 
 
 @router.post("/career/solo/round")
@@ -118,6 +195,66 @@ async def join_game(payload: CareerQuizJoinRequest, db: Session = Depends(get_db
         db,
         GameActionName.JOIN,
         payload=payload,
+    )
+
+
+@router.post("/career/quick-match")
+async def quick_match_career_game(
+    payload: CareerQuizQuickMatchRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        result = await find_or_create_match(
+            db,
+            career_quiz_matchmaking,
+            MatchmakingRequest(
+                preset=payload.preset,
+                player_name=payload.player_name,
+                guest_id=payload.guest_id,
+            ),
+        )
+        game_state = career_service.serialize_game_state(db, result.game)
+        await _apply_quick_match_pair_effects(result, game_state)
+        return state_message(game_state)
+    except GameActionError as exc:
+        return _game_action_error_response(exc)
+
+
+@router.post("/career/quick-match/cancel")
+async def cancel_quick_match_career_game(
+    payload: CareerQuizQuickMatchCancelRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        result = await cancel_search(
+            db,
+            career_quiz_matchmaking,
+            MatchmakingCancelRequest(
+                preset=payload.preset,
+                game_id=payload.game_id,
+                guest_id=payload.guest_id,
+            ),
+        )
+        return state_message(_cancelled_quick_match_state(result))
+    except GameActionError as exc:
+        return _game_action_error_response(exc)
+
+
+@router.get(
+    "/career/quick-match/pools",
+    response_model=CareerQuizQuickMatchPoolsResponse,
+)
+def get_career_quick_match_pools(db: Session = Depends(get_db)):
+    counts = career_quiz_matchmaking.pool_presence_counts(db)
+    return CareerQuizQuickMatchPoolsResponse(
+        pools={
+            preset: CareerQuizQuickMatchPoolCounts(
+                searching=count.searching,
+                in_progress=count.in_progress,
+            )
+            for preset, count in counts.items()
+        },
+        poll_interval_seconds=CAREER_QUIZ_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS,
     )
 
 
