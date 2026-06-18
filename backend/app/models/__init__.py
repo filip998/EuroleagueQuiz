@@ -61,12 +61,17 @@ __all__ = [
     "PhotoQuizRound",
     "User",
     "UserGuestId",
+    "ClerkUserSyncState",
 ]
 
 
 def __getattr__(name):
-    if name in {"User", "UserGuestId"}:
-        from app.models.user import User, UserGuestId
+    if name in {"User", "UserGuestId", "ClerkUserSyncState"}:
+        from app.models.user import ClerkUserSyncState, User, UserGuestId
 
-        return {"User": User, "UserGuestId": UserGuestId}[name]
+        return {
+            "User": User,
+            "UserGuestId": UserGuestId,
+            "ClerkUserSyncState": ClerkUserSyncState,
+        }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

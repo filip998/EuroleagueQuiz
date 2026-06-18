@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth.user_sync_state import clerk_user_is_tombstoned
 from app.models.user import User
 
 
@@ -15,15 +16,81 @@ class UserProvisioningError(ValueError):
     pass
 
 
+class DeletedClerkUserError(UserProvisioningError):
+    pass
+
+
 def get_or_create_user_for_claims(db: Session, claims: Mapping[str, Any]) -> User:
+    clerk_user_id = _validated_clerk_user_id(claims)
+    _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
+    existing = _find_by_clerk_user_id(db, clerk_user_id)
+    if existing is not None:
+        _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
+        return existing
+
+    user = _create_user_from_claims(db, clerk_user_id, claims)
+    _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
+    return user
+
+
+def upsert_user_for_claims(
+    db: Session,
+    claims: Mapping[str, Any],
+    *,
+    commit: bool = True,
+) -> User:
+    clerk_user_id = _validated_clerk_user_id(claims)
+    _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
+    existing = _find_by_clerk_user_id(db, clerk_user_id)
+    if existing is None:
+        user = _create_user_from_claims(
+            db,
+            clerk_user_id,
+            claims,
+            commit=commit,
+            update_existing_on_conflict=True,
+        )
+        if commit:
+            _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
+        return user
+
+    user = _update_user_from_claims(db, existing, claims, commit=commit)
+    if commit:
+        _raise_if_clerk_user_is_tombstoned(db, clerk_user_id)
+    return user
+
+
+def delete_user_if_tombstoned(db: Session, clerk_user_id: str) -> bool:
+    if not clerk_user_is_tombstoned(db, clerk_user_id):
+        return False
+    existing = _find_by_clerk_user_id(db, clerk_user_id)
+    if existing is None:
+        return False
+    db.delete(existing)
+    db.commit()
+    return True
+
+
+def _raise_if_clerk_user_is_tombstoned(db: Session, clerk_user_id: str) -> None:
+    if delete_user_if_tombstoned(db, clerk_user_id) or clerk_user_is_tombstoned(db, clerk_user_id):
+        raise DeletedClerkUserError("Clerk user has been deleted")
+
+
+def _validated_clerk_user_id(claims: Mapping[str, Any]) -> str:
     clerk_user_id = claims.get("sub")
     if not isinstance(clerk_user_id, str) or not clerk_user_id or len(clerk_user_id) > 255:
         raise UserProvisioningError("Invalid Clerk user id")
+    return clerk_user_id
 
-    existing = _find_by_clerk_user_id(db, clerk_user_id)
-    if existing is not None:
-        return existing
 
+def _create_user_from_claims(
+    db: Session,
+    clerk_user_id: str,
+    claims: Mapping[str, Any],
+    *,
+    commit: bool = True,
+    update_existing_on_conflict: bool = False,
+) -> User:
     username = _claimed_username(claims)
     if username is None or _is_reserved_fallback_username(username):
         username = _fallback_username(clerk_user_id)
@@ -37,7 +104,79 @@ def get_or_create_user_for_claims(db: Session, claims: Mapping[str, Any]) -> Use
         email=_claimed_email(claims) or _fallback_email(clerk_user_id),
         display_name=_claimed_display_name(claims),
         avatar_url=_claimed_avatar_url(claims),
+        commit=commit,
+        claims_for_existing_update=claims if update_existing_on_conflict else None,
     )
+
+
+def _update_user_from_claims(
+    db: Session,
+    user: User,
+    claims: Mapping[str, Any],
+    *,
+    commit: bool = True,
+) -> User:
+    clerk_user_id = user.clerk_user_id
+    _assign_update_profile(db, user, claims)
+    try:
+        _flush_or_commit(db, commit=commit)
+    except IntegrityError as exc:
+        db.rollback()
+        refreshed = _find_by_clerk_user_id(db, clerk_user_id)
+        if refreshed is None:
+            return _create_user_from_claims(db, clerk_user_id, claims, commit=commit)
+        fallback_username = _next_available_fallback_username(
+            db,
+            refreshed.clerk_user_id,
+            exclude_user_id=refreshed.id,
+        )
+        if fallback_username is None:
+            raise UserProvisioningError("Could not provision Clerk user") from exc
+        _assign_update_profile(db, refreshed, claims, username=fallback_username)
+        try:
+            _flush_or_commit(db, commit=commit)
+        except IntegrityError as retry_exc:
+            db.rollback()
+            raise UserProvisioningError("Could not provision Clerk user") from retry_exc
+        if commit:
+            db.refresh(refreshed)
+        return refreshed
+    if commit:
+        db.refresh(user)
+    return user
+
+
+def _assign_update_profile(
+    db: Session,
+    user: User,
+    claims: Mapping[str, Any],
+    *,
+    username: str | None = None,
+) -> None:
+    user.username = username or _updated_username(db, user, claims)
+    user.email = _claimed_email(claims) or _fallback_email(user.clerk_user_id)
+    user.display_name = _claimed_display_name(claims)
+    user.avatar_url = _claimed_avatar_url(claims)
+
+
+def _updated_username(db: Session, user: User, claims: Mapping[str, Any]) -> str:
+    username = _claimed_username(claims)
+    if username is None:
+        return user.username
+    if _is_reserved_fallback_username(username) or _username_is_taken(
+        db,
+        username,
+        exclude_user_id=user.id,
+    ):
+        fallback_username = _next_available_fallback_username(
+            db,
+            user.clerk_user_id,
+            exclude_user_id=user.id,
+        )
+        if fallback_username is None:
+            raise UserProvisioningError("Could not provision Clerk user")
+        return fallback_username
+    return username
 
 
 def _insert_user(
@@ -48,6 +187,8 @@ def _insert_user(
     email: str,
     display_name: str | None,
     avatar_url: str | None,
+    commit: bool = True,
+    claims_for_existing_update: Mapping[str, Any] | None = None,
 ) -> User:
     user = User(
         clerk_user_id=clerk_user_id,
@@ -58,11 +199,18 @@ def _insert_user(
     )
     db.add(user)
     try:
-        db.commit()
+        _flush_or_commit(db, commit=commit)
     except IntegrityError as exc:
         db.rollback()
         existing = _find_by_clerk_user_id(db, clerk_user_id)
         if existing is not None:
+            if claims_for_existing_update is not None:
+                return _update_user_from_claims(
+                    db,
+                    existing,
+                    claims_for_existing_update,
+                    commit=commit,
+                )
             return existing
         fallback_username = _next_available_fallback_username(db, clerk_user_id)
         if username != fallback_username and fallback_username is not None:
@@ -73,18 +221,31 @@ def _insert_user(
                 email=email,
                 display_name=display_name,
                 avatar_url=avatar_url,
+                commit=commit,
+                claims_for_existing_update=claims_for_existing_update,
             )
         raise UserProvisioningError("Could not provision Clerk user") from exc
-    db.refresh(user)
+    if commit:
+        db.refresh(user)
     return user
+
+
+def _flush_or_commit(db: Session, *, commit: bool) -> None:
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def _find_by_clerk_user_id(db: Session, clerk_user_id: str) -> User | None:
     return db.execute(select(User).where(User.clerk_user_id == clerk_user_id)).scalar_one_or_none()
 
 
-def _username_is_taken(db: Session, username: str) -> bool:
-    return db.execute(select(User.id).where(User.username == username)).first() is not None
+def _username_is_taken(db: Session, username: str, *, exclude_user_id: str | None = None) -> bool:
+    statement = select(User.id).where(User.username == username)
+    if exclude_user_id is not None:
+        statement = statement.where(User.id != exclude_user_id)
+    return db.execute(statement).first() is not None
 
 
 def _claimed_username(claims: Mapping[str, Any]) -> str | None:
@@ -96,11 +257,18 @@ def _claimed_username(claims: Mapping[str, Any]) -> str | None:
 
 
 def _claimed_email(claims: Mapping[str, Any]) -> str | None:
+    email_addresses = claims.get("email_addresses")
+    primary_email_address_id = claims.get("primary_email_address_id")
+    if isinstance(email_addresses, list) and isinstance(primary_email_address_id, str):
+        for item in email_addresses:
+            if isinstance(item, Mapping) and item.get("id") == primary_email_address_id:
+                value = _clean_email(item.get("email_address") or item.get("email"))
+                if value is not None:
+                    return value
     for key in ("email", "email_address", "primary_email_address"):
         value = _clean_email(claims.get(key))
         if value is not None:
             return value
-    email_addresses = claims.get("email_addresses")
     if isinstance(email_addresses, list):
         for item in email_addresses:
             if isinstance(item, Mapping):
@@ -164,14 +332,19 @@ def _fallback_username_with_suffix(clerk_user_id: str, suffix: int) -> str:
     return f"{base}_{suffix}"[:64]
 
 
-def _next_available_fallback_username(db: Session, clerk_user_id: str) -> str | None:
+def _next_available_fallback_username(
+    db: Session,
+    clerk_user_id: str,
+    *,
+    exclude_user_id: str | None = None,
+) -> str | None:
     for suffix in range(0, 100):
         username = (
             _fallback_username(clerk_user_id)
             if suffix == 0
             else _fallback_username_with_suffix(clerk_user_id, suffix)
         )
-        if not _username_is_taken(db, username):
+        if not _username_is_taken(db, username, exclude_user_id=exclude_user_id):
             return username
     return None
 

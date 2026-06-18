@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///data/euroleague.db"
     auth_database_url: str = "sqlite:///data/users.db"
     clerk_secret_key: str | None = None
+    clerk_webhook_secret: str | None = None
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_authorized_parties: str = ""

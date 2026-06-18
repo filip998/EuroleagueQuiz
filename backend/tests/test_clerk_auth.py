@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 import app.auth.clerk as clerk_module
 import app.auth.dependencies as auth_dependencies
 import app.auth.users as users_module
+from app.auth.user_sync_state import clerk_user_sync_key
 from app.auth.clerk import (
     ClerkAuthConfigurationError,
     ClerkJWKSUnavailableError,
@@ -25,10 +26,10 @@ from app.auth.clerk import (
     ClerkTokenError,
     JWKSCache,
 )
-from app.auth.users import get_or_create_user_for_claims
+from app.auth.users import DeletedClerkUserError, get_or_create_user_for_claims, upsert_user_for_claims
 from app.auth_database import Base, get_auth_db, sqlite_connect_args
 from app.main import app
-from app.models.user import User, UserGuestId
+from app.models.user import ClerkUserSyncState, User, UserGuestId, utc_now
 
 ISSUER = "https://test-instance.clerk.accounts.dev"
 JWKS_URL = f"{ISSUER}/.well-known/jwks.json"
@@ -449,6 +450,25 @@ def test_get_optional_user_returns_none_for_missing_and_invalid_tokens(
         )
 
 
+def test_auth_dependencies_treat_deleted_clerk_user_as_invalid(
+    monkeypatch,
+    auth_session_factory,
+    signing_key,
+):
+    verifier = _verifier(signing_key.jwk)
+    monkeypatch.setattr(auth_dependencies, "get_clerk_jwt_verifier", lambda: verifier)
+
+    with auth_session_factory() as db:
+        _add_deleted_sync_state(db, "user_clerk_123")
+        authorization = f"Bearer {_make_token(signing_key)}"
+
+        with pytest.raises(HTTPException) as current_exc:
+            auth_dependencies.get_current_user(authorization=authorization, db=db)
+        assert current_exc.value.status_code == 401
+        assert auth_dependencies.get_optional_user(authorization=authorization, db=db) is None
+        assert db.scalar(select(func.count()).select_from(User)) == 0
+
+
 def test_jit_provisioning_is_idempotent_with_minimal_claims(auth_session_factory):
     with auth_session_factory() as db:
         first = get_or_create_user_for_claims(db, {"sub": "user_clerk_minimal"})
@@ -459,6 +479,34 @@ def test_jit_provisioning_is_idempotent_with_minimal_claims(auth_session_factory
         assert count == 1
         assert first.username.startswith("user_")
         assert first.email.endswith("@clerk.invalid")
+
+
+def test_jit_provisioning_rejects_deleted_clerk_user(auth_session_factory):
+    with auth_session_factory() as db:
+        _add_deleted_sync_state(db, "user_deleted")
+
+        with pytest.raises(DeletedClerkUserError):
+            get_or_create_user_for_claims(db, {"sub": "user_deleted"})
+
+        assert db.scalar(select(func.count()).select_from(User)) == 0
+
+
+def test_jit_provisioning_cleans_user_when_tombstone_wins_race(auth_session_factory):
+    with auth_session_factory() as db:
+        _add_deleted_sync_state(db, "user_deleted")
+        db.add(
+            User(
+                clerk_user_id="user_deleted",
+                username="raced",
+                email="raced@example.com",
+            )
+        )
+        db.commit()
+
+        with pytest.raises(DeletedClerkUserError):
+            get_or_create_user_for_claims(db, {"sub": "user_deleted"})
+
+        assert db.scalar(select(func.count()).select_from(User)) == 0
 
 
 def test_jit_provisioning_returns_existing_user_after_clerk_id_race(
@@ -499,6 +547,51 @@ def test_jit_provisioning_returns_existing_user_after_clerk_id_race(
 
         assert user.id == existing.id
         assert count == 1
+
+
+def test_webhook_upsert_updates_existing_user_after_clerk_id_race(
+    monkeypatch,
+    auth_session_factory,
+):
+    with auth_session_factory() as db:
+        existing = User(
+            clerk_user_id="user_race",
+            username="user_fallback",
+            email="fallback@clerk.invalid",
+        )
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+
+        original_find = users_module._find_by_clerk_user_id
+        first_lookup = True
+
+        def simulate_concurrent_insert(db_arg, clerk_user_id):
+            nonlocal first_lookup
+            if first_lookup:
+                first_lookup = False
+                return None
+            return original_find(db_arg, clerk_user_id)
+
+        monkeypatch.setattr(users_module, "_find_by_clerk_user_id", simulate_concurrent_insert)
+
+        user = upsert_user_for_claims(
+            db,
+            {
+                "sub": "user_race",
+                "username": "filip",
+                "email": "filip@example.com",
+                "name": "Filip Tanic",
+                "image_url": "https://example.com/avatar.png",
+            },
+        )
+
+        assert user.id == existing.id
+        assert user.username == "filip"
+        assert user.email == "filip@example.com"
+        assert user.display_name == "Filip Tanic"
+        assert user.avatar_url == "https://example.com/avatar.png"
+        assert db.scalar(select(func.count()).select_from(User)) == 1
 
 
 def test_jit_provisioning_handles_username_collision(auth_session_factory):
@@ -738,6 +831,18 @@ def _new_signing_key(kid: str) -> SigningKey:
         "e": _b64url_uint(public_numbers.e),
     }
     return SigningKey(kid=kid, private_key=private_key, jwk=jwk)
+
+
+def _add_deleted_sync_state(db, clerk_user_id: str) -> None:
+    deleted_at = utc_now()
+    db.add(
+        ClerkUserSyncState(
+            clerk_user_key=clerk_user_sync_key(clerk_user_id),
+            last_event_at=deleted_at,
+            deleted_at=deleted_at,
+        )
+    )
+    db.commit()
 
 
 def _make_token(
