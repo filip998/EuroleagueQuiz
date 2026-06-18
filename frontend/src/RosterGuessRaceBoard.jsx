@@ -191,7 +191,11 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
   }
 
   const { activeIndex, activeItemRef, handleKeyDown: handleNavKeyDown } =
-    useListKeyboardNav(searchResults, handlePlayerSelect);
+    useListKeyboardNav(
+      searchResults,
+      handlePlayerSelect,
+      searchFocused && searchQuery.length >= 1 && !searchLoading
+    );
 
   function handleSearchKeyDown(event) {
     if (event.key === "Escape") {

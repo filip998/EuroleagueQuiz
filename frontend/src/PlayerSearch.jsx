@@ -40,7 +40,7 @@ export default function PlayerSearch({
   }, [query, rowTeamCode, colTeamCode, rosterMode]);
 
   const { activeIndex, activeItemRef, handleKeyDown: handleNavKeyDown } =
-    useListKeyboardNav(results, onSelect);
+    useListKeyboardNav(results, onSelect, !loading);
 
   function handleKeyDown(e) {
     if (e.key === "Escape") {

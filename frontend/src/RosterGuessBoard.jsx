@@ -173,7 +173,11 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   }
 
   const { activeIndex, activeItemRef, handleKeyDown: handleNavKeyDown } =
-    useListKeyboardNav(searchResults, handlePlayerSelect);
+    useListKeyboardNav(
+      searchResults,
+      handlePlayerSelect,
+      searchFocused && searchQuery.length >= 1 && !searchLoading
+    );
 
   function handleSearchKeyDown(e) {
     if (e.key === "Escape") { setSearchQuery(""); setSearchResults([]); searchInputRef.current?.blur(); return; }

@@ -115,4 +115,38 @@ describe("useListKeyboardNav", () => {
 
     expect(row.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
   });
+
+  it("does not navigate or select while disabled, even with items present", () => {
+    const onChoose = vi.fn();
+    const { result } = renderHook(() => useListKeyboardNav(items, onChoose, false));
+
+    const down = keyEvent("ArrowDown");
+    act(() => result.current.handleKeyDown(down));
+    expect(result.current.activeIndex).toBe(-1);
+    expect(down.preventDefault).not.toHaveBeenCalled();
+
+    const enter = keyEvent("Enter");
+    act(() => result.current.handleKeyDown(enter));
+    expect(onChoose).not.toHaveBeenCalled();
+    expect(enter.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("clears the highlight when the list becomes disabled (e.g. hidden while loading)", () => {
+    const onChoose = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useListKeyboardNav(items, onChoose, enabled),
+      { initialProps: { enabled: true } }
+    );
+
+    act(() => result.current.handleKeyDown(keyEvent("ArrowDown")));
+    expect(result.current.activeIndex).toBe(0);
+
+    // List hidden (loading / popup gated off): highlight resets and a stale
+    // Enter can no longer select the row the user can't see.
+    rerender({ enabled: false });
+    expect(result.current.activeIndex).toBe(-1);
+
+    act(() => result.current.handleKeyDown(keyEvent("Enter")));
+    expect(onChoose).not.toHaveBeenCalled();
+  });
 });
