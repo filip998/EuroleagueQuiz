@@ -3,13 +3,14 @@ from pathlib import Path
 import asyncio
 import pytest
 import random
+from datetime import date
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import Player, PlayerSeasonTeam, Season, Team
+from app.models import Player, PlayerSeasonStats, PlayerSeasonTeam, Season, Team
 from app.models.tictactoe import QuizTicTacToeGame
 from app.routers import quiz as quiz_router
 from app.services import realtime as realtime_service
@@ -164,6 +165,183 @@ def client(tmp_path: Path):
     engine.dispose()
 
 
+@pytest.fixture()
+def ttt_axis_session(tmp_path: Path):
+    db_path = tmp_path / "ttt_axis_test.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    session = TestingSessionLocal()
+
+    current_season = Season(year=2024, name="2024-2025")
+    past_season = Season(year=2023, name="2023-2024")
+    teams = [
+        Team(euroleague_code=f"AX{index}", name=f"Axis Team {index}")
+        for index in range(1, 7)
+    ]
+    session.add_all([current_season, past_season, *teams])
+    session.flush()
+
+    players = {
+        "star": Player(
+            euroleague_code="AXP001",
+            first_name="Star",
+            last_name="Guard",
+            nationality="CountryA",
+            position="Guard",
+        ),
+        "guard": Player(
+            euroleague_code="AXP002",
+            first_name="Current",
+            last_name="Guard",
+            nationality="CountryA",
+            position="Guard",
+        ),
+        "forward": Player(
+            euroleague_code="AXP003",
+            first_name="Current",
+            last_name="Forward",
+            nationality="CountryB",
+            position="Forward",
+        ),
+        "center": Player(
+            euroleague_code="AXP004",
+            first_name="Current",
+            last_name="Center",
+            nationality="CountryA",
+            position="Center",
+        ),
+        "blank_position": Player(
+            euroleague_code="AXP005",
+            first_name="Blank",
+            last_name="Position",
+            nationality="CountryA",
+            position="",
+        ),
+        "null_position": Player(
+            euroleague_code="AXP006",
+            first_name="Null",
+            last_name="Position",
+            nationality="CountryC",
+            position=None,
+        ),
+        "team_past_only": Player(
+            euroleague_code="AXP007",
+            first_name="Past",
+            last_name="Team",
+            nationality="CountryA",
+            position="Forward",
+        ),
+        "nationality_past_only": Player(
+            euroleague_code="AXP008",
+            first_name="Past",
+            last_name="Nationality",
+            nationality="CountryA",
+            position="Center",
+        ),
+        "past_teammate": Player(
+            euroleague_code="AXP009",
+            first_name="Past",
+            last_name="Teammate",
+            nationality="CountryB",
+            position="Guard",
+        ),
+        "non_overlap": Player(
+            euroleague_code="AXP010",
+            first_name="Non",
+            last_name="Overlap",
+            nationality="CountryB",
+            position="Forward",
+        ),
+    }
+    session.add_all(players.values())
+    session.flush()
+
+    def add_stint(
+        player_key: str,
+        team: Team,
+        season: Season,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+        pir: int | None = None,
+    ) -> PlayerSeasonTeam:
+        stint = PlayerSeasonTeam(
+            player_id=players[player_key].id,
+            team_id=team.id,
+            season_id=season.id,
+            registration_start=start,
+            registration_end=end,
+        )
+        session.add(stint)
+        session.flush()
+        if pir is not None:
+            session.add(PlayerSeasonStats(player_season_team_id=stint.id, pir=pir))
+        return stint
+
+    team_a, team_b, team_c, team_d, team_e, team_f = teams
+    universal_player_keys = [
+        "star",
+        "guard",
+        "forward",
+        "center",
+        "blank_position",
+        "null_position",
+    ]
+    for player_key in universal_player_keys:
+        for team in teams:
+            kwargs = {}
+            if player_key == "star" and team == team_a:
+                kwargs = {
+                    "start": date(2024, 1, 1),
+                    "end": date(2024, 6, 1),
+                    "pir": 500,
+                }
+            elif player_key == "guard" and team == team_a:
+                kwargs = {"start": date(2024, 2, 1), "end": date(2024, 5, 1)}
+            add_stint(player_key, team, current_season, **kwargs)
+
+    add_stint("team_past_only", team_a, past_season)
+    add_stint("nationality_past_only", team_b, past_season)
+    add_stint(
+        "star",
+        team_c,
+        past_season,
+        start=date(2023, 1, 1),
+        end=date(2023, 6, 1),
+    )
+    add_stint(
+        "past_teammate",
+        team_c,
+        past_season,
+        start=date(2023, 2, 1),
+        end=date(2023, 5, 1),
+    )
+    add_stint(
+        "non_overlap",
+        team_a,
+        current_season,
+        start=date(2024, 7, 1),
+        end=date(2024, 8, 1),
+    )
+
+    session.commit()
+    try:
+        yield session, {
+            "current_season": current_season,
+            "past_season": past_season,
+            "teams": teams,
+            "players": players,
+        }
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def _create_ttt_game(client: TestClient, target_wins: int = 2) -> dict:
     response = client.post(
         "/quiz/tictactoe/games",
@@ -201,6 +379,316 @@ def quick_match_effects(monkeypatch):
         fake_broadcast_state,
     )
     return effects
+
+
+def test_tictactoe_axis_weights_preserve_existing_values_and_add_position():
+    assert ttt_service.AXIS_WEIGHTS["team"] == 0.58
+    assert ttt_service.AXIS_WEIGHTS["nationality"] == 0.12
+    assert ttt_service.AXIS_WEIGHTS["played_with"] == 0.20
+    assert ttt_service.AXIS_WEIGHTS["season"] == 0.10
+    assert ttt_service.AXIS_WEIGHTS["position"] == 0.05
+
+
+def test_tictactoe_existing_axis_builders_and_matchers(ttt_axis_session):
+    db, data = ttt_axis_session
+    current_season = data["current_season"]
+    team_a = data["teams"][0]
+    players = data["players"]
+
+    team_axis = {
+        "axis_type": "team",
+        "value": str(team_a.id),
+        "display_label": team_a.name,
+    }
+    nationality_axis = {
+        "axis_type": "nationality",
+        "value": "CountryA",
+        "display_label": "CountryA",
+    }
+    played_with_axis = {
+        "axis_type": "played_with",
+        "value": str(players["star"].id),
+        "display_label": "Star Guard",
+    }
+    season_axis = {
+        "axis_type": "season",
+        "value": str(current_season.id),
+        "display_label": "2024/25",
+    }
+
+    team_players = ttt_service._get_player_set_for_axis(db, team_axis)
+    assert players["guard"].id in team_players
+    assert players["team_past_only"].id in team_players
+    assert ttt_service._player_matches_axis(db, players["guard"].id, team_axis)
+
+    nationality_players = ttt_service._get_player_set_for_axis(db, nationality_axis)
+    assert players["guard"].id in nationality_players
+    assert players["forward"].id not in nationality_players
+    assert ttt_service._player_matches_axis(
+        db, players["guard"].id, nationality_axis
+    )
+    assert not ttt_service._player_matches_axis(
+        db, players["forward"].id, nationality_axis
+    )
+
+    teammates = ttt_service._get_player_set_for_axis(db, played_with_axis)
+    assert players["guard"].id in teammates
+    assert players["star"].id not in teammates
+    assert players["non_overlap"].id not in teammates
+    assert ttt_service._player_matches_axis(db, players["guard"].id, played_with_axis)
+    assert not ttt_service._player_matches_axis(
+        db, players["non_overlap"].id, played_with_axis
+    )
+
+    season_players = ttt_service._get_player_set_for_axis(db, season_axis)
+    assert players["guard"].id in season_players
+    assert players["team_past_only"].id not in season_players
+    assert ttt_service._player_matches_axis(db, players["guard"].id, season_axis)
+    assert not ttt_service._player_matches_axis(
+        db, players["team_past_only"].id, season_axis
+    )
+
+
+def test_tictactoe_season_cross_axis_behaviour_remains_precise(ttt_axis_session):
+    db, data = ttt_axis_session
+    current_season = data["current_season"]
+    past_season = data["past_season"]
+    team_a = data["teams"][0]
+    players = data["players"]
+
+    current_axis = {
+        "axis_type": "season",
+        "value": str(current_season.id),
+        "display_label": "2024/25",
+    }
+    past_axis = {
+        "axis_type": "season",
+        "value": str(past_season.id),
+        "display_label": "2023/24",
+    }
+    team_axis = {
+        "axis_type": "team",
+        "value": str(team_a.id),
+        "display_label": team_a.name,
+    }
+    played_with_axis = {
+        "axis_type": "played_with",
+        "value": str(players["star"].id),
+        "display_label": "Star Guard",
+    }
+    nationality_axis = {
+        "axis_type": "nationality",
+        "value": "CountryA",
+        "display_label": "CountryA",
+    }
+    position_axis = {
+        "axis_type": "position",
+        "value": "Forward",
+        "display_label": "Forward",
+    }
+
+    current_team_players = ttt_service._get_player_set_for_cell(
+        db, current_axis, team_axis
+    )
+    assert players["guard"].id in current_team_players
+    assert players["team_past_only"].id not in current_team_players
+    assert ttt_service._player_matches_cell(
+        db, players["guard"].id, current_axis, team_axis
+    )
+    assert not ttt_service._player_matches_cell(
+        db, players["team_past_only"].id, current_axis, team_axis
+    )
+
+    current_teammates = ttt_service._get_player_set_for_cell(
+        db, current_axis, played_with_axis
+    )
+    assert players["guard"].id in current_teammates
+    assert players["past_teammate"].id not in current_teammates
+    assert players["non_overlap"].id not in current_teammates
+    assert ttt_service._player_matches_cell(
+        db, players["guard"].id, current_axis, played_with_axis
+    )
+    assert not ttt_service._player_matches_cell(
+        db, players["past_teammate"].id, current_axis, played_with_axis
+    )
+    assert players["past_teammate"].id in ttt_service._get_player_set_for_cell(
+        db, past_axis, played_with_axis
+    )
+
+    current_country_players = ttt_service._get_player_set_for_cell(
+        db, current_axis, nationality_axis
+    )
+    assert players["guard"].id in current_country_players
+    assert players["nationality_past_only"].id not in current_country_players
+
+    current_forward_players = ttt_service._get_player_set_for_cell(
+        db, current_axis, position_axis
+    )
+    assert players["forward"].id in current_forward_players
+    assert players["team_past_only"].id not in current_forward_players
+    assert players["blank_position"].id not in current_forward_players
+    assert ttt_service._player_matches_cell(
+        db, players["forward"].id, current_axis, position_axis
+    )
+    assert not ttt_service._player_matches_cell(
+        db, players["team_past_only"].id, current_axis, position_axis
+    )
+
+
+def test_tictactoe_position_provider_builder_and_matcher_exclude_missing(
+    ttt_axis_session,
+):
+    db, data = ttt_axis_session
+    players = data["players"]
+
+    candidates = ttt_service._get_position_candidates(db)
+    assert candidates == [
+        {"axis_type": "position", "value": "Guard", "display_label": "Guard"},
+        {"axis_type": "position", "value": "Forward", "display_label": "Forward"},
+        {"axis_type": "position", "value": "Center", "display_label": "Center"},
+    ]
+
+    guard_axis = {
+        "axis_type": "position",
+        "value": "Guard",
+        "display_label": "Guard",
+    }
+    guard_players = ttt_service._get_player_set_for_axis(db, guard_axis)
+    assert players["star"].id in guard_players
+    assert players["guard"].id in guard_players
+    assert players["forward"].id not in guard_players
+    assert players["blank_position"].id not in guard_players
+    assert players["null_position"].id not in guard_players
+    assert ttt_service._player_matches_axis(db, players["guard"].id, guard_axis)
+    assert not ttt_service._player_matches_axis(
+        db, players["blank_position"].id, guard_axis
+    )
+    assert not ttt_service._player_matches_axis(
+        db, players["null_position"].id, guard_axis
+    )
+
+
+def test_tictactoe_board_generation_can_include_position_with_cap_and_answers(
+    ttt_axis_session,
+    monkeypatch,
+):
+    db, _ = ttt_axis_session
+
+    def choose_position(*args, **kwargs):
+        return ["position"]
+
+    monkeypatch.setattr(ttt_service.random, "choices", choose_position)
+
+    axes = ttt_service._select_board_axes(db)
+
+    assert sum(axis["axis_type"] == "position" for axis in axes) == 1
+    row_axes = axes[:3]
+    col_axes = axes[3:]
+    for row_axis in row_axes:
+        for col_axis in col_axes:
+            assert ttt_service._get_player_set_for_cell(db, row_axis, col_axis)
+
+
+def test_tictactoe_season_position_submit_move_accepts_valid_player(
+    ttt_axis_session,
+    monkeypatch,
+):
+    db, data = ttt_axis_session
+    current_season = data["current_season"]
+    teams = data["teams"]
+    players = data["players"]
+    forced_axes = [
+        {
+            "axis_type": "season",
+            "value": str(current_season.id),
+            "display_label": "2024/25",
+        },
+        {
+            "axis_type": "team",
+            "value": str(teams[1].id),
+            "display_label": teams[1].name,
+        },
+        {
+            "axis_type": "team",
+            "value": str(teams[2].id),
+            "display_label": teams[2].name,
+        },
+        {"axis_type": "position", "value": "Forward", "display_label": "Forward"},
+        {
+            "axis_type": "team",
+            "value": str(teams[3].id),
+            "display_label": teams[3].name,
+        },
+        {
+            "axis_type": "team",
+            "value": str(teams[4].id),
+            "display_label": teams[4].name,
+        },
+    ]
+    monkeypatch.setattr(ttt_service, "_select_board_axes", lambda db: forced_axes)
+
+    game = ttt_service.create_game(
+        db,
+        mode="local_two_player",
+        target_wins=2,
+        timer_mode="unlimited",
+        player1_name="Player One",
+        player2_name="Player Two",
+    )
+
+    incorrect = ttt_service.submit_move(
+        db,
+        game=game,
+        row_index=0,
+        col_index=0,
+        player_id=players["blank_position"].id,
+    )
+    assert incorrect == "incorrect"
+
+    correct = ttt_service.submit_move(
+        db,
+        game=game,
+        row_index=0,
+        col_index=0,
+        player_id=players["forward"].id,
+    )
+    assert correct == "correct"
+
+
+def test_tictactoe_axis_caps_include_generic_achievement_hook():
+    def candidate_provider(db):
+        return []
+
+    def player_set_builder(db, axis):
+        return set()
+
+    def matcher(db, player_id, axis):
+        return False
+
+    synthetic_registry = {
+        axis_type: ttt_service.AxisDefinition(
+            axis_type=axis_type,
+            weight=1.0,
+            candidate_provider=candidate_provider,
+            player_set_builder=player_set_builder,
+            matcher=matcher,
+        )
+        for axis_type in ("champion", "stat_milestone")
+    }
+
+    assert ttt_service._axis_counts_within_board_caps(
+        [{"axis_type": "champion"}],
+        registry=synthetic_registry,
+    )
+    assert not ttt_service._axis_counts_within_board_caps(
+        [{"axis_type": "champion"}, {"axis_type": "stat_milestone"}],
+        registry=synthetic_registry,
+    )
+    assert not ttt_service._axis_type_can_be_added(
+        [{"axis_type": "champion"}],
+        "stat_milestone",
+        registry=synthetic_registry,
+    )
 
 
 def test_create_tictactoe_game_has_board(client: TestClient):
