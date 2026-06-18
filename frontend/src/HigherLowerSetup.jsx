@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { createHigherLowerGame, getHigherLowerLeaderboard } from "./api";
-import { getNickname, setNickname as saveNickname } from "./identity";
+import { getDisplayName, getGuestName, setNickname as saveNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
 import GameSetupShell from "./GameSetupShell";
+import NameField from "./NameField";
 
 const HEADER_ICON = (
   <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -43,7 +44,7 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
   const [tier, setTier] = useState("easy");
   const [seasonStart, setSeasonStart] = useState(2007);
   const [seasonEnd, setSeasonEnd] = useState(2025);
-  const [nickname, setNickname] = useClerkPrefilledName(getNickname);
+  const [nickname, setNickname] = useClerkPrefilledName(getDisplayName);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
@@ -59,7 +60,6 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!nickname.trim()) return;
     setError(null);
     setLoading(true);
     try {
@@ -67,7 +67,7 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
         tier,
         season_range_start: seasonStart,
         season_range_end: seasonEnd,
-        nickname: nickname.trim(),
+        nickname: nickname.trim() || getGuestName(),
       });
       onGameCreated(resp);
     } catch (err) {
@@ -133,6 +133,17 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
       extra={leaderboard_card}
     >
       <form onSubmit={handleSubmit}>
+        <NameField
+          className="mb-6"
+          value={nickname}
+          onChange={(v) => {
+            setNickname(v);
+            saveNickname(v);
+          }}
+        />
+
+        <div className="border-t border-elq-border mb-6" />
+
         <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
           Difficulty
         </label>
@@ -193,28 +204,9 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
           </div>
         </div>
 
-        <div className="border-t border-elq-border my-5" />
-
-        <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
-          Player
-        </label>
-        <div className="mb-6">
-          <input
-            value={nickname}
-            onChange={(e) => {
-              setNickname(e.target.value);
-              saveNickname(e.target.value);
-            }}
-            placeholder="Your nickname"
-            maxLength={30}
-            required
-            className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
-          />
-        </div>
-
         <button
           type="submit"
-          disabled={loading || !nickname.trim()}
+          disabled={loading}
           className="w-full py-3.5 px-6 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg tracking-wide"
         >
           {loading ? "Starting..." : "Start Game"}

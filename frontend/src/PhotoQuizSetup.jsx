@@ -5,7 +5,7 @@ import {
   joinPhotoGame,
   photoQuickMatch,
 } from "./api";
-import { getNickname, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
+import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
 import { formatPresence } from "./quickMatch";
 import {
@@ -17,6 +17,7 @@ import {
 import { resolveQuickMatchSeat } from "./quickMatchSeats";
 import GameSetupShell from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
+import NameField from "./NameField";
 
 const HEADER_ICON = (
   <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -42,7 +43,7 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
   // Friend sub-mode: "create" | "join".
   const [friendSub, setFriendSub] = useState("create");
   const [preset, setPreset] = useState(DEFAULT_PHOTO_QUICK_MATCH_PRESET);
-  const [playerName, setPlayerName] = useClerkPrefilledName(getNickname);
+  const [playerName, setPlayerName] = useClerkPrefilledName(getDisplayName);
   const [joinCode, setJoinCode] = useState("");
   const [targetWins, setTargetWins] = useState(3);
   const [wrongGuessVisibility, setWrongGuessVisibility] = useState("private");
@@ -173,19 +174,16 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
                     className="w-full px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm text-elq-text mb-1.5">Your Name</label>
-                  <input
-                    value={playerName}
-                    onChange={(e) => handlePlayerNameChange(e.target.value)}
-                    placeholder="Your name"
-                    maxLength={NICKNAME_MAX_LENGTH}
-                    className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
-                  />
-                </div>
+                <NameField value={playerName} onChange={handlePlayerNameChange} />
               </div>
             ) : (
               <>
+                <NameField
+                  className="mb-6"
+                  value={playerName}
+                  onChange={handlePlayerNameChange}
+                />
+
                 {isQuick && (
                   <div className="mb-6">
                     <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
@@ -249,19 +247,6 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
                     </div>
                   </div>
                 )}
-
-                <div className="space-y-4 mb-8">
-                  <div>
-                    <label className="block text-sm text-elq-text mb-1.5">Your Name</label>
-                    <input
-                      value={playerName}
-                      onChange={(e) => handlePlayerNameChange(e.target.value)}
-                      placeholder="Your name"
-                      maxLength={NICKNAME_MAX_LENGTH}
-                      className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
-                    />
-                  </div>
-                </div>
               </>
             )}
           </>

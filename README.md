@@ -289,7 +289,8 @@ keys (`solo` / `local` / `online`, sub `create` / `join`) onto their own backend
 ### TicTacToe Quick Match: default landing + one-click pooling
 
 Opening `/tictactoe` lands directly on **Online → Quick Match**, so the matchmaking pool
-grid is the first thing players see (Solo, Local 1v1, and Play-a-Friend stay one tap away
+grid — directly below the standardized **Your Name** field — is the first interactive content
+players see (Solo, Local 1v1, and Play-a-Friend stay one tap away
 via `GameModeSelector`; a valid `?join=` invite still lands on Online → Play a Friend →
 Join with the code prefilled). The flow is near one-click — there is **no separate "Find
 Match" button**. Tapping a pool card *is* the action: it immediately enters that pool and
@@ -354,11 +355,18 @@ identity used by online matchmaking:
   returns the saved nickname when set, otherwise that guest name — this is what the
   near-one-click TicTacToe Quick Match prefills so online play needs no name gate.
 
-Every setup screen prefills its name field from `getNickname()` (TicTacToe Quick Match uses
-`getDisplayName()` so the field is never empty) and persists edits via `setNickname()`; the
-shared nickname is not overwritten while a screen is in Local 1v1 mode (where "Player 1" is
-a placeholder rather than the user's name). Clearing the field still sends no name, so
-anonymous play keeps working. `frontend/src/api.js` attaches `guest_id` to TicTacToe, Roster
+Every setup screen renders the same shared **`frontend/src/NameField.jsx`** for the player
+name — one **"Your Name"** label, one `"Your name"` placeholder, one optional (never
+required) rule, a `NICKNAME_MAX_LENGTH` cap, and one position **above** the pool grid / match
+settings (Higher or Lower, which has no pools, puts it at the top of the form). It is
+prefilled from `getDisplayName()` (the saved nickname, otherwise a stable guest name) so the
+field is never empty and there is no name gate, and edits persist via `setNickname()`. The
+shared nickname is not overwritten while a screen is in Local 1v1 mode, where the same
+component is reused with "Player 1" / "Player 2" labels rather than the user's name. Higher
+or Lower no longer hard-requires the field: a blank name falls back to the stable guest name
+on submit, so its leaderboard still receives a value while the input stays optional. For the
+other games, clearing the field sends no name, so anonymous play keeps working.
+`frontend/src/api.js` attaches `guest_id` to TicTacToe, Roster
 Guess, Career Quiz, and Photo Quiz online `create`/`join` requests; the nickname rides the
 existing `player1_name` / `player_name` field.
 

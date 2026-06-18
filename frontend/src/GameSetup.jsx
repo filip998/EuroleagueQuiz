@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { createGame, joinGame, quickMatchTicTacToe } from "./api";
-import { getDisplayName, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
+import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
 import { normalizeJoinCode } from "./inviteLink";
 import {
@@ -11,6 +11,7 @@ import {
 import { resolveQuickMatchSeat } from "./quickMatchSeats";
 import GameSetupShell from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
+import NameField from "./NameField";
 import QuickMatchPanel from "./QuickMatchPanel";
 
 const HEADER_ICON = (
@@ -189,6 +190,12 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
 
         {isQuick ? (
           <>
+            <NameField
+              className="mb-6"
+              value={player1Name}
+              onChange={handlePlayer1NameChange}
+              disabled={picking}
+            />
             <QuickMatchPanel
               presets={QUICK_MATCH_PRESETS}
               pools={pools}
@@ -197,19 +204,6 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
               pendingPreset={pendingPreset}
               defaultPreset={DEFAULT_QUICK_MATCH_PRESET}
             />
-            <div className="mb-2">
-              <label className="block text-sm text-elq-text mb-1.5">
-                Your name <span className="text-elq-muted font-normal">(optional)</span>
-              </label>
-              <input
-                value={player1Name}
-                onChange={(e) => handlePlayer1NameChange(e.target.value)}
-                placeholder="Your name"
-                maxLength={NICKNAME_MAX_LENGTH}
-                disabled={picking}
-                className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors disabled:opacity-60"
-              />
-            </div>
           </>
         ) : (
           <>
@@ -227,19 +221,27 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
                     className="w-full px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm text-elq-text mb-1.5">Your Name</label>
-                  <input
-                    value={player1Name}
-                    onChange={(e) => handlePlayer1NameChange(e.target.value)}
-                    placeholder="Your name"
-                    maxLength={NICKNAME_MAX_LENGTH}
-                    className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
-                  />
-                </div>
+                <NameField value={player1Name} onChange={handlePlayer1NameChange} />
               </div>
             ) : (
               <>
+                <div className="space-y-4 mb-6">
+                  <NameField
+                    value={player1Name}
+                    onChange={handlePlayer1NameChange}
+                    label={isLocal ? "Player 1" : "Your Name"}
+                    placeholder={isLocal ? "Player 1" : "Your name"}
+                  />
+                  {isLocal && (
+                    <NameField
+                      value={player2Name}
+                      onChange={setPlayer2Name}
+                      label="Player 2"
+                      placeholder="Player 2"
+                    />
+                  )}
+                </div>
+
                 {showMatchSettings && (
                   <>
                     <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
@@ -273,32 +275,6 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
                     </div>
                   </>
                 )}
-
-                <div className="space-y-4 mb-8">
-                  <div>
-                    <label className="block text-sm text-elq-text mb-1.5">
-                      {isLocal ? "Player 1" : "Your Name"}
-                    </label>
-                    <input
-                      value={player1Name}
-                      onChange={(e) => handlePlayer1NameChange(e.target.value)}
-                      placeholder={isLocal ? "Player 1" : "Your name"}
-                      maxLength={NICKNAME_MAX_LENGTH}
-                      className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
-                    />
-                  </div>
-                  {isLocal && (
-                    <div>
-                      <label className="block text-sm text-elq-text mb-1.5">Player 2</label>
-                      <input
-                        value={player2Name}
-                        onChange={(e) => setPlayer2Name(e.target.value)}
-                        placeholder="Player 2"
-                        className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
-                      />
-                    </div>
-                  )}
-                </div>
               </>
             )}
 
