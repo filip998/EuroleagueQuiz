@@ -19,7 +19,7 @@ import {
   useRosterRaceQuickMatchPools,
 } from "./rosterRaceQuickMatch";
 import ClubLogo from "./ClubLogo";
-import { LogoMini } from "./Logo";
+import BoardHeaderNav from "./BoardHeaderNav";
 
 const POSITION_ORDER = { Guard: 0, "Guard-Forward": 1, Forward: 2, "Forward-Center": 3, Center: 4 };
 
@@ -428,7 +428,7 @@ function Shell({ children, onHome }) {
       <div className="h-1 bg-gradient-to-r from-elq-player1 via-elq-orange to-elq-player2" />
       <div className="bg-white border-b border-elq-border">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-          <LogoMini onClick={onHome} />
+          <BoardHeaderNav onHome={onHome} />
           <span className="font-display text-base tracking-wide text-elq-dark">ROSTER RACE</span>
           <span />
         </div>

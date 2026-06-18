@@ -3,7 +3,7 @@ import { getGame, submitMove, offerDraw, respondDraw, giveUpGame, cancelQuickMat
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import PlayerSearch from "./PlayerSearch";
-import { LogoMini } from "./Logo";
+import BoardHeaderNav from "./BoardHeaderNav";
 import ClubLogo from "./ClubLogo";
 import WaitingLobby from "./WaitingLobby";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
@@ -443,16 +443,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       {/* Header bar */}
       <div className="bg-white border-b border-elq-border">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
-          <button
-            onClick={onNewGame}
-            className="text-sm text-elq-muted hover:text-elq-text transition-colors flex items-center gap-1.5"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-            </svg>
-            New Game
-          </button>
-          <LogoMini onClick={onHome} />
+          <BoardHeaderNav onHome={onHome} />
           <span className="text-xs text-elq-muted">
             {isSolo ? "" : `Round ${game.round_number} \u00b7 First to ${game.target_wins}`}
           </span>

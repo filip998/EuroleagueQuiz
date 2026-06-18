@@ -191,3 +191,24 @@ function activeRaceGame(overrides = {}) {
     ...overrides,
   };
 }
+
+describe("RosterGuessRaceBoard header navigation", () => {
+  it("exposes a single consistent Home control that returns to the app home", () => {
+    const onHome = vi.fn();
+    const onNewGame = vi.fn();
+
+    render(
+      <RosterGuessRaceBoard
+        initialState={activeRaceGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onNewGame={onNewGame}
+        onHome={onHome}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to home" }));
+
+    expect(onHome).toHaveBeenCalledTimes(1);
+    expect(onNewGame).not.toHaveBeenCalled();
+  });
+});

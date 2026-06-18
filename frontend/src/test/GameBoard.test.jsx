@@ -375,3 +375,26 @@ describe("GameBoard victory modal", () => {
     expect(screen.queryByText("View result")).not.toBeInTheDocument();
   });
 });
+
+describe("GameBoard header navigation", () => {
+  it("exposes a single consistent Home control that returns to the app home", () => {
+    const onHome = vi.fn();
+    const onNewGame = vi.fn();
+
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={onNewGame}
+        onHome={onHome}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to home" }));
+
+    expect(onHome).toHaveBeenCalledTimes(1);
+    expect(onNewGame).not.toHaveBeenCalled();
+    // The previous centered logo nav is gone, leaving a single home affordance.
+    expect(screen.queryByRole("button", { name: "EuroLeague Quiz" })).toBeNull();
+  });
+});

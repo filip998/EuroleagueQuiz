@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { getRosterGame, submitRosterGuess, offerEndRound, respondEndRound, connectRosterGuessRealtime, autocompleteRosterPlayer, giveUpRosterRound } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
-import { LogoMini } from "./Logo";
+import BoardHeaderNav from "./BoardHeaderNav";
 import ClubLogo from "./ClubLogo";
 
 const POSITION_ORDER = { "Guard": 0, "Guard-Forward": 1, "Forward": 2, "Forward-Center": 3, "Center": 4 };
@@ -200,7 +200,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light flex-shrink-0" />
       <div className="bg-white border-b border-elq-border flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2 flex items-center justify-between">
-          <LogoMini onClick={onHome || onNewGame} />
+          <BoardHeaderNav onHome={onHome} />
           <span className="font-display text-base tracking-wide text-elq-dark">ROSTER GUESS</span>
           <span className="text-[11px] text-elq-muted">{isSolo ? "" : `Rd ${game.round_number} \u00b7 First to ${game.target_wins}`}</span>
         </div>

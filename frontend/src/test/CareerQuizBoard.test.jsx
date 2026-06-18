@@ -1292,3 +1292,24 @@ function completedRound({
     },
   };
 }
+
+describe("CareerQuizBoard header navigation", () => {
+  it("exposes a single consistent Home control that returns to the app home", () => {
+    const onHome = vi.fn();
+    const onNewGame = vi.fn();
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={onHome}
+        onNewGame={onNewGame}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to home" }));
+
+    expect(onHome).toHaveBeenCalledTimes(1);
+    expect(onNewGame).not.toHaveBeenCalled();
+  });
+});
