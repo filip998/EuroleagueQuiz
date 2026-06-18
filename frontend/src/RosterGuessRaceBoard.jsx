@@ -20,6 +20,7 @@ import {
 } from "./rosterRaceQuickMatch";
 import ClubLogo from "./ClubLogo";
 import BoardHeaderNav from "./BoardHeaderNav";
+import OnlineScoreboard from "./OnlineScoreboard";
 
 const POSITION_ORDER = { Guard: 0, "Guard-Forward": 1, Forward: 2, "Forward-Center": 3, Center: 4 };
 
@@ -253,20 +254,16 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
   return (
     <Shell onHome={onHome}>
       <div className="w-full max-w-5xl">
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="font-display text-4xl text-elq-dark">ROSTER RACE</h1>
-            <p className="text-sm text-elq-muted">Claim roster members before your opponent does.</p>
-          </div>
-          <div className="rounded-full border border-elq-border bg-white px-3 py-1.5 text-xs font-bold text-elq-dark">
-            {playerNumber ? `You are ${game[`player${playerNumber}_name`]}` : "Spectating"}
-          </div>
+        <div className="mb-4">
+          <h1 className="font-display text-4xl text-elq-dark">ROSTER RACE</h1>
+          <p className="text-sm text-elq-muted">Claim roster members before your opponent does.</p>
         </div>
 
         <RaceScoreboard
           game={game}
           round={currentRound}
           timerRemaining={roundLocked ? null : timerRemaining}
+          playerNumber={playerNumber}
         />
 
         <CompletedRoundReveal round={completedRound} countdown={revealRemaining} />
@@ -345,35 +342,31 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
   );
 }
 
-function RaceScoreboard({ game, round, timerRemaining }) {
+function RaceScoreboard({ game, round, timerRemaining, playerNumber }) {
   return (
-    <section className="mb-4 rounded-3xl border border-elq-border bg-white shadow-sm overflow-hidden">
-      <div className="h-1.5 bg-gradient-to-r from-elq-player1 via-elq-orange to-elq-player2" />
-      <div className="p-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-        <PlayerScore name={game.player1_name} score={game.player1_score} claims={round?.player1_correct || 0} tone="player1" />
-        <div className="text-center">
-          <div className="font-display text-2xl text-elq-dark">VS</div>
-          <div className="text-xs text-elq-muted">Round {game.round_number} · First to {game.target_wins}</div>
-          {timerRemaining != null && (
-            <div className={`mt-1 font-mono text-lg font-bold ${timerRemaining <= 10 ? "text-elq-warning" : "text-elq-dark"}`}>
-              {timerRemaining}s
-            </div>
-          )}
-        </div>
-        <PlayerScore name={game.player2_name} score={game.player2_score} claims={round?.player2_correct || 0} tone="player2" align="right" />
-      </div>
-    </section>
-  );
-}
-
-function PlayerScore({ name, score, claims, tone, align = "left" }) {
-  const color = tone === "player2" ? "text-elq-player2" : "text-elq-player1";
-  return (
-    <div className={align === "right" ? "text-right" : ""}>
-      <div className={`text-sm font-bold truncate ${color}`}>{name}</div>
-      <div className="text-3xl font-display text-elq-dark">{score}</div>
-      <div className="text-xs text-elq-muted">{claims} claims this round</div>
-    </div>
+    <OnlineScoreboard
+      ariaLabel="Roster Race multiplayer scoreboard"
+      players={[
+        {
+          name: game.player1_name,
+          score: game.player1_score,
+          subline: `${round?.player1_correct || 0} claims this round`,
+        },
+        {
+          name: game.player2_name,
+          score: game.player2_score,
+          subline: `${round?.player2_correct || 0} claims this round`,
+        },
+      ]}
+      youPlayerNumber={playerNumber}
+      roundNumber={game.round_number}
+      targetWins={game.target_wins}
+      timer={
+        timerRemaining != null
+          ? { seconds: timerRemaining, critical: timerRemaining <= 10 }
+          : null
+      }
+    />
   );
 }
 

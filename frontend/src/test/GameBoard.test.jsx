@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import GameBoard from "../GameBoard";
 import { giveUpGame, cancelQuickMatchTicTacToe } from "../api";
 import { clearOnlineInfo } from "../onlineRecovery";
@@ -396,5 +396,25 @@ describe("GameBoard header navigation", () => {
     expect(onNewGame).not.toHaveBeenCalled();
     // The previous centered logo nav is gone, leaving a single home affordance.
     expect(screen.queryByRole("button", { name: "EuroLeague Quiz" })).toBeNull();
+  });
+
+  it("renders the unified online scoreboard with a seat-colored self-indicator", () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={vi.fn()}
+        onHome={vi.fn()}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    const scoreboard = screen.getByLabelText("TicTacToe multiplayer scoreboard");
+    expect(within(scoreboard).getByText("Alice")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("Bob")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("Round 1")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("First to 3")).toBeInTheDocument();
+
+    const pill = within(scoreboard).getByText("You are Alice").closest("div");
+    expect(pill.querySelector(".bg-elq-player1")).toBeTruthy();
   });
 });

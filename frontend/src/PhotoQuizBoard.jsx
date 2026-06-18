@@ -14,6 +14,7 @@ import {
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import BoardHeaderNav from "./BoardHeaderNav";
+import OnlineScoreboard from "./OnlineScoreboard";
 import WaitingLobby from "./WaitingLobby";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import { buildInviteUrl } from "./inviteLink";
@@ -587,104 +588,17 @@ function PhotoFeedbackMessage({ message }) {
 }
 
 function PhotoMultiplayerScoreboard({ game, playerNumber, roundNumber }) {
-  const player1Name = game?.player1_name || "Player 1";
-  const player2Name = game?.player2_name || "Player 2";
-  const targetWins = game?.target_wins ?? "-";
-  const youName = game?.[`player${playerNumber}_name`] || `Player ${playerNumber}`;
-  const youClasses = playerNumber === 2
-    ? {
-      pill: "border-elq-player2/25 bg-elq-player2-bg",
-      dot: "bg-elq-player2",
-    }
-    : {
-      pill: "border-elq-player1/25 bg-elq-player1-bg",
-      dot: "bg-elq-player1",
-    };
-
   return (
-    <section
-      role="group"
-      aria-label="Photo Quiz multiplayer scoreboard"
-      className="mb-6 overflow-hidden rounded-3xl border border-elq-border bg-white shadow-sm animate-fade-in-up"
-    >
-      <div className="h-1.5 bg-gradient-to-r from-elq-player1 via-elq-orange to-elq-player2" />
-      <div className="p-4 sm:p-5">
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="font-display text-2xl tracking-wide text-elq-dark">ONLINE RACE</div>
-            <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold uppercase tracking-[0.16em] text-elq-dark">
-              <span className="rounded-full bg-elq-bg px-2 py-0.5">
-                {roundNumber != null ? `Round ${roundNumber}` : "Round -"}
-              </span>
-              <span className="rounded-full border border-elq-orange/30 bg-elq-orange/10 px-2 py-0.5">
-                First to {targetWins}
-              </span>
-            </div>
-          </div>
-          <div
-            className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold text-elq-dark ${youClasses.pill}`}
-          >
-            <span className={`h-2 w-2 rounded-full ${youClasses.dot}`} />
-            <span>You are {youName}</span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-[1fr_auto_1fr] sm:gap-4">
-          <PhotoPlayerScore
-            label="Player 1"
-            name={player1Name}
-            score={game?.player1_score ?? 0}
-            tone="player1"
-          />
-          <div className="flex items-center justify-center">
-            <div className="rounded-full border border-elq-border bg-elq-bg px-3 py-1 font-display text-xl tracking-wide text-elq-dark">
-              VS
-            </div>
-          </div>
-          <PhotoPlayerScore
-            label="Player 2"
-            name={player2Name}
-            score={game?.player2_score ?? 0}
-            tone="player2"
-            align="right"
-          />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function PhotoPlayerScore({ label, name, score, tone, align = "left" }) {
-  const toneClasses = tone === "player2"
-    ? {
-      bar: "right-0 bg-elq-player2",
-      panel: "border-elq-player2/25 bg-elq-player2-bg/70",
-      text: "text-elq-player2",
-    }
-    : {
-      bar: "left-0 bg-elq-player1",
-      panel: "border-elq-player1/25 bg-elq-player1-bg/70",
-      text: "text-elq-player1",
-    };
-
-  return (
-    <div
-      aria-label={`${name} score ${score}`}
-      className={`relative overflow-hidden rounded-2xl border p-4 ${toneClasses.panel}`}
-    >
-      <div className={`absolute inset-y-0 w-1.5 ${toneClasses.bar}`} />
-      <div className={`flex items-end justify-between gap-4 ${align === "right" ? "sm:flex-row-reverse sm:text-right" : ""}`}>
-        <div className="min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-elq-dark">
-            {label}
-          </div>
-          <div className="mt-1 truncate text-base font-bold text-elq-dark sm:text-lg">{name}</div>
-        </div>
-        <div className={`font-display text-5xl font-bold leading-none sm:text-6xl ${toneClasses.text}`}>
-          {score}
-        </div>
-      </div>
-    </div>
+    <OnlineScoreboard
+      ariaLabel="Photo Quiz multiplayer scoreboard"
+      players={[
+        { name: game?.player1_name || "Player 1", score: game?.player1_score ?? 0 },
+        { name: game?.player2_name || "Player 2", score: game?.player2_score ?? 0 },
+      ]}
+      youPlayerNumber={playerNumber}
+      roundNumber={roundNumber}
+      targetWins={game?.target_wins ?? "-"}
+    />
   );
 }
 
