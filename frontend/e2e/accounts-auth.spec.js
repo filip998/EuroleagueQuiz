@@ -146,6 +146,8 @@ test.describe.serial("Accounts auth e2e", () => {
       await waitForOnlineBoard(playerA, { opponentName: "Anon Bob" });
       await waitForOnlineBoard(playerB, { opponentName: "Anon Alice" });
 
+      await expect.poll(() => ticTacToeSocketUrls(trafficA).length).toBeGreaterThan(0);
+      await expect.poll(() => ticTacToeSocketUrls(trafficB).length).toBeGreaterThan(0);
       expect([...trafficA.rest, ...trafficB.rest].every((request) => !request.authorization)).toBe(true);
       expect(
         [...ticTacToeSocketUrls(trafficA), ...ticTacToeSocketUrls(trafficB)].every(
