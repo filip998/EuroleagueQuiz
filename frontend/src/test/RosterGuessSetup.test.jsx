@@ -101,7 +101,7 @@ describe("RosterGuessSetup", () => {
     renderSetup({ initialMode: "online", initialOnlineGameType: "race" });
     expect(screen.getByText("Classic")).toBeInTheDocument();
     expect(screen.getByText("Race")).toBeInTheDocument();
-    expect(screen.getByText("Race pools")).toBeInTheDocument();
+    expect(screen.getByText("Pick a pool")).toBeInTheDocument();
     expect(screen.getByTestId("presence-modern-standard")).toHaveTextContent(
       "2 searching · 1 in progress"
     );

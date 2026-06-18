@@ -248,7 +248,6 @@ export default function RosterGuessSetup({
                   disabled={loading}
                   pendingPreset={pendingPreset}
                   defaultPreset={DEFAULT_ROSTER_RACE_QUICK_MATCH_PRESET}
-                  label="Race pools"
                 />
               </>
             ) : isRaceJoin ? (
