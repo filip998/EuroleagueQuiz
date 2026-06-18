@@ -572,6 +572,19 @@ def submit_race_claim(
         _assert_active_race_round(db, game, round_obj, round_number)
 
         now = datetime.utcnow()
+        deadline = _race_round_deadline_at(game)
+        if deadline is not None and normalize_utc(now) >= deadline:
+            result = _finish_race_round(
+                db,
+                game,
+                round_obj,
+                expected_round=round_number,
+                completed_at=now,
+            )
+            if result is not None:
+                return result
+            return "incorrect"
+
         updated = (
             db.query(RosterGuessSlot)
             .filter(RosterGuessSlot.round_id == round_obj.id)

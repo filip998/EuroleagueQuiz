@@ -351,6 +351,41 @@ def test_roster_race_timer_tie_starts_reveal_locked_next_round(client: TestClien
     assert locked.json()["payload"]["message"] == "round_locked"
 
 
+def test_roster_race_claim_after_deadline_resolves_without_late_award(client: TestClient):
+    created = _create_roster_race(client, target_wins=2)
+    game = _join_roster_race(client, created["join_code"])
+    round_number = game["round_number"]
+
+    first_claim = client.post(
+        f"/quiz/roster-guess/games/{game['id']}/guess?player=1",
+        json={"player_id": 1, "round_number": round_number},
+    )
+    assert first_claim.status_code == 200
+
+    with client.session_local() as db:
+        active_round = (
+            db.query(RosterGuessRound)
+            .filter_by(game_id=game["id"], round_number=round_number)
+            .one()
+        )
+        active_round.created_at = datetime.utcnow() - timedelta(seconds=121)
+        db.commit()
+
+    late_claim = client.post(
+        f"/quiz/roster-guess/games/{game['id']}/guess?player=2",
+        json={"player_id": 2, "round_number": round_number},
+    )
+    assert late_claim.status_code == 200
+    resolved = _action_payload(late_claim)
+    assert resolved["result"] == "round_won"
+    assert resolved["game"]["player1_score"] == 1
+    assert resolved["game"]["player2_score"] == 0
+    assert resolved["game"]["round_number"] == round_number + 1
+    assert resolved["completed_round"]["player1_correct"] == 1
+    assert resolved["completed_round"]["player2_correct"] == 0
+    assert resolved["completed_round"]["guessed_count"] == 1
+
+
 def test_roster_race_quick_match_pair_cancel_and_public_join_guard(client: TestClient):
     first = client.post(
         "/quiz/roster-guess/quick-match",
