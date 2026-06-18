@@ -76,6 +76,41 @@ describe("QuickMatchPanel", () => {
     expect(screen.getByTestId("play-long")).toBeInTheDocument();
   });
 
+  it("renders a persistent tap affordance on each interactive card without hover", () => {
+    render(
+      <QuickMatchPanel
+        presets={PRESETS}
+        pools={POOLS}
+        onPick={vi.fn()}
+        defaultPreset="standard"
+      />
+    );
+
+    // The affordance is the at-rest cue that the card is tappable: it must render
+    // for every interactive card and be visible WITHOUT hover/focus (touch never
+    // triggers those). jsdom can't apply hover CSS, so lock the contract by class:
+    // the affordance carries no opacity/hover visibility gate (only a color
+    // enhancement on hover).
+    for (const key of ["blitz", "standard", "long"]) {
+      const affordance = screen.getByTestId(`affordance-${key}`);
+      expect(affordance).toBeInTheDocument();
+      expect(affordance.className).not.toContain("opacity-0");
+      expect(affordance.className).not.toContain("group-hover:opacity");
+      expect(affordance.className).not.toContain("group-focus-visible:opacity");
+    }
+
+    // The affordance does not replace the live presence count: both coexist.
+    expect(screen.getByTestId("presence-standard")).toHaveTextContent(
+      "2 searching · 1 in progress"
+    );
+
+    // Contrast: the "Play ▶" pill stays a hover/focus-only flourish, so the two
+    // layers (unconditional affordance vs. hover flourish) remain distinct.
+    expect(screen.getByTestId("play-standard").className).toContain(
+      "group-hover:opacity-100"
+    );
+  });
+
   it("disables every card, shows Searching…, and hides Play while a pick is pending", () => {
     render(
       <QuickMatchPanel
@@ -100,6 +135,12 @@ describe("QuickMatchPanel", () => {
     expect(screen.queryByTestId("play-standard")).not.toBeInTheDocument();
     expect(screen.queryByTestId("play-blitz")).not.toBeInTheDocument();
     expect(screen.queryByTestId("play-long")).not.toBeInTheDocument();
+
+    // Neither does the at-rest tap affordance: a searching/inert panel is not
+    // tappable, so no card advertises a tap cue.
+    expect(screen.queryByTestId("affordance-standard")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("affordance-blitz")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("affordance-long")).not.toBeInTheDocument();
   });
 
   it("does not fire onPick when disabled", () => {
