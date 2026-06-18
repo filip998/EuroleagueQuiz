@@ -882,6 +882,86 @@ def test_career_http_create_and_join_without_guest_id(career_client: TestClient)
         assert stored.player2_guest_id is None
 
 
+def test_career_http_resign_finishes_game_and_notifies_opponent(
+    career_client: TestClient,
+    career_quick_match_effects,
+):
+    create = career_client.post(
+        "/quiz/career/games",
+        json={"target_wins": 3, "player1_name": "Host"},
+    )
+    assert create.status_code == 200
+    game = _state_payload(create)["game"]
+
+    join = career_client.post(
+        "/quiz/career/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner"},
+    )
+    assert join.status_code == 200
+    assert _state_payload(join)["game"]["status"] == "active"
+
+    resign = career_client.post(f"/quiz/career/games/{game['id']}/give-up?player=1")
+    assert resign.status_code == 200
+    payload = _state_payload(resign)
+    assert payload["result"] == "resigned"
+    assert payload["terminal"] is True
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] == 2
+
+    with career_client.session_local() as db:
+        stored = db.get(CareerQuizGame, game["id"])
+        assert stored.status == "finished"
+        assert stored.winner_player == 2
+
+    # The terminal resign state is broadcast to the opponent over realtime.
+    assert career_quick_match_effects["broadcasts"], "expected a resign broadcast"
+    last_game_id, last_state, last_kwargs = career_quick_match_effects["broadcasts"][-1]
+    assert last_game_id == game["id"]
+    resign_result = getattr(last_kwargs.get("result"), "value", last_kwargs.get("result"))
+    assert resign_result == "resigned"
+    assert last_state["winner_player"] == 2
+
+
+def test_career_http_resign_requires_player_identity(career_client: TestClient):
+    create = career_client.post(
+        "/quiz/career/games",
+        json={"target_wins": 3, "player1_name": "Host"},
+    )
+    game = _state_payload(create)["game"]
+    career_client.post(
+        "/quiz/career/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner"},
+    )
+
+    missing = career_client.post(f"/quiz/career/games/{game['id']}/give-up")
+    assert missing.status_code == 422
+
+
+def test_career_http_double_resign_does_not_flip_winner(career_client: TestClient):
+    create = career_client.post(
+        "/quiz/career/games",
+        json={"target_wins": 3, "player1_name": "Host"},
+    )
+    game = _state_payload(create)["game"]
+    career_client.post(
+        "/quiz/career/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner"},
+    )
+
+    first = career_client.post(f"/quiz/career/games/{game['id']}/give-up?player=1")
+    assert first.status_code == 200
+    assert _state_payload(first)["game"]["winner_player"] == 2
+
+    # A second resign (double-submit / stale click) must not flip the winner
+    # or re-emit a terminal "resigned" result.
+    second = career_client.post(f"/quiz/career/games/{game['id']}/give-up?player=2")
+    assert second.status_code == 200
+    payload = _state_payload(second)
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] == 2
+    assert "result" not in payload
+
+
 def test_career_quick_match_first_request_waits_with_public_preset(
     career_client: TestClient,
 ):

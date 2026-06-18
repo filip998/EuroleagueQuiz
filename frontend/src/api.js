@@ -216,6 +216,10 @@ export function giveUpRosterRound(gameId) {
   return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/give-up`);
 }
 
+export function resignRosterRaceGame(gameId, player) {
+  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/give-up?player=${player}`);
+}
+
 export function autocompleteRosterPlayer(q, limit = 15) {
   const params = new URLSearchParams({ q, limit });
   return request("GET", `/quiz/roster-guess/players/autocomplete?${params}`);
@@ -328,6 +332,10 @@ export function submitCareerGuess(gameId, playerNumber, playerId, roundNumber) {
   });
 }
 
+export function resignCareerGame(gameId, playerNumber) {
+  return actionRequest("POST", `/quiz/career/games/${gameId}/give-up?player=${playerNumber}`);
+}
+
 export function offerCareerNoAnswer(gameId, playerNumber, roundNumber) {
   return actionRequest("POST", `/quiz/career/games/${gameId}/no-answer-offer?player=${playerNumber}`, {
     round_number: roundNumber,
@@ -404,6 +412,10 @@ export function submitPhotoGuess(gameId, playerNumber, playerId, roundNumber) {
     player_id: playerId,
     round_number: roundNumber,
   });
+}
+
+export function resignPhotoGame(gameId, playerNumber) {
+  return actionRequest("POST", `/quiz/photo/games/${gameId}/give-up?player=${playerNumber}`);
 }
 
 export function offerPhotoNoAnswer(gameId, playerNumber, roundNumber) {

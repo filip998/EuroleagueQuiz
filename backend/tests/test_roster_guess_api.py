@@ -295,6 +295,62 @@ def test_roster_race_finishes_match_when_full_roster_claimed(client: TestClient)
     assert all(slot["player_name"] for slot in result["completed_round"]["slots"])
 
 
+def test_roster_race_resign_finishes_match_for_opponent(client: TestClient):
+    created = _create_roster_race(client, target_wins=2)
+    game = _join_roster_race(client, created["join_code"])
+
+    resign = client.post(
+        f"/quiz/roster-guess/games/{game['id']}/give-up?player=1",
+    )
+    assert resign.status_code == 200
+    payload = _action_payload(resign)
+    assert payload["result"] == "resigned"
+    assert payload["terminal"] is True
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] == 2
+
+    with client.session_local() as db:
+        stored = db.get(RosterGuessGame, game["id"])
+        assert stored.status == "finished"
+        assert stored.winner_player == 2
+
+
+def test_roster_race_resign_requires_player_identity(client: TestClient):
+    created = _create_roster_race(client, target_wins=2)
+    game = _join_roster_race(client, created["join_code"])
+
+    missing = client.post(f"/quiz/roster-guess/games/{game['id']}/give-up")
+    assert missing.status_code == 400
+    assert missing.json()["type"] == "error"
+
+
+def test_roster_race_double_resign_does_not_flip_winner(client: TestClient):
+    created = _create_roster_race(client, target_wins=2)
+    game = _join_roster_race(client, created["join_code"])
+
+    first = client.post(f"/quiz/roster-guess/games/{game['id']}/give-up?player=1")
+    assert first.status_code == 200
+    assert _action_payload(first)["game"]["winner_player"] == 2
+
+    second = client.post(f"/quiz/roster-guess/games/{game['id']}/give-up?player=2")
+    assert second.status_code == 200
+    payload = _action_payload(second)
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] == 2
+    assert "result" not in payload
+
+
+def test_classic_single_player_give_up_still_returns_given_up(client: TestClient):
+    game = _create_roster_game(client)
+
+    response = client.post(f"/quiz/roster-guess/games/{game['id']}/give-up")
+
+    assert response.status_code == 200
+    payload = _action_payload(response)
+    assert payload["result"] == "given_up"
+    assert payload["completed_round"]["status"] == "given_up"
+
+
 def test_roster_race_timer_tie_starts_reveal_locked_next_round(client: TestClient):
     created = _create_roster_race(client, target_wins=2)
     game = _join_roster_race(client, created["join_code"])

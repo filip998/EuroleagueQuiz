@@ -14,6 +14,7 @@ vi.mock("../api", () => ({
   respondCareerNoAnswer: vi.fn(),
   submitCareerGuess: vi.fn(),
   submitCareerSoloGuess: vi.fn(),
+  resignCareerGame: vi.fn(),
 }));
 
 import CareerQuizBoard from "../CareerQuizBoard";
@@ -32,6 +33,7 @@ import {
   getCareerQuickMatchPools,
   submitCareerGuess,
   submitCareerSoloGuess,
+  resignCareerGame,
 } from "../api";
 import { buildInviteUrl } from "../inviteLink";
 
@@ -1240,6 +1242,67 @@ describe("CareerQuizBoard search keyboard submit", () => {
 
     expect(input).toHaveValue("same");
     expect(screen.getByRole("button", { name: "Same Round Match" })).toBeInTheDocument();
+  });
+});
+
+describe("CareerQuizBoard online resign", () => {
+  it("resigns through the give-up endpoint and shows the self-resign outcome", async () => {
+    resignCareerGame.mockResolvedValue({
+      state: activeCareerGame({ status: "finished", winner_player: 2 }),
+      result: "resigned",
+    });
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    // First click reveals the confirm card, second click confirms the resign.
+    fireEvent.click(screen.getByText("Resign"));
+    expect(
+      screen.getByText("Resign the match? Your opponent wins.")
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Resign"));
+
+    await waitFor(() => expect(resignCareerGame).toHaveBeenCalledWith(7, 1));
+    expect(await screen.findByText("You resigned.")).toBeInTheDocument();
+  });
+
+  it("renders an opponent resignation delivered over realtime", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 2 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    // Player 1 resigned remotely, so player 2 wins and must see the
+    // opponent-perspective note instead of the self-resign copy.
+    emitCareerRealtimeState({
+      state: activeCareerGame({ status: "finished", winner_player: 2 }),
+      result: "resigned",
+    });
+
+    expect(screen.getByText("Your opponent resigned.")).toBeInTheDocument();
+  });
+
+  it("does not offer a resign control once the game is finished", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({ status: "finished", winner_player: 2 })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Resign")).not.toBeInTheDocument();
   });
 });
 

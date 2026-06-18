@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sendActionMock = vi.hoisted(() => vi.fn());
+const realtimeHolder = vi.hoisted(() => ({ opts: null }));
 
 vi.mock("../api", () => ({
   autocompleteRosterPlayer: vi.fn(),
@@ -10,12 +11,16 @@ vi.mock("../api", () => ({
   getRosterGame: vi.fn(),
   submitRosterGuess: vi.fn(),
   getRosterRaceQuickMatchPools: vi.fn(),
+  resignRosterRaceGame: vi.fn(),
 }));
 
 vi.mock("../useOnlineGameRealtime", () => ({
-  useOnlineGameRealtime: () => ({
-    sendAction: sendActionMock,
-  }),
+  useOnlineGameRealtime: (opts) => {
+    realtimeHolder.opts = opts;
+    return {
+      sendAction: sendActionMock,
+    };
+  },
 }));
 
 vi.mock("../QuickMatchSearchingLobby", () => ({
@@ -45,7 +50,11 @@ vi.mock("../ClubLogo", () => ({
 }));
 
 import RosterGuessRaceBoard from "../RosterGuessRaceBoard";
-import { autocompleteRosterPlayer, cancelRosterRaceQuickMatch } from "../api";
+import {
+  autocompleteRosterPlayer,
+  cancelRosterRaceQuickMatch,
+  resignRosterRaceGame,
+} from "../api";
 import { clearOnlineInfo } from "../onlineRecovery";
 import { forgetQuickMatchSeat } from "../quickMatchSeats";
 import { buildInviteUrl } from "../inviteLink";
@@ -205,6 +214,71 @@ describe("RosterGuessRaceBoard", () => {
     expect(screen.getByText("ABC123")).toBeInTheDocument();
     expect(screen.getByText(inviteUrl)).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
+  });
+});
+
+describe("RosterGuessRaceBoard online resign", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    realtimeHolder.opts = null;
+  });
+
+  it("resigns through the give-up endpoint and shows the self-resign outcome", async () => {
+    resignRosterRaceGame.mockResolvedValue({
+      state: activeRaceGame({ status: "finished", winner_player: 2 }),
+      result: "resigned",
+    });
+
+    render(
+      <RosterGuessRaceBoard
+        initialState={activeRaceGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Resign"));
+    expect(
+      screen.getByText("Resign the match? Your opponent wins.")
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Resign"));
+
+    await waitFor(() => expect(resignRosterRaceGame).toHaveBeenCalledWith(30, 1));
+    expect(await screen.findByText("You resigned.")).toBeInTheDocument();
+  });
+
+  it("renders an opponent resignation delivered over realtime", () => {
+    render(
+      <RosterGuessRaceBoard
+        initialState={activeRaceGame()}
+        onlineInfo={{ playerNumber: 2 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeRaceGame({ status: "finished", winner_player: 2 }),
+        result: "resigned",
+      });
+    });
+
+    expect(screen.getByText("Your opponent resigned.")).toBeInTheDocument();
+  });
+
+  it("does not offer a resign control once the game is finished", () => {
+    render(
+      <RosterGuessRaceBoard
+        initialState={activeRaceGame({ status: "finished", winner_player: 2 })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Resign")).not.toBeInTheDocument();
   });
 });
 

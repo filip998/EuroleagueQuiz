@@ -9,6 +9,7 @@ import {
   offerPhotoNoAnswer,
   revealPhotoSoloAnswer,
   respondPhotoNoAnswer,
+  resignPhotoGame,
   submitPhotoGuess,
   submitPhotoSoloGuess,
 } from "./api";
@@ -17,6 +18,7 @@ import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import BoardHeaderNav from "./BoardHeaderNav";
 import OnlineScoreboard from "./OnlineScoreboard";
 import WaitingLobby from "./WaitingLobby";
+import ResignControl from "./ResignControl";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import { buildInviteUrl } from "./inviteLink";
 import { clearOnlineInfo } from "./onlineRecovery";
@@ -79,6 +81,7 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
   const [noAnswerOfferMessageRoundNumber, setNoAnswerOfferMessageRoundNumber] = useState(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [cancelling, setCancelling] = useState(false);
+  const [resigning, setResigning] = useState(false);
   const [roundTimerAnchor, setRoundTimerAnchor] = useState(null);
   const [lastResult, setLastResult] = useState(null);
 
@@ -188,6 +191,11 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
 
     if (result.result === "opponent_left") {
       setLastResult("opponent_left");
+      return;
+    }
+
+    if (result.result === "resigned") {
+      setLastResult("resigned");
       return;
     }
 
@@ -355,6 +363,18 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
     }
   }
 
+  async function handleResign() {
+    setResigning(true);
+    try {
+      const result = await resignPhotoGame(game.id, playerNumber);
+      handleRealtimeState(result);
+    } catch (error) {
+      setMessage(error.message || PHOTO_FEEDBACK_MESSAGES.realtimeUnavailable);
+    } finally {
+      setResigning(false);
+    }
+  }
+
   async function resyncPhotoGame() {
     setMessage("");
     setNoAnswerOfferMessageRoundNumber(null);
@@ -417,6 +437,11 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
           {lastResult === "opponent_left" && (
             <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
               Your opponent left the game.
+            </p>
+          )}
+          {lastResult === "resigned" && (
+            <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+              {game.winner_player === playerNumber ? "Your opponent resigned." : "You resigned."}
             </p>
           )}
           <div className="text-5xl mb-3">🏆</div>
@@ -543,6 +568,9 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
             )}
           </div>
         </div>
+        {isOnline && game?.status === "active" && (
+          <ResignControl onResign={handleResign} disabled={resigning} />
+        )}
       </div>
     </Shell>
   );
