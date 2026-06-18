@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 const backendPort = Number(process.env.E2E_BACKEND_PORT || 8000);
 const backendUrl = `http://127.0.0.1:${backendPort}`;
 
-async function startTicTacToeQuickMatch(page, { nickname = null, preset = "Standard" } = {}) {
+async function startTicTacToeQuickMatch(page, { nickname = null, preset = "Blitz" } = {}) {
   await page.goto("/tictactoe");
   const nameInput = page.getByPlaceholder("Your name");
   await expect(nameInput).toBeVisible({ timeout: 10000 });
@@ -100,7 +100,7 @@ test.describe.serial("Accounts auth e2e", () => {
 
       await signedPage.goto("/tictactoe");
       await expect(signedPage.getByPlaceholder("Your name")).toHaveValue("signed_tester");
-      await signedPage.getByTestId("quick-pick-standard").click();
+      await signedPage.getByTestId("quick-pick-blitz").click();
       await expect(signedPage.getByText("SEARCHING THE POOL")).toBeVisible({
         timeout: 10000,
       });
