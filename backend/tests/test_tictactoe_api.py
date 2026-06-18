@@ -13,7 +13,7 @@ from app.models import Player, PlayerSeasonTeam, Season, Team
 from app.models.tictactoe import QuizTicTacToeGame
 from app.routers import quiz as quiz_router
 from app.schemas.realtime import RealtimeServerMessageAdapter
-from app.services import matchmaking, tictactoe as ttt_service
+from app.services import matchmaking, realtime as realtime_service, tictactoe as ttt_service
 from app.services.realtime import DisconnectGraceTimerManager, OnlineGameRealtimeModule
 from app.services.realtime_adapters import TicTacToeRealtimeAdapter
 from tests.realtime_helpers import FakeWebSocket, SleepController, drain_tasks
@@ -406,6 +406,68 @@ def test_quick_match_pairs_second_guest_and_only_fresh_pair_starts_effects(
     assert len(quick_match_effects["broadcasts"]) == 1
 
 
+def test_anonymous_quick_match_rest_stays_tokenless_and_playable(
+    client: TestClient,
+    quick_match_effects,
+    monkeypatch,
+):
+    monkeypatch.setattr(matchmaking, "random_starting_player", lambda: 1)
+
+    first = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "blitz",
+            "player_name": None,
+            "guest_id": "anonymous-host",
+        },
+    )
+    assert first.status_code == 200
+    waiting_game = _action_payload(first)["game"]
+    assert waiting_game["status"] == "waiting_for_opponent"
+    assert "guest_id" not in waiting_game
+    assert "player1_guest_id" not in waiting_game
+
+    second = client.post(
+        "/quiz/tictactoe/quick-match",
+        json={
+            "preset": "blitz",
+            "player_name": None,
+            "guest_id": "anonymous-joiner",
+        },
+    )
+    assert second.status_code == 200
+    matched_game = _action_payload(second)["game"]
+    assert matched_game["id"] == waiting_game["id"]
+    assert matched_game["status"] == "active"
+    assert matched_game["player1_name"] == "Player 1"
+    assert matched_game["player2_name"] == "Player 2"
+    assert "guest_id" not in matched_game
+    assert "player1_guest_id" not in matched_game
+    assert "player2_guest_id" not in matched_game
+    assert quick_match_effects["started"] == [matched_game["id"]]
+
+    with client.session_local() as db:
+        db_game = db.get(QuizTicTacToeGame, matched_game["id"])
+        assert db_game.player1_guest_id == "anonymous-host"
+        assert db_game.player2_guest_id == "anonymous-joiner"
+
+    cell = _find_cell(matched_game, 0, 0)
+    move = client.post(
+        f"/quiz/tictactoe/games/{matched_game['id']}/moves?player=1",
+        json={
+            "row_index": 0,
+            "col_index": 0,
+            "player_id": _valid_player_for_cell(client, cell),
+        },
+    )
+
+    assert move.status_code == 200
+    move_payload = _action_payload(move)
+    assert move_payload["result"] == "correct"
+    assert move_payload["game"]["current_player"] == 2
+    assert quick_match_effects["started"] == [matched_game["id"], matched_game["id"]]
+
+
 def test_quick_match_randomized_starting_player_can_choose_either_player(
     client: TestClient,
     quick_match_effects,
@@ -507,6 +569,86 @@ async def test_tictactoe_disconnect_grace_forfeits_real_quick_match_game(
     assert message["payload"]["result"] == "opponent_left"
     assert message["payload"]["terminal"] is True
     assert message["payload"]["game"]["winner_player"] == 2
+
+
+@pytest.mark.asyncio
+async def test_anonymous_realtime_websockets_skip_auth_and_play_game(
+    client: TestClient,
+    monkeypatch,
+):
+    def fail_verifier():
+        raise AssertionError("Verifier should not run for tokenless websockets")
+
+    def fail_auth_session_factory():
+        raise AssertionError("Auth DB should not open for tokenless websockets")
+
+    monkeypatch.setattr(realtime_service, "get_clerk_jwt_verifier", fail_verifier)
+
+    with client.session_local() as db:
+        game = ttt_service.create_game(
+            db,
+            mode="online_friend",
+            target_wins=3,
+            timer_mode="unlimited",
+            player1_name="Anonymous One",
+            guest_id=None,
+        )
+        ttt_service.join_game(
+            db,
+            game.join_code,
+            "Anonymous Two",
+            guest_id=None,
+            started_by_player=1,
+        )
+        game_id = game.id
+        db.commit()
+
+    module = OnlineGameRealtimeModule(
+        TicTacToeRealtimeAdapter(),
+        session_factory=client.session_local,
+        auth_session_factory=fail_auth_session_factory,
+        disconnect_grace_seconds=3,
+    )
+    player_one = FakeWebSocket()
+    player_two = FakeWebSocket()
+
+    await module._send_initial_state(player_one, game_id, 1)
+    await module._send_initial_state(player_two, game_id, 2)
+
+    assert player_one.accepted is True
+    assert player_two.accepted is True
+    assert module.connections.get_context(game_id, 1).user is None
+    assert module.connections.get_context(game_id, 2).user is None
+    RealtimeServerMessageAdapter.validate_python(player_one.sent[0])
+    RealtimeServerMessageAdapter.validate_python(player_two.sent[0])
+    game_state = player_one.sent[0]["payload"]["game"]
+    assert game_state["status"] == "active"
+
+    cell = _find_cell(game_state, 0, 0)
+    await module.handle_client_message(
+        player_one,
+        game_id,
+        1,
+        {
+            "action": "move",
+            "row_index": 0,
+            "col_index": 0,
+            "player_id": _valid_player_for_cell(client, cell),
+        },
+    )
+
+    assert len(player_one.sent) == 2
+    assert len(player_two.sent) == 2
+    for websocket in (player_one, player_two):
+        RealtimeServerMessageAdapter.validate_python(websocket.sent[-1])
+        assert websocket.sent[-1]["payload"]["result"] == "correct"
+        assert websocket.sent[-1]["payload"]["game"]["current_player"] == 2
+
+    with client.session_local() as db:
+        stored_game = db.get(QuizTicTacToeGame, game_id)
+        assert stored_game.player1_guest_id is None
+        assert stored_game.player2_guest_id is None
+        assert stored_game.current_player == 2
 
 
 def test_quick_match_cancel_removes_waiting_game_and_frees_pool(client: TestClient):
