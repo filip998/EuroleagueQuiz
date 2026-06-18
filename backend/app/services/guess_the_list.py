@@ -1490,9 +1490,15 @@ def _slots_for_serialization(
     slots: Sequence[GuessTheListSlot],
     round_over: bool,
 ) -> list[GuessTheListSlot]:
-    if round_over or _clean_category_type(round_obj.category_type) == CATEGORY_ROSTER:
+    if _clean_category_type(round_obj.category_type) == CATEGORY_ROSTER:
         return list(slots)
+    if round_over:
+        return sorted(slots, key=_revealed_slot_order_key)
     return sorted(slots, key=lambda slot: _hidden_slot_order_key(round_obj.id, slot.id))
+
+
+def _revealed_slot_order_key(slot: GuessTheListSlot) -> tuple[bool, int, int]:
+    return (slot.rank is None, slot.rank or 0, slot.id or 0)
 
 
 def _hidden_slot_order_key(round_id: int, slot_id: int) -> str:

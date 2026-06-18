@@ -181,7 +181,7 @@ class SyntheticSingleSeasonGenerator:
             team_code=None,
             team_name=None,
             season_year=2024,
-            slots=tuple(slots),
+            slots=tuple(reversed(slots)),
         )
 
 
