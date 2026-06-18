@@ -141,6 +141,23 @@ describe("RosterGuessSetup", () => {
     );
   });
 
+  it("captions Classic create options with Season Range and Settings sections", () => {
+    renderSetup();
+    fireEvent.click(screen.getByText("Online"));
+
+    // Classic create is the default online sub-mode.
+    expect(screen.getByText("Season Range")).toBeInTheDocument();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+  });
+
+  it("captions Race friend create options with Season Range and Race length sections", () => {
+    renderSetup({ initialMode: "online", initialOnlineGameType: "race" });
+    fireEvent.click(screen.getByText("Play a Friend"));
+
+    expect(screen.getByText("Season Range")).toBeInTheDocument();
+    expect(screen.getByText("Race length")).toBeInTheDocument();
+  });
+
   it("joins a private Race friend game by code", async () => {
     joinRosterRaceGame.mockResolvedValue({ state: { id: 22, status: "active" } });
 

@@ -250,6 +250,16 @@ describe("GameSetup", () => {
     expect(screen.getByText("Turn timer")).toBeInTheDocument();
   });
 
+  it("captions the friend Create options with a Settings section", () => {
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+
+    // Default Quick Match landing has no section caption.
+    expect(screen.queryByText("Settings")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Play a Friend"));
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+  });
+
   it("prefills Online -> Play a Friend -> Join with a valid initialJoinCode", () => {
     render(
       <GameSetup

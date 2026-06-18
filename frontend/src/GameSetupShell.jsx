@@ -14,6 +14,20 @@ const CARD_CLASS =
   "bg-white rounded-2xl border border-elq-border shadow-lg shadow-black/5";
 
 /**
+ * Uppercase section caption that groups a block of option selects on a setup
+ * screen. Shared so every game's Online -> Play a Friend -> Create pane styles
+ * and spaces these headings identically (issue #133). It is a group caption,
+ * not a form label, so it renders a <p> rather than a <label>.
+ */
+export function SectionCaption({ children }) {
+  return (
+    <p className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
+      {children}
+    </p>
+  );
+}
+
+/**
  * Shared chrome for every game's pre-game setup screen: orange top bar, a
  * LogoMini Home control, a centered per-game identity header (accent icon badge
  * + title + tagline), the canonical white card wrapping the game-specific body,

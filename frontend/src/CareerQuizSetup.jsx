@@ -7,7 +7,7 @@ import {
 } from "./api";
 import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
-import GameSetupShell from "./GameSetupShell";
+import GameSetupShell, { SectionCaption } from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 import NameField from "./NameField";
 import QuickMatchPanel from "./QuickMatchPanel";
@@ -192,29 +192,32 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
                     defaultPreset={DEFAULT_CAREER_QUICK_MATCH_PRESET}
                   />
                 ) : (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm text-elq-text mb-1.5">First to</label>
-                      <select
-                        value={targetWins}
-                        onChange={(e) => setTargetWins(Number(e.target.value))}
-                        className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer"
-                      >
-                        {[1, 3, 5, 7].map((value) => (
-                          <option key={value} value={value}>{value} wins</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-elq-text mb-1.5">Wrong guesses</label>
-                      <select
-                        value={wrongGuessVisibility}
-                        onChange={(e) => setWrongGuessVisibility(e.target.value)}
-                        className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer"
-                      >
-                        <option value="private">Private</option>
-                        <option value="shared">Shared</option>
-                      </select>
+                  <div>
+                    <SectionCaption>Settings</SectionCaption>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm text-elq-text mb-1.5">First to</label>
+                        <select
+                          value={targetWins}
+                          onChange={(e) => setTargetWins(Number(e.target.value))}
+                          className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer"
+                        >
+                          {[1, 3, 5, 7].map((value) => (
+                            <option key={value} value={value}>{value} wins</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm text-elq-text mb-1.5">Wrong guesses</label>
+                        <select
+                          value={wrongGuessVisibility}
+                          onChange={(e) => setWrongGuessVisibility(e.target.value)}
+                          className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer"
+                        >
+                          <option value="private">Private</option>
+                          <option value="shared">Shared</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 )}

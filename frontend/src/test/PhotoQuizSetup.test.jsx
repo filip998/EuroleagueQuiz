@@ -206,6 +206,17 @@ describe("PhotoQuizSetup", () => {
     );
   });
 
+  it("captions the friend Create options with a Settings section, not on Quick Match", () => {
+    renderSetup();
+    fireEvent.click(screen.getByText("Online"));
+
+    // Quick Match is the default online landing and has no section caption.
+    expect(screen.queryByText("Settings")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Play a Friend"));
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+  });
+
   it("does not show the preset picker in solo mode", () => {
     renderSetup();
     expect(screen.queryByText("First to 1")).not.toBeInTheDocument();

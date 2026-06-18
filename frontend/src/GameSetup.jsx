@@ -9,7 +9,7 @@ import {
   useQuickMatchPools,
 } from "./quickMatch";
 import { resolveQuickMatchSeat } from "./quickMatchSeats";
-import GameSetupShell from "./GameSetupShell";
+import GameSetupShell, { SectionCaption } from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 import NameField from "./NameField";
 import QuickMatchPanel from "./QuickMatchPanel";
@@ -244,9 +244,7 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
 
                 {showMatchSettings && (
                   <>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
-                      Settings
-                    </label>
+                    <SectionCaption>Settings</SectionCaption>
                     <div className="grid grid-cols-2 gap-4 mb-6">
                       <div>
                         <label className="block text-sm text-elq-text mb-1.5">First to</label>
