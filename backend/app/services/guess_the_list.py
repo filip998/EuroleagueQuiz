@@ -5,7 +5,7 @@ import threading
 import weakref
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import (
     Any,
     Callable,
@@ -17,7 +17,7 @@ from typing import (
     TypeVar,
 )
 
-from sqlalchemy import func
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
 from app.game_actions import (
@@ -30,6 +30,7 @@ from app.models import (
     GamePlayerStats,
     Player,
     PlayerSeasonTeam,
+    PlayerSeasonStats,
     Season,
     Team,
     TeamSeason,
@@ -125,6 +126,29 @@ class LeaderboardMetricConfig:
     unit: str
 
 
+@dataclass(frozen=True)
+class SingleSeasonMetricConfig:
+    season_column: Any
+    game_column: Any
+    display_name: str
+    per_game_unit: str
+
+
+@dataclass(frozen=True)
+class SingleSeasonCandidate:
+    player_id: int
+    player_season_team_id: int | None
+    first_name: str | None
+    last_name: str | None
+    position: str | None
+    nationality: str | None
+    height_cm: int | None
+    jersey_number: str | None
+    games_played: int
+    total_value: Decimal
+    average_value: Decimal
+
+
 LEADERBOARD_METRIC_CONFIGS: Mapping[str, LeaderboardMetricConfig] = {
     "points": LeaderboardMetricConfig(GamePlayerStats.points, "points", "pts"),
     "rebounds": LeaderboardMetricConfig(
@@ -134,6 +158,34 @@ LEADERBOARD_METRIC_CONFIGS: Mapping[str, LeaderboardMetricConfig] = {
     ),
     "assists": LeaderboardMetricConfig(GamePlayerStats.assists, "assists", "ast"),
     "pir": LeaderboardMetricConfig(GamePlayerStats.pir, "PIR", "PIR"),
+}
+
+
+SINGLE_SEASON_METRIC_CONFIGS: Mapping[str, SingleSeasonMetricConfig] = {
+    "points": SingleSeasonMetricConfig(
+        PlayerSeasonStats.points,
+        GamePlayerStats.points,
+        "points",
+        "ppg",
+    ),
+    "rebounds": SingleSeasonMetricConfig(
+        PlayerSeasonStats.total_rebounds,
+        GamePlayerStats.total_rebounds,
+        "rebounds",
+        "rpg",
+    ),
+    "assists": SingleSeasonMetricConfig(
+        PlayerSeasonStats.assists,
+        GamePlayerStats.assists,
+        "assists",
+        "apg",
+    ),
+    "pir": SingleSeasonMetricConfig(
+        PlayerSeasonStats.pir,
+        GamePlayerStats.pir,
+        "PIR",
+        "PIR",
+    ),
 }
 
 
@@ -444,9 +496,369 @@ class AllTimeLeadersGenerator:
         )
 
 
+class SingleSeasonLeadersGenerator:
+    """Build per-game leader rounds, retrying thin season/metric candidates.
+
+    A shuffled candidate list is exhausted before failing so wide season ranges
+    do not randomly miss valid rounds. Pre-2007 seasons use box-score totals;
+    2007+ seasons use aggregated season-stat rows.
+    """
+
+    def __init__(self, metric: str | None = None):
+        if metric is not None and metric not in SINGLE_SEASON_METRIC_CONFIGS:
+            raise GuessTheListError(f"Unsupported single-season metric: {metric}")
+        self._metric = metric
+
+    def build_round(
+        self,
+        db: Session,
+        game: GuessTheListGame,
+        round_number: int,
+    ) -> RoundSpec:
+        season_rows = (
+            db.query(Season.id, Season.year)
+            .filter(
+                Season.year >= game.season_range_start,
+                Season.year <= game.season_range_end,
+            )
+            .order_by(Season.year.asc())
+            .all()
+        )
+        if not season_rows:
+            raise GuessTheListError("No seasons found in the selected range")
+
+        metrics = (self._metric,) if self._metric is not None else LEADERBOARD_METRICS
+        candidates = [
+            (season_id, season_year, metric)
+            for season_id, season_year in season_rows
+            for metric in metrics
+        ]
+        random.shuffle(candidates)
+
+        for season_id, season_year, metric in candidates:
+            metric_config = SINGLE_SEASON_METRIC_CONFIGS[metric]
+            rows = self._ranked_rows_for_candidate(
+                db,
+                season_id=season_id,
+                season_year=season_year,
+                metric_config=metric_config,
+            )
+            if len(rows) < 10:
+                continue
+
+            slots = []
+            for ranked_row in rows:
+                row = ranked_row.item
+                player_name = f"{row.first_name or ''} {row.last_name or ''}".strip()
+                display_value = _round_single_season_average(row.average_value)
+                slots.append(
+                    RoundSlotSpec(
+                        player_season_team_id=row.player_season_team_id,
+                        player_id=row.player_id,
+                        jersey_number=row.jersey_number,
+                        position=row.position,
+                        nationality=row.nationality,
+                        height_cm=row.height_cm,
+                        player_name=player_name or "Unknown",
+                        rank=ranked_row.rank,
+                        stat_value=float(display_value),
+                        stat_value_label=(
+                            f"{display_value:.1f} {metric_config.per_game_unit}"
+                        ),
+                    )
+                )
+
+            return RoundSpec(
+                category_type=CATEGORY_SINGLE_SEASON,
+                metric=metric,
+                scope_label=(
+                    f"{season_year} {metric_config.display_name} per-game leaders"
+                ),
+                team_id=None,
+                season_id=season_id,
+                team_code=None,
+                team_name=None,
+                season_year=season_year,
+                slots=tuple(slots),
+            )
+
+        raise GuessTheListError(
+            "No single-season leaderboard with at least 10 qualified players "
+            "was found in the selected range"
+        )
+
+    def _ranked_rows_for_candidate(
+        self,
+        db: Session,
+        *,
+        season_id: int,
+        season_year: int,
+        metric_config: SingleSeasonMetricConfig,
+    ) -> list[RankedBoundaryItem[SingleSeasonCandidate]]:
+        team_game_counts = _team_game_counts_for_season(db, season_id)
+        if not team_game_counts:
+            return []
+
+        if season_year <= 2006:
+            rows = _single_season_rows_from_game_player_stats(
+                db,
+                season_id=season_id,
+                metric_config=metric_config,
+                team_game_counts=team_game_counts,
+            )
+        else:
+            rows = _single_season_rows_from_player_season_stats(
+                db,
+                season_id=season_id,
+                metric_config=metric_config,
+                team_game_counts=team_game_counts,
+            )
+
+        if len(rows) < 10:
+            return []
+
+        sorted_rows = sorted(
+            rows,
+            key=lambda row: (
+                -row.average_value,
+                (row.last_name or "").casefold(),
+                (row.first_name or "").casefold(),
+                row.player_id,
+            ),
+        )
+        return ranked_items_with_boundary_ties(
+            sorted_rows,
+            limit=10,
+            stat_value=lambda row: row.average_value,
+        )
+
+
+def _team_game_counts_for_season(db: Session, season_id: int) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    for team_id, total in (
+        db.query(Game.home_team_id, func.count(Game.id))
+        .filter(Game.season_id == season_id)
+        .group_by(Game.home_team_id)
+        .all()
+    ):
+        counts[team_id] = counts.get(team_id, 0) + int(total or 0)
+    for team_id, total in (
+        db.query(Game.away_team_id, func.count(Game.id))
+        .filter(Game.season_id == season_id)
+        .group_by(Game.away_team_id)
+        .all()
+    ):
+        counts[team_id] = counts.get(team_id, 0) + int(total or 0)
+    return counts
+
+
+def _single_season_rows_from_player_season_stats(
+    db: Session,
+    *,
+    season_id: int,
+    metric_config: SingleSeasonMetricConfig,
+    team_game_counts: Mapping[int, int],
+) -> list[SingleSeasonCandidate]:
+    appearance_totals = _single_season_appearance_totals_subquery(
+        db,
+        season_id,
+        metric_config,
+    )
+    metric_total = func.coalesce(
+        appearance_totals.c.total_value,
+        metric_config.season_column,
+        0,
+    )
+    games_played = func.coalesce(
+        appearance_totals.c.appearance_games,
+        PlayerSeasonStats.games_played,
+    )
+    rows = (
+        db.query(
+            PlayerSeasonTeam.id.label("player_season_team_id"),
+            PlayerSeasonTeam.team_id,
+            PlayerSeasonTeam.player_id,
+            PlayerSeasonTeam.jersey_number,
+            Player.first_name,
+            Player.last_name,
+            Player.position,
+            Player.nationality,
+            Player.height_cm,
+            games_played.label("games_played"),
+            metric_total.label("total_value"),
+        )
+        .select_from(PlayerSeasonStats)
+        .join(
+            PlayerSeasonTeam,
+            PlayerSeasonStats.player_season_team_id == PlayerSeasonTeam.id,
+        )
+        .join(Player, Player.id == PlayerSeasonTeam.player_id)
+        .outerjoin(
+            appearance_totals,
+            and_(
+                appearance_totals.c.player_id == PlayerSeasonTeam.player_id,
+                appearance_totals.c.team_id == PlayerSeasonTeam.team_id,
+            ),
+        )
+        .filter(PlayerSeasonTeam.season_id == season_id)
+        .filter(games_played > 0)
+        .all()
+    )
+    return _qualified_unique_single_season_rows(rows, team_game_counts)
+
+
+def _single_season_rows_from_game_player_stats(
+    db: Session,
+    *,
+    season_id: int,
+    metric_config: SingleSeasonMetricConfig,
+    team_game_counts: Mapping[int, int],
+) -> list[SingleSeasonCandidate]:
+    appearance_condition = _game_player_stats_counts_as_appearance()
+    metric_total = func.coalesce(
+        func.sum(case((appearance_condition, metric_config.game_column), else_=0)),
+        0,
+    )
+    games_played = func.count(
+        func.distinct(case((appearance_condition, GamePlayerStats.game_id)))
+    )
+    rows = (
+        db.query(
+            PlayerSeasonTeam.id.label("player_season_team_id"),
+            GamePlayerStats.team_id.label("team_id"),
+            GamePlayerStats.player_id.label("player_id"),
+            PlayerSeasonTeam.jersey_number,
+            Player.first_name,
+            Player.last_name,
+            Player.position,
+            Player.nationality,
+            Player.height_cm,
+            games_played.label("games_played"),
+            metric_total.label("total_value"),
+        )
+        .select_from(GamePlayerStats)
+        .join(Game, Game.id == GamePlayerStats.game_id)
+        .join(Player, Player.id == GamePlayerStats.player_id)
+        .outerjoin(
+            PlayerSeasonTeam,
+            and_(
+                PlayerSeasonTeam.player_id == GamePlayerStats.player_id,
+                PlayerSeasonTeam.team_id == GamePlayerStats.team_id,
+                PlayerSeasonTeam.season_id == Game.season_id,
+            ),
+        )
+        .filter(Game.season_id == season_id)
+        .group_by(
+            PlayerSeasonTeam.id,
+            GamePlayerStats.team_id,
+            GamePlayerStats.player_id,
+            PlayerSeasonTeam.jersey_number,
+            Player.first_name,
+            Player.last_name,
+            Player.position,
+            Player.nationality,
+            Player.height_cm,
+        )
+        .having(games_played > 0)
+        .all()
+    )
+    return _qualified_unique_single_season_rows(rows, team_game_counts)
+
+
+def _single_season_appearance_totals_subquery(
+    db: Session,
+    season_id: int,
+    metric_config: SingleSeasonMetricConfig,
+):
+    appearance_condition = _game_player_stats_counts_as_appearance()
+    return (
+        db.query(
+            GamePlayerStats.player_id.label("player_id"),
+            GamePlayerStats.team_id.label("team_id"),
+            func.count(
+                func.distinct(case((appearance_condition, GamePlayerStats.game_id)))
+            ).label("appearance_games"),
+            func.coalesce(
+                func.sum(case((appearance_condition, metric_config.game_column), else_=0)),
+                0,
+            ).label("total_value"),
+        )
+        .join(Game, Game.id == GamePlayerStats.game_id)
+        .filter(Game.season_id == season_id)
+        .group_by(GamePlayerStats.player_id, GamePlayerStats.team_id)
+        .subquery()
+    )
+
+
+def _game_player_stats_counts_as_appearance():
+    return func.upper(func.coalesce(GamePlayerStats.minutes, "")) != "DNP"
+
+
+def _qualified_unique_single_season_rows(
+    rows: Sequence[Any],
+    team_game_counts: Mapping[int, int],
+) -> list[SingleSeasonCandidate]:
+    by_player_id: dict[int, SingleSeasonCandidate] = {}
+    for row in rows:
+        games_played = int(row.games_played or 0)
+        team_game_count = int(team_game_counts.get(row.team_id, 0))
+        total_value = Decimal(int(row.total_value or 0))
+        if (
+            games_played <= 0
+            or team_game_count <= 0
+            or games_played * 2 < team_game_count
+            or total_value <= 0
+        ):
+            continue
+
+        candidate = SingleSeasonCandidate(
+            player_id=row.player_id,
+            player_season_team_id=row.player_season_team_id,
+            first_name=row.first_name,
+            last_name=row.last_name,
+            position=row.position,
+            nationality=row.nationality,
+            height_cm=row.height_cm,
+            jersey_number=row.jersey_number,
+            games_played=games_played,
+            total_value=total_value,
+            average_value=total_value / Decimal(games_played),
+        )
+        previous = by_player_id.get(candidate.player_id)
+        if previous is None or _single_season_candidate_is_better(
+            candidate,
+            previous,
+        ):
+            by_player_id[candidate.player_id] = candidate
+
+    return list(by_player_id.values())
+
+
+def _single_season_candidate_is_better(
+    candidate: SingleSeasonCandidate,
+    previous: SingleSeasonCandidate,
+) -> bool:
+    return (
+        candidate.average_value,
+        candidate.games_played,
+        candidate.total_value,
+        -(candidate.player_season_team_id or 0),
+    ) > (
+        previous.average_value,
+        previous.games_played,
+        previous.total_value,
+        -(previous.player_season_team_id or 0),
+    )
+
+
+def _round_single_season_average(value: int | float | Decimal) -> Decimal:
+    return Decimal(str(value)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+
+
 ROUND_GENERATOR_REGISTRY: dict[str, GuessTheListRoundGenerator] = {
     CATEGORY_ALL_TIME: AllTimeLeadersGenerator(),
     CATEGORY_ROSTER: RosterGenerator(),
+    CATEGORY_SINGLE_SEASON: SingleSeasonLeadersGenerator(),
 }
 
 
