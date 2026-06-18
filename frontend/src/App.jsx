@@ -11,7 +11,7 @@ import CareerQuizSetup from "./CareerQuizSetup";
 import CareerQuizBoard from "./CareerQuizBoard";
 import PhotoQuizSetup from "./PhotoQuizSetup";
 import PhotoQuizBoard from "./PhotoQuizBoard";
-import HomeQuickMatchCta from "./HomeQuickMatchCta";
+import HomeQuickMatchCta, { HomePlayCta } from "./HomeQuickMatchCta";
 import { LogoFull } from "./Logo";
 import { getCareerGame, getGame, getPhotoGame, getRosterGame } from "./api";
 import { parseJoinCode } from "./inviteLink";
@@ -108,24 +108,24 @@ function HomePage() {
               <HomeQuickMatchCta to="/roster?quick=1" />
             </div>
 
-            {/* Higher or Lower card */}
-            <Link
-              to="/higherlower"
-              className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] active:scale-[0.98]"
-            >
-              <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center mb-4 group-hover:bg-emerald-200 transition-colors">
-                <svg className="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
-                </svg>
-              </div>
-              <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">HIGHER OR LOWER</h2>
-              <p className="text-sm text-elq-muted leading-relaxed">
-                Who has the bigger stat? Guess right to build your streak. One mistake and it's over!
-              </p>
-              <div className="mt-4 text-xs font-semibold text-elq-orange opacity-0 group-hover:opacity-100 transition-opacity">
-                PLAY →
-              </div>
-            </Link>
+            {/* Higher or Lower card — single-player, so the persistent bottom CTA
+                is a Play button (not Quick Match), keeping the grid uniform. Main
+                link plus a sibling Play link (never nested anchors); both land on
+                the Higher or Lower setup screen. */}
+            <div className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] flex flex-col">
+              <Link to="/higherlower" className="block text-left flex-1">
+                <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center mb-4 group-hover:bg-emerald-200 transition-colors">
+                  <svg className="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
+                  </svg>
+                </div>
+                <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">HIGHER OR LOWER</h2>
+                <p className="text-sm text-elq-muted leading-relaxed">
+                  Who has the bigger stat? Guess right to build your streak. One mistake and it's over!
+                </p>
+              </Link>
+              <HomePlayCta to="/higherlower" />
+            </div>
 
             {/* Career Quiz card */}
             <div className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] flex flex-col">

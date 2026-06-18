@@ -6,23 +6,47 @@ const BOLT_ICON = (
   </svg>
 );
 
+const PLAY_ICON = (
+  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+    <path d="M8 5v14l11-7z" />
+  </svg>
+);
+
 /**
- * Reusable home-card call-to-action that jumps straight into a game's online
- * Quick Match. Game-agnostic: pass the setup route in `to` (the setup screen is
- * responsible for defaulting to Quick Match) and an optional `label`. Rendered as
- * its own `<Link>` so it can sit beside a card's main link without nesting
- * anchors.
+ * Shared persistent home-card call-to-action button. Rendered as its own `<Link>`
+ * so it can sit beside a card's main link without nesting anchors. Game-agnostic:
+ * pass the destination route in `to`, plus a `label`, optional `icon`, and a
+ * `testid`. The orange button styling is the single source of truth for every
+ * home-card CTA so the grid stays uniform.
  */
-export default function HomeQuickMatchCta({ to, label = "Quick Match" }) {
+export function HomeCardCta({ to, label, icon = null, testid }) {
   return (
     <Link
       to={to}
-      data-testid="home-quick-match-cta"
+      data-testid={testid}
       onClick={(e) => e.stopPropagation()}
       className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-elq-orange px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white transition-colors hover:bg-elq-orange-dark"
     >
-      {BOLT_ICON}
+      {icon}
       {label}
     </Link>
   );
+}
+
+/**
+ * Home-card CTA that jumps straight into a game's online Quick Match. Pass the
+ * setup route in `to` (the setup screen is responsible for defaulting to Quick
+ * Match) and an optional `label`.
+ */
+export default function HomeQuickMatchCta({ to, label = "Quick Match" }) {
+  return <HomeCardCta to={to} label={label} icon={BOLT_ICON} testid="home-quick-match-cta" />;
+}
+
+/**
+ * Home-card CTA for single-player games (e.g. Higher or Lower) that jump straight
+ * into play. Mirrors the Quick Match button's slot/style with a Play affordance so
+ * every home card has the same always-visible primary action.
+ */
+export function HomePlayCta({ to, label = "Play" }) {
+  return <HomeCardCta to={to} label={label} icon={PLAY_ICON} testid="home-play-cta" />;
 }

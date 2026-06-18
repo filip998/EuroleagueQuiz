@@ -129,6 +129,21 @@ describe("App", () => {
     expect(screen.getByTestId("hl-setup")).toBeInTheDocument();
   });
 
+  it("renders a persistent Play CTA on the Higher or Lower card that opens setup", () => {
+    render(<MemoryRouter><App /></MemoryRouter>);
+    const cta = screen.getByTestId("home-play-cta");
+    // Persistent: present in the DOM without any hover interaction...
+    expect(cta).toBeInTheDocument();
+    expect(cta).toHaveAttribute("href", "/higherlower");
+    expect(cta).toHaveTextContent("Play");
+    // ...and rendered as the shared orange button, not the old hover-only text.
+    expect(cta.className).toContain("bg-elq-orange");
+    expect(cta.className).not.toContain("opacity-0");
+    expect(cta.className).not.toContain("group-hover:opacity-100");
+    fireEvent.click(cta);
+    expect(screen.getByTestId("hl-setup")).toBeInTheDocument();
+  });
+
   it("navigates to Career Quiz setup when clicking the card", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     fireEvent.click(screen.getByText("CAREER QUIZ"));
