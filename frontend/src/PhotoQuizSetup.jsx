@@ -7,7 +7,6 @@ import {
 } from "./api";
 import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
-import { formatPresence } from "./quickMatch";
 import {
   PHOTO_QUICK_MATCH_PRESETS,
   DEFAULT_PHOTO_QUICK_MATCH_PRESET,
@@ -18,6 +17,7 @@ import { resolveQuickMatchSeat } from "./quickMatchSeats";
 import GameSetupShell from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 import NameField from "./NameField";
+import QuickMatchPanel from "./QuickMatchPanel";
 
 const HEADER_ICON = (
   <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -42,12 +42,12 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
   const [onlineSub, setOnlineSub] = useState("quick");
   // Friend sub-mode: "create" | "join".
   const [friendSub, setFriendSub] = useState("create");
-  const [preset, setPreset] = useState(DEFAULT_PHOTO_QUICK_MATCH_PRESET);
   const [playerName, setPlayerName] = useClerkPrefilledName(getDisplayName);
   const [joinCode, setJoinCode] = useState("");
   const [targetWins, setTargetWins] = useState(3);
   const [wrongGuessVisibility, setWrongGuessVisibility] = useState("private");
   const [loading, setLoading] = useState(false);
+  const [pendingPreset, setPendingPreset] = useState(null);
   const [error, setError] = useState("");
   const inFlightRef = useRef(false);
 
@@ -66,24 +66,40 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
     setNickname(value);
   }
 
+  async function handleQuickPick(preset) {
+    // Synchronous guard against rapid double taps creating two games.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setError("");
+    setLoading(true);
+    setPendingPreset(preset);
+    try {
+      const game = photoGameStateFromResponse(
+        await photoQuickMatch({ preset, player_name: playerName || null })
+      );
+      const playerNumber = resolveQuickMatchSeat(photoSeatKey(game.id), game.status);
+      onGameCreated(game, { playerNumber, isOnline: true });
+    } catch (err) {
+      setError(err.message || "Could not start Photo Quiz");
+    } finally {
+      inFlightRef.current = false;
+      setLoading(false);
+      setPendingPreset(null);
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    // Quick Match is one-tap via the pool cards, never the form submit.
+    if (isQuick || inFlightRef.current) return;
     const code = joinCode.trim().toUpperCase();
     if (isJoin && code.length !== 6) return;
-    // Synchronous guard against rapid double submits creating two games.
-    if (inFlightRef.current) return;
     inFlightRef.current = true;
     setLoading(true);
     try {
       if (mode === "solo") {
         onSoloRound(await createPhotoSoloRound([]));
-      } else if (isQuick) {
-        const game = photoGameStateFromResponse(
-          await photoQuickMatch({ preset, player_name: playerName || null })
-        );
-        const playerNumber = resolveQuickMatchSeat(photoSeatKey(game.id), game.status);
-        onGameCreated(game, { playerNumber, isOnline: true });
       } else if (isJoin) {
         const game = photoGameStateFromResponse(
           await joinPhotoGame(code, playerName || "Player 2")
@@ -108,14 +124,8 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
   }
 
   const submitDisabled = loading || (isJoin && joinCode.trim().length !== 6);
-  const ctaLabel = !isOnline
-    ? "Start Game"
-    : isQuick
-      ? "Find Match"
-      : isJoin
-        ? "Join Game"
-        : "Create Online Game";
-  const loadingLabel = isQuick ? "Finding match…" : isJoin ? "Joining..." : "Starting...";
+  const ctaLabel = !isOnline ? "Start Game" : isJoin ? "Join Game" : "Create Online Game";
+  const loadingLabel = isJoin ? "Joining..." : "Starting...";
 
   return (
     <GameSetupShell
@@ -185,39 +195,14 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
                 />
 
                 {isQuick && (
-                  <div className="mb-6">
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
-                      Pick a pool
-                    </label>
-                    <div className="space-y-2.5">
-                      {PHOTO_QUICK_MATCH_PRESETS.map((p) => {
-                        const active = preset === p.key;
-                        return (
-                          <button
-                            key={p.key}
-                            type="button"
-                            onClick={() => setPreset(p.key)}
-                            aria-pressed={active}
-                            className={`w-full flex items-center justify-between gap-3 p-3.5 rounded-xl border-2 text-left transition-all ${
-                              active
-                                ? "border-elq-orange bg-elq-orange/5"
-                                : "border-elq-border hover:border-gray-300"
-                            }`}
-                          >
-                            <div>
-                              <div className={`font-semibold text-sm ${active ? "text-elq-orange" : "text-elq-text"}`}>
-                                {p.label}
-                              </div>
-                              <div className="text-[11px] text-elq-muted mt-0.5">{p.detail}</div>
-                            </div>
-                            <div className="text-[11px] text-elq-muted text-right whitespace-nowrap" data-testid={`presence-${p.key}`}>
-                              {formatPresence(pools?.[p.key])}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  <QuickMatchPanel
+                    presets={PHOTO_QUICK_MATCH_PRESETS}
+                    pools={pools}
+                    onPick={handleQuickPick}
+                    disabled={loading}
+                    pendingPreset={pendingPreset}
+                    defaultPreset={DEFAULT_PHOTO_QUICK_MATCH_PRESET}
+                  />
                 )}
 
                 {isCreate && (
@@ -252,13 +237,15 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
           </>
         )}
 
-        <button
-          type="submit"
-          disabled={submitDisabled}
-          className="w-full py-3.5 px-6 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg tracking-wide"
-        >
-          {loading ? loadingLabel : ctaLabel}
-        </button>
+        {!isQuick && (
+          <button
+            type="submit"
+            disabled={submitDisabled}
+            className="w-full py-3.5 px-6 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg tracking-wide"
+          >
+            {loading ? loadingLabel : ctaLabel}
+          </button>
+        )}
       </form>
     </GameSetupShell>
   );

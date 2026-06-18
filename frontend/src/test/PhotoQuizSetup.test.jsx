@@ -83,8 +83,9 @@ describe("PhotoQuizSetup", () => {
 
   it("starts on the Quick Match pool grid when initialMode is 'online'", () => {
     renderSetup({ initialMode: "online" });
-    expect(screen.getByText("Find Match")).toBeInTheDocument();
     expect(screen.getByText("First to 1")).toBeInTheDocument();
+    expect(screen.queryByText("Find Match")).not.toBeInTheDocument();
+    expect(screen.queryByText("Create Online Game")).not.toBeInTheDocument();
     expect(screen.queryByText("Start Game")).not.toBeInTheDocument();
   });
 
@@ -108,7 +109,8 @@ describe("PhotoQuizSetup", () => {
     expect(screen.getByText("First to 1")).toBeInTheDocument();
     expect(screen.getByText("First to 3")).toBeInTheDocument();
     expect(screen.getByText("First to 5")).toBeInTheDocument();
-    expect(screen.getByText("Find Match")).toBeInTheDocument();
+    expect(screen.getByText("Recommended")).toBeInTheDocument();
+    expect(screen.queryByText("Find Match")).not.toBeInTheDocument();
   });
 
   it("shows live presence counts on each preset", () => {
@@ -133,7 +135,7 @@ describe("PhotoQuizSetup", () => {
     fireEvent.change(screen.getByPlaceholderText("Your name"), {
       target: { value: "Ace" },
     });
-    fireEvent.click(screen.getByText("Find Match"));
+    fireEvent.click(screen.getByTestId("quick-pick-standard"));
 
     await waitFor(() => expect(mockOnGameCreated).toHaveBeenCalled());
     expect(photoQuickMatch).toHaveBeenCalledWith({
@@ -153,8 +155,7 @@ describe("PhotoQuizSetup", () => {
 
     renderSetup();
     fireEvent.click(screen.getByText("Online"));
-    fireEvent.click(screen.getByText("First to 1"));
-    fireEvent.click(screen.getByText("Find Match"));
+    fireEvent.click(screen.getByTestId("quick-pick-quick"));
 
     await waitFor(() => expect(mockOnGameCreated).toHaveBeenCalled());
     expect(photoQuickMatch).toHaveBeenCalledWith(
@@ -208,6 +209,6 @@ describe("PhotoQuizSetup", () => {
   it("does not show the preset picker in solo mode", () => {
     renderSetup();
     expect(screen.queryByText("First to 1")).not.toBeInTheDocument();
-    expect(screen.queryByText("Find Match")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("quick-pick-quick")).not.toBeInTheDocument();
   });
 });
