@@ -26,6 +26,7 @@ from app.models import (
     Season,
     Team,
 )
+from app.services.timing import set_timing_metric, timed_phase
 
 SUPPORTED_MODES = {"single_player", "local_two_player", "online_friend"}
 LOCAL_PLAY_MODES = {"single_player", "local_two_player"}
@@ -552,6 +553,13 @@ def _player_matches_cell(
     season (e.g., 'Real Madrid × 2025/26' requires the player on Real Madrid
     specifically in 2025/26).
     """
+    with timed_phase("move.player_matches_cell"):
+        return _player_matches_cell_uncached(db, player_id, row_axis, col_axis)
+
+
+def _player_matches_cell_uncached(
+    db: Session, player_id: int, row_axis: dict, col_axis: dict,
+) -> bool:
     season_axis = row_axis if row_axis["axis_type"] == "season" else (
         col_axis if col_axis["axis_type"] == "season" else None
     )
@@ -1405,15 +1413,16 @@ def _get_sample_answers(
     count: int = 3, exclude_player_id: int | None = None,
 ) -> list[str]:
     """Get up to `count` random valid player names for a cell."""
-    row_axis, col_axis = _cell_axes(round_obj, row_index, col_index)
-    valid_ids = list(_get_player_set_for_cell(db, row_axis, col_axis))
-    if exclude_player_id:
-        valid_ids = [pid for pid in valid_ids if pid != exclude_player_id]
-    if not valid_ids:
-        return []
-    sample_ids = random.sample(valid_ids, min(count, len(valid_ids)))
-    players = db.query(Player).filter(Player.id.in_(sample_ids)).all()
-    return [f"{p.first_name} {p.last_name}" for p in players]
+    with timed_phase("completed_round.sample_answers"):
+        row_axis, col_axis = _cell_axes(round_obj, row_index, col_index)
+        valid_ids = list(_get_player_set_for_cell(db, row_axis, col_axis))
+        if exclude_player_id:
+            valid_ids = [pid for pid in valid_ids if pid != exclude_player_id]
+        if not valid_ids:
+            return []
+        sample_ids = random.sample(valid_ids, min(count, len(valid_ids)))
+        players = db.query(Player).filter(Player.id.in_(sample_ids)).all()
+        return [f"{p.first_name} {p.last_name}" for p in players]
 
 
 def _cell_team_ids(round_obj: QuizTicTacToeRound, row_index: int, col_index: int) -> tuple[int, int]:
@@ -1495,10 +1504,11 @@ def _select_board_axes(db: Session) -> list[dict]:
     Each dict has: axis_type, value, display_label.
     """
     registry = AXIS_REGISTRY
-    candidates_by_type = {
-        axis_type: definition.candidate_provider(db)
-        for axis_type, definition in registry.items()
-    }
+    with timed_phase("board.reference_data"):
+        candidates_by_type = {
+            axis_type: definition.candidate_provider(db)
+            for axis_type, definition in registry.items()
+        }
     team_candidates = candidates_by_type.get("team", [])
     if len(team_candidates) < 6:
         raise TicTacToeConflictError(
@@ -1569,39 +1579,44 @@ def _select_board_axes(db: Session) -> list[dict]:
         return random.choice(available)
 
     max_attempts = 500
-    for _ in range(max_attempts):
-        axes: list[dict] = []
-        used_values: set[tuple[str, str]] = set()
-        for _ in range(6):
-            chosen_type = random.choices(axis_types, weights=axis_probs, k=1)[0]
-            available = _available_candidates(chosen_type, axes, used_values)
+    attempts = 0
+    try:
+        with timed_phase("board.axis_selection"):
+            for attempts in range(1, max_attempts + 1):
+                axes: list[dict] = []
+                used_values: set[tuple[str, str]] = set()
+                for _ in range(6):
+                    chosen_type = random.choices(axis_types, weights=axis_probs, k=1)[0]
+                    available = _available_candidates(chosen_type, axes, used_values)
 
-            if not available:
-                available = _available_candidates("team", axes, used_values)
-                chosen_type = "team"
-                if not available:
-                    break
+                    if not available:
+                        available = _available_candidates("team", axes, used_values)
+                        chosen_type = "team"
+                        if not available:
+                            break
 
-            axis = _pick_candidate(chosen_type, available)
-            used_values.add((axis["axis_type"], axis["value"]))
-            axes.append(axis)
+                    axis = _pick_candidate(chosen_type, available)
+                    used_values.add((axis["axis_type"], axis["value"]))
+                    axes.append(axis)
 
-        if len(axes) != 6:
-            continue
+                if len(axes) != 6:
+                    continue
 
-        row_axes = axes[:3]
-        col_axes = axes[3:]
-        valid = True
-        for ra in row_axes:
-            for ca in col_axes:
-                if not _cell_player_set(ra, ca):
-                    valid = False
-                    break
-            if not valid:
-                break
+                row_axes = axes[:3]
+                col_axes = axes[3:]
+                valid = True
+                for ra in row_axes:
+                    for ca in col_axes:
+                        if not _cell_player_set(ra, ca):
+                            valid = False
+                            break
+                    if not valid:
+                        break
 
-        if valid:
-            return axes
+                if valid:
+                    return axes
+    finally:
+        set_timing_metric("board.axis_selection.attempts", attempts)
 
     raise TicTacToeConflictError(
         "Unable to generate a valid 3x3 board with axis intersections"

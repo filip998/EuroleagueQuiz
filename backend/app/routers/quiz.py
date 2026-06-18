@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import func
 
+from app.config import settings
 from app.database import get_db
 from app.game_actions import (
     GameActionError,
@@ -48,11 +49,16 @@ from app.services.matchmaking_adapters import (
 )
 from app.services.realtime import OnlineGameRealtimeModule
 from app.services.realtime_adapters import TicTacToeRealtimeAdapter
+from app.services.timing import activate_timing, timed_phase
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 tictactoe_realtime = OnlineGameRealtimeModule(TicTacToeRealtimeAdapter())
 tictactoe_matchmaking = TicTacToeMatchmakingAdapter()
+_TIMED_TICTACTOE_HTTP_ACTIONS = {
+    GameActionName.CREATE.value,
+    GameActionName.MOVE.value,
+}
 
 
 async def _tictactoe_http_action(
@@ -63,16 +69,61 @@ async def _tictactoe_http_action(
     game_id: int | None = None,
     player: int | None = None,
 ):
-    try:
-        return await tictactoe_realtime.game_actions.http_action(
-            db=db,
-            action=action,
-            payload=payload,
-            game_id=game_id,
-            player=player,
-        )
-    except HttpGameActionRejected as exc:
-        return JSONResponse(status_code=exc.status_code, content=exc.envelope)
+    action_value = action.value
+    timing_enabled = _tictactoe_timing_enabled(action_value)
+    with activate_timing(
+        "tictactoe.http",
+        enabled=timing_enabled,
+        attributes={
+            "game": "tictactoe",
+            "action": action_value,
+            "source": "http",
+        },
+    ) as recorder:
+        status_code = 200
+        try:
+            content = await tictactoe_realtime.game_actions.http_action(
+                db=db,
+                action=action,
+                payload=payload,
+                game_id=game_id,
+                player=player,
+            )
+        except HttpGameActionRejected as exc:
+            status_code = exc.status_code
+            content = exc.envelope
+
+        if recorder is not None:
+            recorder.set_metric("http.status_code", status_code)
+
+        with timed_phase("response.serialization"):
+            response = JSONResponse(status_code=status_code, content=content)
+
+        if recorder is not None:
+            server_timing = (
+                recorder.server_timing_header()
+                if settings.tictactoe_timing_enabled
+                else ""
+            )
+            if server_timing:
+                response.headers["Server-Timing"] = server_timing
+            _log_tictactoe_timing(recorder)
+
+        return response
+
+
+def _tictactoe_timing_enabled(action: str) -> bool:
+    if action not in _TIMED_TICTACTOE_HTTP_ACTIONS:
+        return False
+    return settings.tictactoe_timing_enabled or logger.isEnabledFor(logging.DEBUG)
+
+
+def _log_tictactoe_timing(recorder) -> None:
+    summary = recorder.summary()
+    if settings.tictactoe_timing_enabled:
+        logger.info("tictactoe latency timing", extra={"tictactoe_timing": summary})
+    else:
+        logger.debug("tictactoe latency timing", extra={"tictactoe_timing": summary})
 
 
 def _game_action_error_response(exc: GameActionError) -> JSONResponse:

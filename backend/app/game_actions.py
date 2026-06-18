@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.schemas.realtime import error_message
+from app.services.timing import timed_phase
 
 
 class GameActionCode(StrEnum):
@@ -78,7 +79,8 @@ def run_game_action(db: Session, action: Callable[[], T]) -> T:
         if result is GAME_ACTION_NOOP:
             db.rollback()
             return result
-        db.commit()
+        with timed_phase("db.commit"):
+            db.commit()
         return result
     except Exception:
         db.rollback()

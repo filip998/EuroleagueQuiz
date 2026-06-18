@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import asyncio
+import logging
 import pytest
 import random
 from datetime import date
@@ -704,6 +705,137 @@ def test_create_tictactoe_game_has_board(client: TestClient):
     assert len(payload["round"]["rows"]) == 3
     assert len(payload["round"]["columns"]) == 3
     assert len(payload["round"]["cells"]) == 9
+
+
+def test_tictactoe_timing_disabled_by_default_has_no_server_timing_header(
+    client: TestClient,
+):
+    response = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "local_two_player",
+            "target_wins": 2,
+            "timer_mode": "15s",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("server-timing") is None
+
+
+def test_tictactoe_debug_logging_does_not_emit_server_timing_without_flag(
+    client: TestClient,
+    caplog,
+):
+    with caplog.at_level(logging.DEBUG, logger="app.routers.quiz"):
+        response = client.post(
+            "/quiz/tictactoe/games",
+            json={
+                "mode": "local_two_player",
+                "target_wins": 2,
+                "timer_mode": "15s",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers.get("server-timing") is None
+    assert any(
+        record.tictactoe_timing["attributes"]["action"] == "create"
+        for record in caplog.records
+        if hasattr(record, "tictactoe_timing")
+    )
+
+
+def test_tictactoe_create_timing_header_covers_board_commit_and_serialization(
+    client: TestClient,
+    monkeypatch,
+):
+    monkeypatch.setattr(quiz_router.settings, "tictactoe_timing_enabled", True)
+
+    response = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "local_two_player",
+            "target_wins": 2,
+            "timer_mode": "15s",
+        },
+    )
+
+    assert response.status_code == 200
+    header = response.headers["server-timing"]
+    assert "board_reference_data;dur=" in header
+    assert "board_axis_selection;dur=" in header
+    assert "board_axis_selection_attempts" in header
+    assert "db_commit;dur=" in header
+    assert "response_state_serialization;dur=" in header
+    assert "response_serialization;dur=" in header
+
+
+def test_tictactoe_move_timing_header_covers_validation_and_completed_answers(
+    client: TestClient,
+    monkeypatch,
+):
+    monkeypatch.setattr(quiz_router.settings, "tictactoe_timing_enabled", True)
+    game = _create_ttt_game(client, target_wins=2)
+    game_id = game["id"]
+    final_response = None
+
+    for row_index, col_index in ((0, 0), (1, 1), (2, 2)):
+        latest_state = client.get(f"/quiz/tictactoe/games/{game_id}").json()
+        cell = _find_cell(latest_state, row_index, col_index)
+        player_id = _valid_player_for_cell(client, cell)
+        final_response = client.post(
+            f"/quiz/tictactoe/games/{game_id}/moves",
+            json={
+                "row_index": row_index,
+                "col_index": col_index,
+                "player_id": player_id,
+            },
+        )
+        assert final_response.status_code == 200
+        result = _action_payload(final_response)
+        if row_index != 2:
+            bad_cell = _find_cell(result["game"], 0, 1)
+            bad_player = _invalid_player_for_cell(client, bad_cell)
+            if bad_player is not None:
+                incorrect = client.post(
+                    f"/quiz/tictactoe/games/{game_id}/moves",
+                    json={
+                        "row_index": 0,
+                        "col_index": 1,
+                        "player_id": bad_player,
+                    },
+                )
+                assert incorrect.status_code == 200
+
+    assert final_response is not None
+    payload = _action_payload(final_response)
+    assert payload["result"] == "round_won"
+    header = final_response.headers["server-timing"]
+    assert "move_player_matches_cell;dur=" in header
+    assert "completed_round_sample_answers;dur=" in header
+    assert "db_commit;dur=" in header
+    assert "response_completed_round_serialization;dur=" in header
+    assert "response_serialization;dur=" in header
+
+
+def test_tictactoe_timing_header_is_attached_to_domain_errors(
+    client: TestClient,
+    monkeypatch,
+):
+    monkeypatch.setattr(quiz_router.settings, "tictactoe_timing_enabled", True)
+
+    response = client.post(
+        "/quiz/tictactoe/games/999/moves",
+        json={
+            "row_index": 0,
+            "col_index": 0,
+            "player_id": 1,
+        },
+    )
+
+    assert response.status_code == 404
+    assert "response_serialization;dur=" in response.headers["server-timing"]
 
 
 def test_quick_match_first_request_waits_with_public_preset(client: TestClient):

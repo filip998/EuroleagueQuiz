@@ -4,8 +4,9 @@ import { getAuthToken } from "./authToken";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const WS_BASE = API_BASE.replace(/^http/, "ws");
+let tictactoeTimingCounter = 0;
 
-async function request(method, path, body = null, { authToken } = {}) {
+async function request(method, path, body = null, { authToken, clientTiming } = {}) {
   const headers = { "Content-Type": "application/json" };
   // Additive auth: attach the Clerk session token only when signed in. Signed-out
   // (anonymous) play registers no provider, so no Authorization header is sent.
@@ -16,7 +17,13 @@ async function request(method, path, body = null, { authToken } = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(`${API_BASE}${path}`, opts);
+  clientTiming?.markFetchStart();
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, opts);
+  } finally {
+    clientTiming?.markFetchEnd();
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     const error = new Error(err.payload?.message || err.detail || `HTTP ${res.status}`);
@@ -29,8 +36,71 @@ async function request(method, path, body = null, { authToken } = {}) {
   return res.json();
 }
 
-async function actionRequest(method, path, body = null) {
-  return parseRealtimeMessage(await request(method, path, body));
+async function actionRequest(method, path, body = null, options = {}) {
+  return parseRealtimeMessage(await request(method, path, body, options));
+}
+
+async function withTicTacToeClientTiming(action, run) {
+  const timing = createTicTacToeClientTiming(action);
+  try {
+    return await run(timing);
+  } finally {
+    timing?.markPaint();
+  }
+}
+
+function createTicTacToeClientTiming(action) {
+  if (
+    !import.meta.env.DEV ||
+    typeof performance === "undefined" ||
+    typeof performance.mark !== "function" ||
+    typeof performance.measure !== "function"
+  ) {
+    return null;
+  }
+
+  tictactoeTimingCounter += 1;
+  const prefix = `elq.tictactoe.${action}.${Date.now()}.${tictactoeTimingCounter}`;
+  mark(`${prefix}.input`);
+  return {
+    markFetchStart() {
+      mark(`${prefix}.fetch_start`);
+      measure(`${prefix}.input_to_fetch_start`, `${prefix}.input`, `${prefix}.fetch_start`);
+    },
+    markFetchEnd() {
+      mark(`${prefix}.fetch_end`);
+      measure(`${prefix}.fetch`, `${prefix}.fetch_start`, `${prefix}.fetch_end`);
+      measure(`${prefix}.input_to_fetch_end`, `${prefix}.input`, `${prefix}.fetch_end`);
+    },
+    markPaint() {
+      const markPaintDone = () => {
+        mark(`${prefix}.paint`);
+        measure(`${prefix}.fetch_end_to_paint`, `${prefix}.fetch_end`, `${prefix}.paint`);
+        measure(`${prefix}.input_to_paint`, `${prefix}.input`, `${prefix}.paint`);
+      };
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(markPaintDone);
+      } else {
+        setTimeout(markPaintDone, 0);
+      }
+    },
+  };
+}
+
+function mark(name) {
+  try {
+    performance.mark(name);
+  } catch {
+    // Dev-only instrumentation must never affect gameplay.
+  }
+}
+
+function measure(name, startMark, endMark) {
+  try {
+    performance.measure(name, startMark, endMark);
+  } catch {
+    // Dev-only instrumentation must never affect gameplay.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -56,7 +126,14 @@ export async function linkGuest(authToken) {
 }
 
 export function createGame(payload) {
-  return actionRequest("POST", "/quiz/tictactoe/games", { ...payload, guest_id: getGuestId() });
+  return withTicTacToeClientTiming("create", (clientTiming) =>
+    actionRequest(
+      "POST",
+      "/quiz/tictactoe/games",
+      { ...payload, guest_id: getGuestId() },
+      { clientTiming }
+    )
+  );
 }
 
 export function getGame(gameId) {
@@ -72,7 +149,11 @@ export function joinGame(joinCode, playerName) {
 }
 
 export function submitMove(gameId, move) {
-  return actionRequest("POST", `/quiz/tictactoe/games/${gameId}/moves`, move);
+  return withTicTacToeClientTiming("move", (clientTiming) =>
+    actionRequest("POST", `/quiz/tictactoe/games/${gameId}/moves`, move, {
+      clientTiming,
+    })
+  );
 }
 
 export function offerDraw(gameId) {

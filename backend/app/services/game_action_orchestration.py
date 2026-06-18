@@ -21,6 +21,7 @@ from app.schemas.realtime import (
     state_message,
     unknown_action_message,
 )
+from app.services.timing import timed_phase
 
 logger = logging.getLogger(__name__)
 
@@ -205,20 +206,22 @@ class GameActionOrchestrator:
         outcome = run_game_action(db, lambda: self._handle_adapter_action(db, command))
 
         db.refresh(outcome.game)
-        state = self.adapter.serialize_state(db, outcome.game)
-        completed_round = outcome.completed_round
-        if completed_round is None and outcome.completed_round_number is not None:
-            completed_round = self.adapter.serialize_completed_round(
-                db,
-                state["id"],
-                outcome.completed_round_number,
-            )
+        with timed_phase("response.state_serialization"):
+            state = self.adapter.serialize_state(db, outcome.game)
+            completed_round = outcome.completed_round
+            if completed_round is None and outcome.completed_round_number is not None:
+                with timed_phase("response.completed_round_serialization"):
+                    completed_round = self.adapter.serialize_completed_round(
+                        db,
+                        state["id"],
+                        outcome.completed_round_number,
+                    )
 
-        envelope = state_message(
-            state,
-            result=outcome.result,
-            completed_round=completed_round,
-        )
+            envelope = state_message(
+                state,
+                result=outcome.result,
+                completed_round=completed_round,
+            )
         await self._apply_realtime_effects(state, outcome, completed_round)
         return envelope
 

@@ -110,6 +110,24 @@ cd backend
 uvicorn app.main:app --reload
 ```
 
+### TicTacToe latency instrumentation
+
+Set `ELQ_TICTACTOE_TIMING_ENABLED=true` to emit TicTacToe create/move
+`Server-Timing` headers and structured `tictactoe_timing` logs with phase
+durations for board generation, move validation, commit, and response
+serialization. Setting the TicTacToe router logger to DEBUG records the same
+structured logs locally without exposing `Server-Timing` headers to clients; it
+is off by default.
+
+Run the dependency-light board-generation benchmark from `backend/`:
+
+```bash
+.venv/bin/python benchmarks/tictactoe_latency.py --concurrency 5 --repeats 5
+```
+
+The initial local baseline is recorded in
+[`docs/tictactoe-latency-baseline.md`](docs/tictactoe-latency-baseline.md).
+
 ### Run Data Ingestion
 
 ```bash
