@@ -653,6 +653,78 @@ describe("PhotoQuizBoard search keyboard submit", () => {
 
     expect(submitPhotoGuess).not.toHaveBeenCalled();
   });
+
+  it("clears the guess box query and autocomplete results when the online round changes", async () => {
+    autocompletePhotoPlayer.mockResolvedValue({
+      players: [{ id: 81, name: "Stale Match" }],
+    });
+
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type a player name...");
+    fireEvent.change(input, { target: { value: "stale" } });
+    await screen.findByRole("button", { name: "Stale Match" });
+    expect(input).toHaveValue("stale");
+
+    emitPhotoRealtimeState({
+      state: activePhotoGame({
+        round_number: 2,
+        current_round: {
+          ...activePhotoGame().current_round,
+          round_number: 2,
+        },
+        latest_completed_round: completedRound({
+          round_number: 1,
+          name: "Opponent Pick",
+          status: "completed",
+          winner_player: 2,
+        }),
+      }),
+      result: "round_won",
+      completedRound: completedRound({
+        round_number: 1,
+        name: "Opponent Pick",
+        status: "completed",
+        winner_player: 2,
+      }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Type a player name...")).toHaveValue("");
+    });
+    expect(screen.queryByRole("button", { name: "Stale Match" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the guess box query while the same online round continues", async () => {
+    autocompletePhotoPlayer.mockResolvedValue({
+      players: [{ id: 82, name: "Same Round Match" }],
+    });
+
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type a player name...");
+    fireEvent.change(input, { target: { value: "same" } });
+    await screen.findByRole("button", { name: "Same Round Match" });
+
+    emitPhotoRealtimeState({ state: activePhotoGame() });
+
+    expect(input).toHaveValue("same");
+    expect(screen.getByRole("button", { name: "Same Round Match" })).toBeInTheDocument();
+  });
 });
 
 describe("PhotoQuizBoard Quick Match", () => {

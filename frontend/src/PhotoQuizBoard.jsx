@@ -457,7 +457,11 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
               </div>
             )}
 
-            <PhotoGuessBox onGuess={handleGuess} disabled={Boolean(answer) || roundLocked} />
+            <PhotoGuessBox
+              onGuess={handleGuess}
+              disabled={Boolean(answer) || roundLocked}
+              roundKey={roundKey}
+            />
 
             <PhotoFeedbackMessage message={message} />
 
@@ -798,11 +802,22 @@ function isPhotoActionSyncConflict(error) {
   );
 }
 
-function PhotoGuessBox({ onGuess, disabled }) {
+function PhotoGuessBox({ onGuess, disabled, roundKey }) {
   const [query, setQuery] = useState("");
   const [players, setPlayers] = useState([]);
+  const [prevRoundKey, setPrevRoundKey] = useState(roundKey);
+
+  if (roundKey !== prevRoundKey) {
+    // Reset the in-progress guess and autocomplete results whenever the active
+    // round changes (opponent answered first, per-round timer expiry/auto-skip,
+    // or mutual no-answer skip) so the next round opens with an empty box.
+    setPrevRoundKey(roundKey);
+    setQuery("");
+    setPlayers([]);
+  }
 
   useEffect(() => {
+    let cancelled = false;
     const timer = setTimeout(async () => {
       if (!query || disabled) {
         setPlayers([]);
@@ -810,12 +825,19 @@ function PhotoGuessBox({ onGuess, disabled }) {
       }
       try {
         const result = await autocompletePhotoPlayer(query);
-        setPlayers(result.players || []);
+        if (!cancelled) {
+          setPlayers(result.players || []);
+        }
       } catch {
-        setPlayers([]);
+        if (!cancelled) {
+          setPlayers([]);
+        }
       }
     }, 200);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [query, disabled]);
 
   function selectPlayer(player) {
