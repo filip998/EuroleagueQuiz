@@ -310,8 +310,6 @@ def offer_no_answer(
         raise InvalidGameActionError("Player identity is required")
     if game.status != "active":
         raise ConflictGameActionError("Game is not active")
-    if game.is_public:
-        raise ConflictGameActionError("No-answer offers are disabled for public games")
     _raise_if_round_stale(game, round_number)
     _raise_if_current_round_locked(game)
     _assert_active_game_round(db, game, _current_round(game), round_number)
@@ -342,8 +340,6 @@ def respond_no_answer(
         raise InvalidGameActionError("No answer offer version is required")
     if game.status != "active":
         raise ConflictGameActionError("Game is not active")
-    if game.is_public:
-        raise ConflictGameActionError("No-answer offers are disabled for public games")
     _raise_if_round_stale(game, round_number)
     if acting_player != game.pending_no_answer_to:
         raise InvalidGameActionError("No answer offer is not pending for this player")

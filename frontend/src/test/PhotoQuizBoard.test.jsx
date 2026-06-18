@@ -829,7 +829,7 @@ describe("PhotoQuizBoard Quick Match", () => {
     expect(screen.getByTestId("photo-round-timer")).toHaveTextContent("Time's up");
   });
 
-  it("hides the per-round timer and the no-answer flow for public Quick Match games", () => {
+  it("shows the per-round timer and the mutual no-answer offer for public Quick Match games", () => {
     render(
       <PhotoQuizBoard
         initialState={publicQuickMatchGame()}
@@ -838,7 +838,8 @@ describe("PhotoQuizBoard Quick Match", () => {
         onNewGame={vi.fn()}
       />
     );
-    expect(screen.queryByText("Nobody knows")).not.toBeInTheDocument();
+    expect(screen.getByTestId("photo-round-timer")).toBeInTheDocument();
+    expect(screen.getByText("Nobody knows")).toBeInTheDocument();
 
     cleanup();
 
@@ -854,10 +855,7 @@ describe("PhotoQuizBoard Quick Match", () => {
     expect(screen.getByText("Nobody knows")).toBeInTheDocument();
   });
 
-  it("hides the no-answer flow for a public game even before onlineInfo is recovered", () => {
-    // A public game opened/recovered without onlineInfo must still hide the
-    // no-answer UI: the backend rejects offers/responses for any public game, so
-    // the gating derives from game state rather than transport.
+  it("shows the no-answer offer for a recovered public game before realtime reconnects", () => {
     render(
       <PhotoQuizBoard
         initialState={publicQuickMatchGame()}
@@ -865,7 +863,25 @@ describe("PhotoQuizBoard Quick Match", () => {
         onNewGame={vi.fn()}
       />
     );
-    expect(screen.queryByText("Nobody knows")).not.toBeInTheDocument();
+    expect(screen.getByText("Nobody knows")).toBeInTheDocument();
+  });
+
+  it("shows public Quick Match no-answer response controls to the targeted player", () => {
+    render(
+      <PhotoQuizBoard
+        initialState={publicQuickMatchGame({
+          pending_no_answer_from: 1,
+          pending_no_answer_to: 2,
+          pending_no_answer_offer_version: 8,
+        })}
+        onlineInfo={{ playerNumber: 2 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Accept no answer" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Decline" })).toBeInTheDocument();
   });
 });
 
