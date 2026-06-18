@@ -1912,12 +1912,12 @@ async def test_photo_quick_match_public_round_timeout_auto_skips_with_injected_c
 
     module.start_timer_from_state(state)
     await sleep.wait_for_call()
-    assert sleep.calls[0][0] == 60
+    assert sleep.calls[0][0] == 10
 
     sleep.release(0)
     await _drain_async_tasks()
     await sleep.wait_for_call(2)
-    assert sleep.calls[1][0] > 60
+    assert sleep.calls[1][0] > 10
     module.cancel_timer(game_id)
 
     verify = SessionLocal()

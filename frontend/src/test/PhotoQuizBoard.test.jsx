@@ -816,15 +816,15 @@ describe("PhotoQuizBoard Quick Match", () => {
     );
 
     const timer = screen.getByTestId("photo-round-timer");
-    expect(timer).toHaveTextContent("60s left");
+    expect(timer).toHaveTextContent("10s left");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(screen.getByTestId("photo-round-timer")).toHaveTextContent("55s left");
+    expect(screen.getByTestId("photo-round-timer")).toHaveTextContent("5s left");
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(56000);
+      await vi.advanceTimersByTimeAsync(11000);
     });
     expect(screen.getByTestId("photo-round-timer")).toHaveTextContent("Time's up");
   });
