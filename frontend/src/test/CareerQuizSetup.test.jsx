@@ -136,6 +136,16 @@ describe("CareerQuizSetup", () => {
     );
   });
 
+  it("captions the friend Create options with a Settings section, not on Quick Match", () => {
+    renderSetup({ initialMode: "online" });
+
+    // Quick Match is the default online landing and has no section caption.
+    expect(screen.queryByText("Settings")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Play a Friend"));
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+  });
+
   it("joins a private friend game with a 6-character code", async () => {
     joinCareerGame.mockResolvedValue({ state: { id: 6, status: "active" } });
 

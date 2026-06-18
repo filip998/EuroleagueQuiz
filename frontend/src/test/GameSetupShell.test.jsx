@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import GameSetupShell from "../GameSetupShell";
+import GameSetupShell, { SectionCaption } from "../GameSetupShell";
 
 vi.mock("../Logo", () => ({
   LogoMini: ({ onClick }) => (
@@ -56,5 +56,12 @@ describe("GameSetupShell", () => {
     );
     fireEvent.click(screen.getByTestId("logo-mini"));
     expect(onHome).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SectionCaption", () => {
+  it("renders its text so every Create pane shares one caption treatment", () => {
+    render(<SectionCaption>Settings</SectionCaption>);
+    expect(screen.getByText("Settings")).toBeInTheDocument();
   });
 });

@@ -8,7 +8,7 @@ import {
 } from "./api";
 import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
-import GameSetupShell from "./GameSetupShell";
+import GameSetupShell, { SectionCaption } from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 import NameField from "./NameField";
 import QuickMatchPanel from "./QuickMatchPanel";
@@ -271,9 +271,7 @@ export default function RosterGuessSetup({
                   setSeasonStart={setSeasonStart}
                   setSeasonEnd={setSeasonEnd}
                 />
-                <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
-                  Race length
-                </label>
+                <SectionCaption>Race length</SectionCaption>
                 <select
                   value={raceTargetWins}
                   onChange={(e) => setRaceTargetWins(Number(e.target.value))}
@@ -385,9 +383,7 @@ function SegmentedToggle({ value, onChange, options, disabled = false }) {
 function SeasonRange({ seasonStart, seasonEnd, setSeasonStart, setSeasonEnd }) {
   return (
     <>
-      <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
-        Season Range
-      </label>
+      <SectionCaption>Season Range</SectionCaption>
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div>
           <label className="block text-sm text-elq-text mb-1.5">From</label>
@@ -425,9 +421,7 @@ function SeasonRange({ seasonStart, seasonEnd, setSeasonStart, setSeasonEnd }) {
 function ClassicSettings({ targetWins, setTargetWins, timerMode, setTimerMode }) {
   return (
     <>
-      <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">
-        Settings
-      </label>
+      <SectionCaption>Settings</SectionCaption>
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div>
           <label className="block text-sm text-elq-text mb-1.5">First to</label>
