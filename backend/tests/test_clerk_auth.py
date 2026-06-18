@@ -677,7 +677,22 @@ def test_auth_me_requires_token_and_returns_provisioned_user(
     try:
         client = TestClient(app)
         missing = client.get("/auth/me")
+        expired = client.get(
+            "/auth/me",
+            headers={
+                "Authorization": f"Bearer {_make_token(signing_key, expires_delta=timedelta(seconds=-1))}"
+            },
+        )
+        wrong_issuer = client.get(
+            "/auth/me",
+            headers={
+                "Authorization": f"Bearer {_make_token(signing_key, issuer='https://evil.example.com')}"
+            },
+        )
         valid = client.get("/auth/me", headers={"Authorization": f"Bearer {_make_token(signing_key)}"})
+        repeat = client.get("/auth/me", headers={"Authorization": f"Bearer {_make_token(signing_key)}"})
+        with auth_session_factory() as db:
+            user_count = db.scalar(select(func.count()).select_from(User))
     finally:
         if previous_override is None:
             app.dependency_overrides.pop(get_auth_db, None)
@@ -685,11 +700,16 @@ def test_auth_me_requires_token_and_returns_provisioned_user(
             app.dependency_overrides[get_auth_db] = previous_override
 
     assert missing.status_code == 401
+    assert expired.status_code == 401
+    assert wrong_issuer.status_code == 401
     assert valid.status_code == 200
+    assert repeat.status_code == 200
     body = valid.json()
     assert body["username"].startswith("user_")
     assert body["email"].endswith("@clerk.invalid")
     assert "clerk_user_id" not in body
+    assert repeat.json()["id"] == body["id"]
+    assert user_count == 1
 
 
 def test_auth_link_guest_requires_token_and_links_guest_id(
