@@ -7,6 +7,8 @@
  *
  * Props:
  * - ariaLabel:       string label for the scoreboard <section role="group">.
+ * - title:           optional heading shown above the round/target pills
+ *                    (e.g. "ONLINE RACE"); omitted when null.
  * - players:         [{ name, score, subline?, active? }, { ... }] (index 0 = P1).
  * - youPlayerNumber: 1 | 2 | null — renders a seat-colored "You are <name>" pill
  *                    only for a valid seat (so local/solo render no pill).
@@ -97,6 +99,7 @@ function ScoreboardCenter({ timer, statusText }) {
 
 export default function OnlineScoreboard({
   ariaLabel = "Online match scoreboard",
+  title = null,
   players = [],
   youPlayerNumber = null,
   roundNumber = null,
@@ -117,15 +120,24 @@ export default function OnlineScoreboard({
       <div className="h-1.5 bg-gradient-to-r from-elq-player1 via-elq-orange to-elq-player2" />
       <div className="p-4 sm:p-5">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-2 text-xs font-bold uppercase tracking-[0.16em] text-elq-dark">
-            <span className="rounded-full bg-elq-bg px-2 py-0.5">
-              {roundNumber != null ? `Round ${roundNumber}` : "Round -"}
-            </span>
-            {targetWins != null && (
-              <span className="rounded-full border border-elq-orange/30 bg-elq-orange/10 px-2 py-0.5">
-                First to {targetWins}
-              </span>
+          <div>
+            {title && (
+              <div className="font-display text-2xl tracking-wide text-elq-dark">{title}</div>
             )}
+            <div
+              className={`flex flex-wrap gap-2 text-xs font-bold uppercase tracking-[0.16em] text-elq-dark ${
+                title ? "mt-2" : ""
+              }`}
+            >
+              <span className="rounded-full bg-elq-bg px-2 py-0.5">
+                {roundNumber != null ? `Round ${roundNumber}` : "Round -"}
+              </span>
+              {targetWins != null && (
+                <span className="rounded-full border border-elq-orange/30 bg-elq-orange/10 px-2 py-0.5">
+                  First to {targetWins}
+                </span>
+              )}
+            </div>
           </div>
           {youStyles && youName != null && (
             <div

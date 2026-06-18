@@ -97,4 +97,14 @@ describe("OnlineScoreboard", () => {
     expect(screen.getByText("Round -")).toBeInTheDocument();
     expect(screen.queryByText(/^First to /)).not.toBeInTheDocument();
   });
+
+  it("renders an optional title heading when provided", () => {
+    renderBoard({ title: "ONLINE RACE" });
+    expect(screen.getByText("ONLINE RACE")).toBeInTheDocument();
+  });
+
+  it("omits the title heading when none is provided", () => {
+    renderBoard();
+    expect(screen.queryByText("ONLINE RACE")).not.toBeInTheDocument();
+  });
 });

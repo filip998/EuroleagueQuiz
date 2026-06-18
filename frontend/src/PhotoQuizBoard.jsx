@@ -591,6 +591,7 @@ function PhotoMultiplayerScoreboard({ game, playerNumber, roundNumber }) {
   return (
     <OnlineScoreboard
       ariaLabel="Photo Quiz multiplayer scoreboard"
+      title="ONLINE RACE"
       players={[
         { name: game?.player1_name || "Player 1", score: game?.player1_score ?? 0 },
         { name: game?.player2_name || "Player 2", score: game?.player2_score ?? 0 },
