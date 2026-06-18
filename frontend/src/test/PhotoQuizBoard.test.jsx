@@ -203,6 +203,48 @@ describe("PhotoQuizBoard clue", () => {
     const clue = screen.getByTestId("photo-clue-image");
     expect(clue).toHaveAttribute("src", repeatedUrl);
   });
+
+  it("rewrites an EuroLeague CDN clue to a width-bounded webp with a high-DPI srcSet", () => {
+    const cdn = "https://media-cdn.incrowdsports.com/abc-123.png";
+    render(
+      <PhotoQuizBoard
+        soloInitialRound={soloPhotoRound({ image_url: cdn })}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const clue = screen.getByTestId("photo-clue-image");
+    expect(clue).toHaveAttribute("src", `${cdn}?width=384&format=webp`);
+    expect(clue).toHaveAttribute(
+      "srcset",
+      `${cdn}?width=384&format=webp 384w, ${cdn}?width=768&format=webp 768w`
+    );
+    expect(clue).toHaveAttribute("sizes");
+  });
+
+  it("retries the original CDN url before showing the fallback panel", () => {
+    const cdn = "https://media-cdn.incrowdsports.com/abc-123.png";
+    render(
+      <PhotoQuizBoard
+        soloInitialRound={soloPhotoRound({ image_url: cdn })}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    // First failure (optimized webp): swap to the untouched original, keep the img.
+    fireEvent.error(screen.getByTestId("photo-clue-image"));
+    const clue = screen.getByTestId("photo-clue-image");
+    expect(clue).toHaveAttribute("src", cdn);
+    expect(clue).not.toHaveAttribute("srcset");
+    expect(screen.queryByTestId("photo-clue-fallback")).not.toBeInTheDocument();
+
+    // Original also fails: now show the graceful placeholder.
+    fireEvent.error(clue);
+    expect(screen.getByTestId("photo-clue-fallback")).toBeInTheDocument();
+    expect(screen.queryByTestId("photo-clue-image")).not.toBeInTheDocument();
+  });
 });
 
 describe("PhotoQuizBoard multiplayer reveals", () => {

@@ -10,6 +10,7 @@ import {
 } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
+import { optimizeHeadshot, handleHeadshotError, HEADSHOT_WIDTHS } from "./imageUrl";
 import WaitingLobby from "./WaitingLobby";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import { buildInviteUrl } from "./inviteLink";
@@ -407,6 +408,7 @@ function RaceScoreboard({ game, round, timerRemaining, playerNumber }) {
 }
 
 function RaceSlot({ slot }) {
+  const [imageFailed, setImageFailed] = useState(false);
   const claimedBy = slot.guessed_by_player;
   const claimed = claimedBy === 1 || claimedBy === 2;
   const classes = claimedBy === 1
@@ -416,11 +418,17 @@ function RaceSlot({ slot }) {
       : slot.player_name
         ? "border-amber-200 bg-amber-50"
         : "border-elq-border bg-white";
+  const showImage = Boolean(slot.image_url) && !imageFailed;
   return (
     <div className={`flex items-center gap-3 rounded-2xl border px-3 py-2 ${classes}`}>
       <div className="h-10 w-10 rounded-xl bg-slate-100 overflow-hidden flex items-center justify-center">
-        {slot.image_url ? (
-          <img src={slot.image_url} alt={slot.player_name || "Player"} className="h-full w-full object-cover object-top" />
+        {showImage ? (
+          <img
+            src={optimizeHeadshot(slot.image_url, { width: HEADSHOT_WIDTHS.avatar })}
+            alt={slot.player_name || "Player"}
+            className="h-full w-full object-cover object-top"
+            onError={(e) => handleHeadshotError(e, slot.image_url, () => setImageFailed(true))}
+          />
         ) : (
           <span className="text-slate-300 font-bold">?</span>
         )}
