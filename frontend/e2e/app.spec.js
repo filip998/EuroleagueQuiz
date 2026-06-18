@@ -158,7 +158,7 @@ test.describe("Home Page", () => {
       "true"
     );
     await expect(page.getByText("Pick a pool")).toBeVisible();
-    await expect(page.getByTestId("quick-pick-modern-standard")).toBeVisible();
+    await expect(page.getByTestId("quick-pick-standard")).toBeVisible();
   });
 
   test("navigates to Higher or Lower setup", async ({ page }) => {

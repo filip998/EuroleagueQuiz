@@ -199,6 +199,33 @@ class SyntheticSingleSeasonGenerator:
         )
 
 
+class StaticRoundGenerator:
+    def __init__(self, category_type: str, metric: str | None = None):
+        self.category_type = category_type
+        self.metric = metric
+
+    def build_round(self, db, game, round_number):
+        player = db.query(Player).order_by(Player.id.asc()).first()
+        assert player is not None
+        full_name = f"{player.first_name or ''} {player.last_name or ''}".strip()
+        return guess_the_list_service.RoundSpec(
+            category_type=self.category_type,
+            metric=self.metric,
+            scope_label=f"{self.category_type} round {round_number}",
+            team_id=None,
+            season_id=None,
+            team_code=None,
+            team_name=None,
+            season_year=None,
+            slots=(
+                guess_the_list_service.RoundSlotSpec(
+                    player_id=player.id,
+                    player_name=full_name or "Synthetic Player",
+                ),
+            ),
+        )
+
+
 def test_ranked_items_with_boundary_ties_includes_cutoff_ties():
     ranked = guess_the_list_service.ranked_items_with_boundary_ties(
         [30, 25, 20, 15, 10, 10, 5],
@@ -1089,7 +1116,7 @@ def test_legacy_roster_guess_http_routes_alias_guess_the_list(client: TestClient
 
     pools = client.get("/quiz/roster-guess/quick-match/pools")
     assert pools.status_code == 200
-    assert "modern-standard" in pools.json()["pools"]
+    assert set(pools.json()["pools"]) == {"quick", "standard", "long"}
 
 
 def test_submit_guess_returns_state_envelope_with_result(client: TestClient):
@@ -1460,11 +1487,20 @@ async def test_guess_the_list_race_unattended_timeout_finishes_without_rearming(
         assert [round_obj.status for round_obj in stored.rounds] == ["completed"]
 
 
-def test_guess_the_list_race_quick_match_pair_cancel_and_public_join_guard(client: TestClient):
+def test_guess_the_list_race_quick_match_pair_cancel_and_public_join_guard(
+    client: TestClient,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        guess_the_list_service,
+        "_random_quick_match_category",
+        lambda: guess_the_list_service.CATEGORY_ROSTER,
+    )
+
     first = client.post(
         "/quiz/guess-the-list/quick-match",
         json={
-            "preset": "modern-standard",
+            "preset": "standard",
             "player_name": "One",
             "guest_id": "guest-one",
         },
@@ -1493,7 +1529,7 @@ def test_guess_the_list_race_quick_match_pair_cancel_and_public_join_guard(clien
     repeat = client.post(
         "/quiz/guess-the-list/quick-match",
         json={
-            "preset": "modern-standard",
+            "preset": "standard",
             "player_name": "One again",
             "guest_id": "guest-one",
         },
@@ -1504,12 +1540,14 @@ def test_guess_the_list_race_quick_match_pair_cancel_and_public_join_guard(clien
 
     pools = client.get("/quiz/guess-the-list/quick-match/pools")
     assert pools.status_code == 200
-    assert pools.json()["pools"]["modern-standard"]["searching"] == 1
+    assert set(pools.json()["pools"]) == {"quick", "standard", "long"}
+    assert pools.json()["pools"]["standard"]["searching"] == 1
+    assert pools.json()["pools"]["quick"] == {"searching": 0, "in_progress": 0}
 
     second = client.post(
         "/quiz/guess-the-list/quick-match",
         json={
-            "preset": "modern-standard",
+            "preset": "standard",
             "player_name": "Two",
             "guest_id": "guest-two",
         },
@@ -1518,28 +1556,144 @@ def test_guess_the_list_race_quick_match_pair_cancel_and_public_join_guard(clien
     matched = _action_payload(second)["game"]
     assert matched["id"] == waiting["id"]
     assert matched["status"] == "active"
+    assert matched["target_wins"] == 2
     assert matched["round"] is not None
     assert matched["join_code"] is None
+
+    active_pools = client.get("/quiz/guess-the-list/quick-match/pools")
+    assert active_pools.status_code == 200
+    assert active_pools.json()["pools"]["standard"] == {
+        "searching": 0,
+        "in_progress": 1,
+    }
 
     cancel_seed = client.post(
         "/quiz/guess-the-list/quick-match",
         json={
-            "preset": "full-quick",
+            "preset": "quick",
             "player_name": "Cancel",
             "guest_id": "guest-cancel",
         },
     )
     search = _action_payload(cancel_seed)["game"]
+    assert search["target_wins"] == 1
     cancel = client.post(
         "/quiz/guess-the-list/quick-match/cancel",
         json={
-            "preset": "full-quick",
+            "preset": "quick",
             "game_id": search["id"],
             "guest_id": "guest-cancel",
         },
     )
     assert cancel.status_code == 200
     assert _action_payload(cancel)["game"]["status"] == "cancelled"
+
+
+def test_guess_the_list_quick_match_randomizes_round_types_per_round(
+    client: TestClient,
+    monkeypatch,
+):
+    categories = iter(
+        (
+            guess_the_list_service.CATEGORY_ROSTER,
+            guess_the_list_service.CATEGORY_ALL_TIME,
+            guess_the_list_service.CATEGORY_SINGLE_SEASON,
+        )
+    )
+    monkeypatch.setattr(
+        guess_the_list_service,
+        "_random_quick_match_category",
+        lambda: next(categories),
+    )
+
+    with client.session_local() as db:
+        game = guess_the_list_service.create_race_game(
+            db,
+            target_wins=3,
+            player1_name="One",
+            season_range_start=2000,
+            season_range_end=2025,
+            guest_id="guest-one",
+            is_public=True,
+            preset="long",
+        )
+        game.status = "active"
+        game.player2_name = "Two"
+        game.player2_guest_id = "guest-two"
+        registry = {
+            guess_the_list_service.CATEGORY_ROSTER: StaticRoundGenerator(
+                guess_the_list_service.CATEGORY_ROSTER
+            ),
+            guess_the_list_service.CATEGORY_ALL_TIME: StaticRoundGenerator(
+                guess_the_list_service.CATEGORY_ALL_TIME,
+                metric="points",
+            ),
+            guess_the_list_service.CATEGORY_SINGLE_SEASON: StaticRoundGenerator(
+                guess_the_list_service.CATEGORY_SINGLE_SEASON,
+                metric="assists",
+            ),
+        }
+
+        created_categories = []
+        for _ in range(3):
+            round_obj = guess_the_list_service._create_next_round(
+                db,
+                game,
+                registry=registry,
+            )
+            created_categories.append(round_obj.category_type)
+            round_obj.status = "completed"
+            round_obj.completed_at = datetime.utcnow()
+            db.flush()
+
+    assert created_categories == [
+        guess_the_list_service.CATEGORY_ROSTER,
+        guess_the_list_service.CATEGORY_ALL_TIME,
+        guess_the_list_service.CATEGORY_SINGLE_SEASON,
+    ]
+
+
+def test_guess_the_list_quick_match_all_time_metric_does_not_repeat_back_to_back(
+    all_time_leaders_db,
+    monkeypatch,
+):
+    game = guess_the_list_service.create_race_game(
+        all_time_leaders_db,
+        target_wins=3,
+        player1_name="One",
+        season_range_start=2000,
+        season_range_end=2025,
+        guest_id="guest-one",
+        is_public=True,
+        preset="long",
+    )
+    game.status = "active"
+    game.player2_name = "Two"
+    game.player2_guest_id = "guest-two"
+    all_time_leaders_db.flush()
+
+    monkeypatch.setattr(
+        guess_the_list_service,
+        "_random_quick_match_category",
+        lambda: guess_the_list_service.CATEGORY_ALL_TIME,
+    )
+    monkeypatch.setattr(
+        guess_the_list_service.random,
+        "choice",
+        lambda choices: choices[0],
+    )
+
+    first_round = guess_the_list_service._create_next_round(all_time_leaders_db, game)
+    assert first_round.category_type == guess_the_list_service.CATEGORY_ALL_TIME
+    assert first_round.metric == "points"
+    first_round.status = "completed"
+    first_round.completed_at = datetime.utcnow()
+    all_time_leaders_db.flush()
+
+    second_round = guess_the_list_service._create_next_round(all_time_leaders_db, game)
+    assert second_round.category_type == guess_the_list_service.CATEGORY_ALL_TIME
+    assert second_round.metric == "rebounds"
+    assert second_round.metric != first_round.metric
 
 
 def test_guess_the_list_race_quick_match_rejects_invalid_preset(client: TestClient):

@@ -58,6 +58,11 @@ CATEGORY_ALL_TIME = "all_time"
 CATEGORY_SINGLE_SEASON = "single_season"
 DEFAULT_CATEGORY_TYPE = CATEGORY_ROSTER
 LEADERBOARD_METRICS = ("points", "rebounds", "assists", "pir")
+QUICK_MATCH_CATEGORY_TYPES = (
+    CATEGORY_ROSTER,
+    CATEGORY_ALL_TIME,
+    CATEGORY_SINGLE_SEASON,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -875,6 +880,67 @@ def _generator_for_category(
     return generator
 
 
+def _uses_randomized_quick_match_rounds(game: GuessTheListGame) -> bool:
+    return bool(game.is_race and game.is_public and game.preset)
+
+
+def _random_quick_match_category() -> str:
+    return random.choice(QUICK_MATCH_CATEGORY_TYPES)
+
+
+def _random_all_time_metric(*, exclude: str | None = None) -> str:
+    eligible_metrics = tuple(
+        metric for metric in LEADERBOARD_METRICS if metric != exclude
+    )
+    return random.choice(eligible_metrics or LEADERBOARD_METRICS)
+
+
+def _previous_all_time_metric(
+    db: Session,
+    *,
+    game_id: int,
+    next_round_number: int,
+) -> str | None:
+    previous_round_number = next_round_number - 1
+    if previous_round_number < 1:
+        return None
+
+    row = (
+        db.query(GuessTheListRound.metric)
+        .filter(GuessTheListRound.game_id == game_id)
+        .filter(GuessTheListRound.round_number == previous_round_number)
+        .filter(GuessTheListRound.category_type == CATEGORY_ALL_TIME)
+        .first()
+    )
+    if row is None or row[0] not in LEADERBOARD_METRICS:
+        return None
+    return row[0]
+
+
+def _round_generator_for_next_round(
+    db: Session,
+    game: GuessTheListGame,
+    next_round_number: int,
+    *,
+    registry: Mapping[str, GuessTheListRoundGenerator] | None = None,
+) -> GuessTheListRoundGenerator:
+    if not _uses_randomized_quick_match_rounds(game):
+        return _generator_for_category(game.category_type, registry=registry)
+
+    category = _random_quick_match_category()
+    if category == CATEGORY_ALL_TIME and registry is None:
+        return AllTimeLeadersGenerator(
+            metric=_random_all_time_metric(
+                exclude=_previous_all_time_metric(
+                    db,
+                    game_id=game.id,
+                    next_round_number=next_round_number,
+                )
+            )
+        )
+    return _generator_for_category(category, registry=registry)
+
+
 # ---------------------------------------------------------------------------
 # Game lifecycle
 # ---------------------------------------------------------------------------
@@ -1118,7 +1184,12 @@ def _create_next_round(
         .scalar()
         or 0
     ) + 1
-    generator = _generator_for_category(game.category_type, registry=registry)
+    generator = _round_generator_for_next_round(
+        db,
+        game,
+        next_round_number,
+        registry=registry,
+    )
     round_spec = generator.build_round(db, game, next_round_number)
 
     created_at = starts_at or datetime.utcnow()

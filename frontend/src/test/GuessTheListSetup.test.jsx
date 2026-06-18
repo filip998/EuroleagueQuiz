@@ -34,7 +34,7 @@ vi.mock("../guessTheListRaceQuickMatch", async () => {
     ...actual,
     useGuessTheListRaceQuickMatchPools: () => ({
       pools: {
-        "modern-standard": { searching: 2, in_progress: 1 },
+        standard: { searching: 2, in_progress: 1 },
       },
       error: false,
     }),
@@ -106,15 +106,15 @@ describe("GuessTheListSetup", () => {
     expect(screen.getByText("Classic")).toBeInTheDocument();
     expect(screen.getByText("Race")).toBeInTheDocument();
     expect(screen.getByText("Pick a pool")).toBeInTheDocument();
-    expect(screen.getByTestId("presence-modern-standard")).toHaveTextContent(
+    expect(screen.getByTestId("presence-standard")).toHaveTextContent(
       "2 searching · 1 in progress"
     );
 
-    fireEvent.click(screen.getByTestId("quick-pick-modern-standard"));
+    fireEvent.click(screen.getByTestId("quick-pick-standard"));
 
     await waitFor(() => expect(onGameCreated).toHaveBeenCalled());
     expect(quickMatchGuessTheListRace).toHaveBeenCalledWith({
-      preset: "modern-standard",
+      preset: "standard",
       player_name: "Ace",
     });
     expect(onGameCreated).toHaveBeenCalledWith(

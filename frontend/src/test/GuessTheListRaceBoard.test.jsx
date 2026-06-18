@@ -169,7 +169,7 @@ describe("GuessTheListRaceBoard", () => {
           id: 30,
           status: "waiting_for_opponent",
           is_public: true,
-          preset: "modern-standard",
+          preset: "standard",
         }}
         onlineInfo={{ playerNumber: 1 }}
         onNewGame={onNewGame}
@@ -179,7 +179,7 @@ describe("GuessTheListRaceBoard", () => {
 
     expect(screen.getByTestId("searching-lobby")).toHaveAttribute(
       "data-preset",
-      "modern-standard"
+      "standard"
     );
     // Public quick-match games hide the join code, so no invite link must leak.
     expect(screen.queryByText("Copy link")).not.toBeInTheDocument();
@@ -187,7 +187,7 @@ describe("GuessTheListRaceBoard", () => {
 
     await waitFor(() => expect(onNewGame).toHaveBeenCalled());
     expect(cancelGuessTheListRaceQuickMatch).toHaveBeenCalledWith({
-      preset: "modern-standard",
+      preset: "standard",
       game_id: 30,
     });
     expect(clearOnlineInfo).toHaveBeenCalledWith(30);

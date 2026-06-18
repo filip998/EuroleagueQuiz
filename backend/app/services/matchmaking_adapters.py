@@ -104,26 +104,36 @@ DEFAULT_CAREER_QUIZ_MATCHMAKING_PRESETS = {
     "long": CareerQuizMatchmakingPreset(target_wins=5),
 }
 
-_GUESS_THE_LIST_ERAS = {
-    "full": (2000, 2025),
-    "modern": (2018, 2025),
-    "nostalgia": (2000, 2010),
-    "recent": (2010, 2025),
-}
+_GUESS_THE_LIST_QUICK_MATCH_SEASON_RANGE = (2000, 2025)
 _GUESS_THE_LIST_LENGTHS = {
     "quick": 1,
     "standard": 2,
     "long": 3,
 }
 DEFAULT_GUESS_THE_LIST_MATCHMAKING_PRESETS = {
-    f"{era}-{length}": GuessTheListMatchmakingPreset(
+    length: GuessTheListMatchmakingPreset(
         target_wins=target_wins,
-        season_range_start=start,
-        season_range_end=end,
+        season_range_start=_GUESS_THE_LIST_QUICK_MATCH_SEASON_RANGE[0],
+        season_range_end=_GUESS_THE_LIST_QUICK_MATCH_SEASON_RANGE[1],
     )
-    for era, (start, end) in _GUESS_THE_LIST_ERAS.items()
     for length, target_wins in _GUESS_THE_LIST_LENGTHS.items()
 }
+_LEGACY_GUESS_THE_LIST_MATCHMAKING_PRESET_KEYS = frozenset(
+    (
+        "full-quick",
+        "full-standard",
+        "full-long",
+        "modern-quick",
+        "modern-standard",
+        "modern-long",
+        "nostalgia-quick",
+        "nostalgia-standard",
+        "nostalgia-long",
+        "recent-quick",
+        "recent-standard",
+        "recent-long",
+    )
+)
 
 
 class TicTacToeMatchmakingAdapter:
@@ -960,7 +970,7 @@ class GuessTheListMatchmakingAdapter:
         db: Session,
         request: MatchmakingCancelRequest,
     ) -> GuessTheListGame:
-        self._preset_config(request.preset)
+        self._validate_cancel_preset(request.preset)
         game = (
             db.query(GuessTheListGame)
             .filter(
@@ -981,6 +991,13 @@ class GuessTheListMatchmakingAdapter:
         db.delete(game)
         db.flush()
         return game
+
+    def _validate_cancel_preset(self, preset: str) -> None:
+        if preset in self._presets:
+            return
+        if preset in _LEGACY_GUESS_THE_LIST_MATCHMAKING_PRESET_KEYS:
+            return
+        self._preset_config(preset)
 
     def _preset_config(self, preset: str) -> GuessTheListMatchmakingPreset:
         try:
