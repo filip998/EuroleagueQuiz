@@ -15,6 +15,7 @@ from app.models import (
     GamePlayerStats,
     Player,
     PlayerSeasonTeam,
+    PlayerSeasonStats,
     Season,
     Team,
 )
@@ -627,6 +628,283 @@ def test_all_time_leaders_category_is_registered_for_game_creation(
     assert state["round"]["category_type"] == guess_the_list_service.CATEGORY_ALL_TIME
     assert state["round"]["metric"] == "points"
     assert state["round"]["scope_label"] == "All-time points leaders (2000-2025)"
+
+
+@pytest.fixture()
+def single_season_leaders_db():
+    engine = create_engine("sqlite:///:memory:")
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    session = TestingSessionLocal()
+    try:
+        _seed_single_season_leaders_fixture(session)
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def _seed_single_season_leaders_fixture(session):
+    home = Team(euroleague_code="SSL", name="Single Season Home")
+    away = Team(euroleague_code="SSX", name="Single Season Away")
+    session.add_all([home, away])
+    session.flush()
+
+    seasons = {
+        year: Season(year=year, name=f"{year}-{year + 1}") for year in (2006, 2024)
+    }
+    session.add_all(seasons.values())
+    session.flush()
+
+    games = {2006: [], 2024: []}
+    for year, season in seasons.items():
+        for index in range(1, 5):
+            game = Game(
+                season_id=season.id,
+                euroleague_gamecode=year * 100 + index,
+                round=index,
+                phase="Regular Season",
+                home_team_id=home.id if index % 2 else away.id,
+                away_team_id=away.id if index % 2 else home.id,
+            )
+            games[year].append(game)
+    session.add_all([game for season_games in games.values() for game in season_games])
+    session.flush()
+
+    post_2007_rows = [
+        ("Post01", "Alpha", 4, 80),
+        ("Post02", "Bravo", 4, 76),
+        ("Post03", "Charlie", 4, 72),
+        ("Post04", "Delta", 4, 68),
+        ("Post05", "Echo", 4, 64),
+        ("Post06", "Foxtrot", 4, 60),
+        ("Post07", "Golf", 4, 56),
+        ("Post08", "Hotel", 4, 52),
+        ("Post09", "India", 4, 48),
+        ("Post10", "Juliet", 4, 44),
+        ("Post11", "Kilo", 2, 22),
+        ("Post12", "Lima", 4, 40),
+        ("PostLow", "Fewgames", 1, 100),
+    ]
+    for index, (first_name, last_name, games_played, points) in enumerate(
+        post_2007_rows,
+        start=1,
+    ):
+        player = Player(
+            euroleague_code=f"SSL24{index:03}",
+            first_name=first_name,
+            last_name=last_name,
+            nationality="CountryA",
+            position="Guard",
+            height_cm=180 + index,
+        )
+        session.add(player)
+        session.flush()
+        stint = PlayerSeasonTeam(
+            player_id=player.id,
+            team_id=home.id,
+            season_id=seasons[2024].id,
+            jersey_number=str(index),
+        )
+        session.add(stint)
+        session.flush()
+        session.add(
+            PlayerSeasonStats(
+                player_season_team_id=stint.id,
+                games_played=games_played,
+                points=points,
+                total_rebounds=0,
+                assists=0,
+                pir=0,
+            )
+        )
+
+    pre_2007_rows = [
+        ("Pre01", "Alpha", 4, 20),
+        ("Pre02", "Bravo", 4, 19),
+        ("Pre03", "Charlie", 4, 18),
+        ("Pre04", "Delta", 4, 17),
+        ("Pre05", "Echo", 4, 16),
+        ("Pre06", "Foxtrot", 4, 15),
+        ("Pre07", "Golf", 4, 14),
+        ("Pre08", "Hotel", 4, 13),
+        ("Pre09", "India", 4, 12),
+        ("Pre10", "Juliet", 4, 11),
+        ("Pre11", "Kilo", 2, 11),
+        ("Pre12", "Lima", 4, 10),
+        ("PreLow", "Fewgames", 1, 100),
+    ]
+    for index, (first_name, last_name, games_played, points_per_game) in enumerate(
+        pre_2007_rows,
+        start=1,
+    ):
+        player = Player(
+            euroleague_code=f"SSL06{index:03}",
+            first_name=first_name,
+            last_name=last_name,
+            nationality="CountryB",
+            position="Forward",
+            height_cm=190 + index,
+        )
+        session.add(player)
+        session.flush()
+        session.add(
+            PlayerSeasonTeam(
+                player_id=player.id,
+                team_id=home.id,
+                season_id=seasons[2006].id,
+                jersey_number=str(index),
+            )
+        )
+        for game in games[2006][:games_played]:
+            session.add(
+                GamePlayerStats(
+                    game_id=game.id,
+                    player_id=player.id,
+                    team_id=home.id,
+                    points=points_per_game,
+                    total_rebounds=0,
+                    assists=0,
+                    pir=0,
+                )
+            )
+
+    session.commit()
+
+
+def _new_single_season_game(start_year=2024, end_year=2024):
+    now = datetime.utcnow()
+    return GuessTheListGame(
+        mode="single_player",
+        status="active",
+        join_code=None,
+        is_race=False,
+        is_public=False,
+        preset=None,
+        category_type=guess_the_list_service.CATEGORY_SINGLE_SEASON,
+        target_wins=2,
+        turn_seconds=None,
+        turn_started_at=None,
+        race_round_seconds=None,
+        race_reveal_seconds=None,
+        player1_name="Player One",
+        player2_name=None,
+        player1_guest_id=None,
+        player2_guest_id=None,
+        player1_score=0,
+        player2_score=0,
+        current_player=1,
+        round_number=0,
+        winner_player=None,
+        season_range_start=start_year,
+        season_range_end=end_year,
+        pending_end_from=None,
+        pending_end_to=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def test_single_season_leaders_uses_player_season_stats_qualifier_and_ties(
+    single_season_leaders_db,
+):
+    spec = guess_the_list_service.SingleSeasonLeadersGenerator(
+        metric="points",
+    ).build_round(
+        single_season_leaders_db,
+        _new_single_season_game(2024, 2024),
+        1,
+    )
+
+    assert spec.category_type == guess_the_list_service.CATEGORY_SINGLE_SEASON
+    assert spec.metric == "points"
+    assert spec.season_year == 2024
+    assert spec.scope_label == "2024 points per-game leaders"
+    assert len(spec.slots) == 11
+    assert [
+        (slot.player_name, slot.rank, slot.stat_value, slot.stat_value_label)
+        for slot in spec.slots
+    ] == [
+        ("Post01 Alpha", 1, 20.0, "20.0 ppg"),
+        ("Post02 Bravo", 2, 19.0, "19.0 ppg"),
+        ("Post03 Charlie", 3, 18.0, "18.0 ppg"),
+        ("Post04 Delta", 4, 17.0, "17.0 ppg"),
+        ("Post05 Echo", 5, 16.0, "16.0 ppg"),
+        ("Post06 Foxtrot", 6, 15.0, "15.0 ppg"),
+        ("Post07 Golf", 7, 14.0, "14.0 ppg"),
+        ("Post08 Hotel", 8, 13.0, "13.0 ppg"),
+        ("Post09 India", 9, 12.0, "12.0 ppg"),
+        ("Post10 Juliet", 10, 11.0, "11.0 ppg"),
+        ("Post11 Kilo", 10, 11.0, "11.0 ppg"),
+    ]
+    assert "PostLow Fewgames" not in [slot.player_name for slot in spec.slots]
+
+
+def test_single_season_leaders_uses_boxscore_aggregates_for_pre_2007(
+    single_season_leaders_db,
+):
+    spec = guess_the_list_service.SingleSeasonLeadersGenerator(
+        metric="points",
+    ).build_round(
+        single_season_leaders_db,
+        _new_single_season_game(2006, 2006),
+        1,
+    )
+
+    assert spec.category_type == guess_the_list_service.CATEGORY_SINGLE_SEASON
+    assert spec.metric == "points"
+    assert spec.season_year == 2006
+    assert len(spec.slots) == 11
+    assert spec.slots[0].player_name == "Pre01 Alpha"
+    assert spec.slots[0].stat_value_label == "20.0 ppg"
+    assert [slot.rank for slot in spec.slots][-2:] == [10, 10]
+    assert "Pre11 Kilo" in [slot.player_name for slot in spec.slots]
+    assert "PreLow Fewgames" not in [slot.player_name for slot in spec.slots]
+
+
+def test_single_season_leaders_category_is_registered_and_hides_active_answers(
+    single_season_leaders_db,
+):
+    game = guess_the_list_service.create_game(
+        single_season_leaders_db,
+        mode="single_player",
+        target_wins=2,
+        timer_mode="40s",
+        category_type=guess_the_list_service.CATEGORY_SINGLE_SEASON,
+        player1_name="Player One",
+        season_range_start=2024,
+        season_range_end=2024,
+    )
+
+    state = guess_the_list_service.serialize_game_state(single_season_leaders_db, game)
+    active_round = state["round"]
+    assert state["category_type"] == guess_the_list_service.CATEGORY_SINGLE_SEASON
+    assert active_round["category_type"] == guess_the_list_service.CATEGORY_SINGLE_SEASON
+    assert active_round["metric"] == "points"
+    assert active_round["total_slots"] == 11
+    assert all(
+        slot["player_name"] is None
+        and slot["rank"] is None
+        and slot["stat_value"] is None
+        and slot["stat_value_label"] is None
+        for slot in active_round["slots"]
+    )
+
+    round_obj = guess_the_list_service.get_active_round(single_season_leaders_db, game.id)
+    round_obj.status = "completed"
+    round_obj.completed_at = datetime.utcnow()
+    single_season_leaders_db.flush()
+
+    completed_round = guess_the_list_service.serialize_completed_round(
+        single_season_leaders_db,
+        game.id,
+        round_obj.round_number,
+    )
+    assert completed_round is not None
+    assert [slot["rank"] for slot in completed_round["slots"]][-2:] == [10, 10]
+    assert completed_round["slots"][0]["player_name"] == "Post01 Alpha"
+    assert completed_round["slots"][0]["stat_value_label"] == "20.0 ppg"
 
 
 def test_legacy_roster_guess_http_routes_alias_guess_the_list(client: TestClient):
