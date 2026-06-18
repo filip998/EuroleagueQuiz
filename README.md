@@ -193,8 +193,9 @@ the answer is guessed correctly or revealed. Online Photo Quiz friend games use
 the round clue is the resolved `image_url`. Public Photo Quiz Quick Match uses
 `POST /quiz/photo/quick-match`, `POST /quiz/photo/quick-match/cancel`, and
 `GET /quiz/photo/quick-match/pools` with `quick` / `standard` / `long` presets
-that set first-to-1 / first-to-3 / first-to-5, keep wrong guesses private, and
-server-skip idle public rounds after the per-round timeout.
+that set first-to-1 / first-to-3 / first-to-5, keep wrong guesses private, allow
+a mutual "Nobody knows" offer/accept to skip early, and server-skip idle public
+rounds after the per-round timeout when players do not agree.
 Multiplayer Career Quiz and Photo Quiz resolved-round state includes
 `latest_completed_round.next_round_starts_at` during the three-second reveal lock; the
 backend rejects next-round guesses with `round_locked` until that UTC timestamp elapses.

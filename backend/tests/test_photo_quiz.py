@@ -12,7 +12,7 @@ from app.game_actions import ConflictGameActionError, InvalidGameActionError
 from app.main import app
 from app.models import PhotoQuizGame, PhotoQuizRound, Player
 from app.routers import photo_quiz as photo_quiz_router
-from app.schemas.realtime import RealtimeServerMessageAdapter
+from app.schemas.realtime import RealtimeResult, RealtimeServerMessageAdapter
 from app.services import photo_quiz
 from app.services.realtime_adapters import PhotoQuizRealtimeAdapter
 from app.services.realtime import OnlineGameRealtimeModule, TurnTimerManager
@@ -1793,7 +1793,7 @@ def test_photo_quick_match_public_join_code_cannot_bypass_matchmaking(
         assert stored.player2_guest_id is None
 
 
-def test_photo_quick_match_rejects_cooperative_no_answer_skip(
+def test_photo_quick_match_no_answer_requires_mutual_agreement(
     photo_client: TestClient,
     photo_quick_match_effects,
 ):
@@ -1817,22 +1817,91 @@ def test_photo_quick_match_rejects_cooperative_no_answer_skip(
     assert second.status_code == 200
     game = _state_payload(second)["game"]
 
+    round_number = game["round_number"]
+
     offer = photo_client.post(
         f"/quiz/photo/games/{game['id']}/no-answer-offer?player=1",
-        json={"round_number": game["round_number"]},
+        json={"round_number": round_number},
     )
+    assert offer.status_code == 200
+    offered_game = offer.json()["payload"]["game"]
+    first_offer_version = offered_game["pending_no_answer_offer_version"]
+    assert offer.json()["payload"]["result"] == "no_answer_offered"
+    assert offered_game["pending_no_answer_from"] == 1
+    assert offered_game["pending_no_answer_to"] == 2
+    assert offered_game["round_number"] == round_number
+    assert offered_game["current_round"]["status"] == "active"
+    assert offered_game["latest_completed_round"] is None
 
-    assert offer.status_code == 409
-    assert offer.json() == {
-        "type": "error",
-        "payload": {
-            "code": "conflict",
-            "message": "No-answer offers are disabled for public games",
+    decline = photo_client.post(
+        f"/quiz/photo/games/{game['id']}/no-answer-response?player=2",
+        json={
+            "accept": False,
+            "round_number": round_number,
+            "no_answer_offer_version": first_offer_version,
         },
-    }
+    )
+    assert decline.status_code == 200
+    declined_game = decline.json()["payload"]["game"]
+    assert decline.json()["payload"]["result"] == "no_answer_declined"
+    assert declined_game["pending_no_answer_from"] is None
+    assert declined_game["pending_no_answer_to"] is None
+    assert declined_game["pending_no_answer_offer_version"] is None
+    assert declined_game["round_number"] == round_number
+    assert declined_game["current_round"]["status"] == "active"
+    assert declined_game["latest_completed_round"] is None
+
+    second_offer = photo_client.post(
+        f"/quiz/photo/games/{game['id']}/no-answer-offer?player=1",
+        json={"round_number": round_number},
+    )
+    assert second_offer.status_code == 200
+    second_offer_game = second_offer.json()["payload"]["game"]
+    second_offer_version = second_offer_game["pending_no_answer_offer_version"]
+    assert second_offer_version == first_offer_version + 1
+
+    replayed_accept = photo_client.post(
+        f"/quiz/photo/games/{game['id']}/no-answer-response?player=2",
+        json={
+            "accept": True,
+            "round_number": round_number,
+            "no_answer_offer_version": first_offer_version,
+        },
+    )
+    assert replayed_accept.status_code == 409
+    assert replayed_accept.json()["payload"]["code"] == "conflict"
+
+    current_state = photo_client.get(f"/quiz/photo/games/{game['id']}")
+    assert current_state.status_code == 200
+    current_game = current_state.json()
+    assert current_game["pending_no_answer_from"] == 1
+    assert current_game["pending_no_answer_to"] == 2
+    assert current_game["pending_no_answer_offer_version"] == second_offer_version
+    assert current_game["round_number"] == round_number
+    assert current_game["current_round"]["status"] == "active"
+    assert current_game["latest_completed_round"] is None
+
+    accept = photo_client.post(
+        f"/quiz/photo/games/{game['id']}/no-answer-response?player=2",
+        json={
+            "accept": True,
+            "round_number": round_number,
+            "no_answer_offer_version": second_offer_version,
+        },
+    )
+    assert accept.status_code == 200
+    accepted_game = accept.json()["payload"]["game"]
+    assert accept.json()["payload"]["result"] == "no_answer_accepted"
+    assert accepted_game["pending_no_answer_from"] is None
+    assert accepted_game["pending_no_answer_to"] is None
+    assert accepted_game["pending_no_answer_offer_version"] is None
+    assert accepted_game["round_number"] == round_number + 1
+    assert accepted_game["latest_completed_round"]["round_number"] == round_number
+    assert accepted_game["latest_completed_round"]["status"] == "no_answer"
+    assert accepted_game["latest_completed_round"]["winner_player"] is None
 
 
-def test_photo_realtime_adapter_rejects_public_no_answer_offer():
+def test_photo_realtime_adapter_allows_public_no_answer_offer_without_resolving():
     db = _session()
     try:
         for index in range(2):
@@ -1851,17 +1920,19 @@ def test_photo_realtime_adapter_rejects_public_no_answer_offer():
         photo_quiz.join_game(db, game.join_code, player_name="B", allow_public=True)
         current = photo_quiz._current_round(game)
 
-        with pytest.raises(
-            ConflictGameActionError,
-            match="No-answer offers are disabled for public games",
-        ):
-            PhotoQuizRealtimeAdapter().handle_client_action(
-                db,
-                game,
-                action="offer_no_answer",
-                data={"round_number": current.round_number},
-                player=1,
-            )
+        outcome = PhotoQuizRealtimeAdapter().handle_client_action(
+            db,
+            game,
+            action="offer_no_answer",
+            data={"round_number": current.round_number},
+            player=1,
+        )
+
+        assert outcome.result == RealtimeResult.NO_ANSWER_OFFERED
+        assert game.pending_no_answer_from == 1
+        assert game.pending_no_answer_to == 2
+        assert game.round_number == current.round_number
+        assert current.status == "active"
     finally:
         db.close()
 

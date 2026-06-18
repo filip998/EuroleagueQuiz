@@ -272,8 +272,16 @@ test.describe.serial("Photo Quiz Flow", () => {
         ownName: "Quick Photo Bob",
         opponentName: "Quick Photo Alice",
       });
-      await expect(playerA.getByRole("button", { name: "Nobody knows" })).toHaveCount(0);
-      await expect(playerB.getByRole("button", { name: "Nobody knows" })).toHaveCount(0);
+      await expect(playerA.getByRole("button", { name: "Nobody knows" })).toBeVisible();
+      await expect(playerB.getByRole("button", { name: "Nobody knows" })).toBeVisible();
+      await playerA.getByRole("button", { name: "Nobody knows" }).click();
+      await expect(playerB.getByRole("button", { name: "Accept no answer" })).toBeVisible({
+        timeout: 10000,
+      });
+      await playerB.getByRole("button", { name: "Decline" }).click();
+      await expect(playerA.getByRole("button", { name: "Nobody knows" })).toBeVisible({
+        timeout: 10000,
+      });
 
       const gameId = gameIdFromUrl(playerA);
       expect(gameIdFromUrl(playerB)).toBe(gameId);
