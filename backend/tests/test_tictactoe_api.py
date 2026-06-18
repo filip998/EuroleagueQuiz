@@ -382,6 +382,10 @@ def quick_match_effects(monkeypatch):
 
 
 def test_tictactoe_axis_weights_preserve_existing_values_and_add_position():
+    assert ttt_service.AXIS_WEIGHTS == {
+        axis_type: definition.weight
+        for axis_type, definition in ttt_service.AXIS_REGISTRY.items()
+    }
     assert ttt_service.AXIS_WEIGHTS["team"] == 0.58
     assert ttt_service.AXIS_WEIGHTS["nationality"] == 0.12
     assert ttt_service.AXIS_WEIGHTS["played_with"] == 0.20
