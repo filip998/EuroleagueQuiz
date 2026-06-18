@@ -811,49 +811,77 @@ def forfeit_online_game(
     game: RosterGuessGame,
     *,
     forfeiting_player: int,
-) -> None:
+) -> bool:
     """Finish an online Roster Guess Race game because one player disconnected.
 
     The forfeiting player loses; the remaining player wins.  The current
     active race round is completed so both sides see the roster reveal.
-    For non-race online games the function is a no-op (disconnect forfeits
-    are only enabled for Race games via the adapter's eligibility check).
-    Idempotent: a no-op if the game is already finished.
+    For non-race online games the function is a no-op.  Returns ``False``
+    if another resolver already finished the game/round before this
+    forfeit could claim it.
     """
     if game.mode != "online_friend":
         raise RosterGuessConflictError("Forfeit is only available in online games")
-    if game.status != "active":
-        return
+    if game.status != "active" or not game.is_race:
+        return False
     if forfeiting_player not in (1, 2):
         raise RosterGuessError("forfeiting_player must be 1 or 2")
 
     winning_player = _other_player(forfeiting_player)
     now = datetime.utcnow()
+    round_number = game.round_number
 
     try:
         round_obj = get_active_round(db, game.id)
-        if game.is_race:
-            db.query(RosterGuessRound).filter(
-                RosterGuessRound.id == round_obj.id,
-                RosterGuessRound.status == "active",
-            ).update(
-                {"status": "completed", "completed_at": now},
-                synchronize_session=False,
-            )
-            round_obj.status = "completed"
-            round_obj.completed_at = now
-        else:
-            round_obj.status = "completed"
-            round_obj.completed_at = now
     except RosterGuessConflictError:
-        pass
+        return False
+    if round_obj.status != "active":
+        return False
 
+    updated_round = (
+        db.query(RosterGuessRound)
+        .filter(RosterGuessRound.id == round_obj.id)
+        .filter(RosterGuessRound.status == "active")
+        .update(
+            {
+                "status": "completed",
+                "completed_at": now,
+                "winner_player": None,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated_round != 1:
+        return False
+    updated_game = (
+        db.query(RosterGuessGame)
+        .filter(RosterGuessGame.id == game.id)
+        .filter(RosterGuessGame.is_race.is_(True))
+        .filter(RosterGuessGame.status == "active")
+        .filter(RosterGuessGame.round_number == round_number)
+        .update(
+            {
+                "status": "finished",
+                "winner_player": winning_player,
+                "pending_end_from": None,
+                "pending_end_to": None,
+                "updated_at": now,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated_game != 1:
+        raise RosterGuessConflictError("round_stale")
     game.status = "finished"
     game.winner_player = winning_player
     game.pending_end_from = None
     game.pending_end_to = None
     game.updated_at = now
+    round_obj.status = "completed"
+    round_obj.completed_at = now
+    round_obj.winner_player = None
     db.flush()
+    return True
 
 
 # ---------------------------------------------------------------------------

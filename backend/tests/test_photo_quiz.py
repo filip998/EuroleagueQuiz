@@ -1063,6 +1063,73 @@ def test_multiplayer_stale_correct_guess_from_second_session_is_rejected(tmp_pat
         verify.close()
 
 
+def test_multiplayer_stale_disconnect_forfeit_cannot_overwrite_correct_guess(
+    tmp_path: Path,
+):
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        for index in range(3):
+            _player(
+                setup,
+                "StaleForfeit",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/stale-forfeit-{index}",
+                euroleague_image_url=f"https://cdn/stale-forfeit-{index}.png",
+            )
+        setup.commit()
+        game = photo_quiz.create_game(setup, target_wins=1, player1_name="A")
+        photo_quiz.join_game(setup, game.join_code, player_name="B")
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    stale = SessionLocal()
+    try:
+        stale_game = stale.get(PhotoQuizGame, game_id)
+
+        fresh = SessionLocal()
+        try:
+            fresh_game = fresh.get(PhotoQuizGame, game_id)
+            fresh_round = photo_quiz._current_round(fresh_game)
+            assert (
+                photo_quiz.submit_guess(
+                    fresh,
+                    game=fresh_game,
+                    player_id=fresh_round.answer_player_id,
+                    acting_player=1,
+                    round_number=fresh_round.round_number,
+                )
+                == "match_won"
+            )
+            fresh.commit()
+        finally:
+            fresh.close()
+
+        assert (
+            photo_quiz.forfeit_online_game(
+                stale,
+                stale_game,
+                forfeiting_player=1,
+            )
+            is False
+        )
+        stale.commit()
+    finally:
+        stale.close()
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(PhotoQuizGame, game_id)
+        assert stored.status == "finished"
+        assert stored.winner_player == 1
+        assert stored.player1_score == 1
+        assert stored.player2_score == 0
+    finally:
+        verify.close()
+
+
 def test_multiplayer_stale_incorrect_guess_after_correct_guess_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

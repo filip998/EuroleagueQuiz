@@ -295,6 +295,50 @@ def test_roster_race_finishes_match_when_full_roster_claimed(client: TestClient)
     assert all(slot["player_name"] for slot in result["completed_round"]["slots"])
 
 
+def test_roster_race_stale_disconnect_forfeit_cannot_overwrite_match_win(
+    client: TestClient,
+):
+    created = _create_roster_race(client, target_wins=1)
+    game = _join_roster_race(client, created["join_code"])
+    game_id = game["id"]
+    round_number = game["round_number"]
+
+    stale = client.session_local()
+    try:
+        stale_game = stale.get(RosterGuessGame, game_id)
+
+        result = None
+        for player_id in range(1, 7):
+            response = client.post(
+                f"/quiz/roster-guess/games/{game_id}/guess?player=1",
+                json={"player_id": player_id, "round_number": round_number},
+            )
+            assert response.status_code == 200
+            result = _action_payload(response)
+
+        assert result["result"] == "match_won"
+        assert result["game"]["winner_player"] == 1
+
+        assert (
+            roster_service.forfeit_online_game(
+                stale,
+                stale_game,
+                forfeiting_player=1,
+            )
+            is False
+        )
+        stale.commit()
+    finally:
+        stale.close()
+
+    with client.session_local() as db:
+        stored = db.get(RosterGuessGame, game_id)
+        assert stored.status == "finished"
+        assert stored.winner_player == 1
+        assert stored.player1_score == 1
+        assert stored.player2_score == 0
+
+
 def test_roster_race_timer_tie_starts_reveal_locked_next_round(client: TestClient):
     created = _create_roster_race(client, target_wins=2)
     game = _join_roster_race(client, created["join_code"])

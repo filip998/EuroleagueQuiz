@@ -233,6 +233,18 @@ def submit_guess(
     _raise_if_current_round_locked(game)
 
     correct = player_id == round_obj.answer_player_id
+    if correct:
+        completed_at = datetime.utcnow()
+        _claim_active_round(
+            db,
+            round_obj,
+            status="completed",
+            winner_player=acting_player,
+            completed_at=completed_at,
+        )
+    else:
+        _assert_active_game_round(db, game, round_obj, round_number)
+
     db.add(
         CareerQuizGuess(
             round_id=round_obj.id,
@@ -244,22 +256,25 @@ def submit_guess(
     if not correct:
         return "incorrect"
 
-    round_obj.status = "completed"
-    round_obj.winner_player = acting_player
-    round_obj.completed_at = datetime.utcnow()
-    if acting_player == 1:
-        game.player1_score += 1
+    player1_score = game.player1_score + (1 if acting_player == 1 else 0)
+    player2_score = game.player2_score + (1 if acting_player == 2 else 0)
+    match_won = player1_score >= game.target_wins or player2_score >= game.target_wins
+    game_values: dict[str, Any] = {
+        "player1_score": player1_score,
+        "player2_score": player2_score,
+        "pending_no_answer_from": None,
+        "pending_no_answer_to": None,
+    }
+    if match_won:
+        game_values["status"] = "finished"
+        game_values["winner_player"] = acting_player
     else:
-        game.player2_score += 1
-    game.pending_no_answer_from = None
-    game.pending_no_answer_to = None
+        game_values["round_number"] = game.round_number + 1
+    _update_active_game_round(db, game, round_number, game_values)
 
-    if game.player1_score >= game.target_wins or game.player2_score >= game.target_wins:
-        game.status = "finished"
-        game.winner_player = acting_player
+    if match_won:
         return "match_won"
 
-    game.round_number += 1
     _create_next_round(db, game)
     return "round_won"
 
@@ -303,16 +318,35 @@ def respond_no_answer(
     if accept:
         _raise_if_current_round_locked(game)
     if not accept:
-        game.pending_no_answer_from = None
-        game.pending_no_answer_to = None
+        _update_active_game_round(
+            db,
+            game,
+            round_number,
+            {
+                "pending_no_answer_from": None,
+                "pending_no_answer_to": None,
+            },
+        )
         return "declined"
 
     round_obj = _current_round(game)
-    round_obj.status = "no_answer"
-    round_obj.completed_at = datetime.utcnow()
-    game.pending_no_answer_from = None
-    game.pending_no_answer_to = None
-    game.round_number += 1
+    _claim_active_round(
+        db,
+        round_obj,
+        status="no_answer",
+        winner_player=None,
+        completed_at=datetime.utcnow(),
+    )
+    _update_active_game_round(
+        db,
+        game,
+        round_number,
+        {
+            "pending_no_answer_from": None,
+            "pending_no_answer_to": None,
+            "round_number": game.round_number + 1,
+        },
+    )
     _create_next_round(db, game)
     return "accepted"
 
@@ -351,38 +385,56 @@ def forfeit_online_game(
     game: CareerQuizGame,
     *,
     forfeiting_player: int,
-) -> None:
+) -> bool:
     """Finish an online Career Quiz game because one player disconnected.
 
     The forfeiting player loses; the remaining player wins.  The current
     active round is closed as ``no_answer`` so the answer is revealed on
-    both sides.  Idempotent: a no-op if the game is already finished.
+    both sides.  Returns ``False`` if another resolver already finished
+    the game/round before this forfeit could claim it.
     """
     if game.mode != "online_friend":
         raise ConflictGameActionError("Forfeit is only available in online games")
     if game.status != "active":
-        return
+        return False
     if forfeiting_player not in (1, 2):
         raise InvalidGameActionError("forfeiting_player must be 1 or 2")
 
     winning_player = 2 if forfeiting_player == 1 else 1
     now = datetime.utcnow()
+    round_number = game.round_number
 
     try:
         round_obj = _current_round(game)
-        if round_obj.status == "active":
-            round_obj.status = "no_answer"
-            round_obj.winner_player = None
-            round_obj.completed_at = now
     except ConflictGameActionError:
-        pass
+        return False
+    if round_obj.status != "active":
+        return False
 
-    game.status = "finished"
-    game.winner_player = winning_player
-    game.pending_no_answer_from = None
-    game.pending_no_answer_to = None
-    game.updated_at = now
+    try:
+        _claim_active_round(
+            db,
+            round_obj,
+            status="no_answer",
+            winner_player=None,
+            completed_at=now,
+        )
+    except ConflictGameActionError:
+        return False
+    _update_active_game_round(
+        db,
+        game,
+        round_number,
+        {
+            "status": "finished",
+            "winner_player": winning_player,
+            "pending_no_answer_from": None,
+            "pending_no_answer_to": None,
+            "updated_at": now,
+        },
+    )
     db.flush()
+    return True
 
 
 def handle_public_round_time_expired(
@@ -408,12 +460,26 @@ def handle_public_round_time_expired(
     if round_obj.status != "active":
         return False
 
-    round_obj.status = "no_answer"
-    round_obj.winner_player = None
-    round_obj.completed_at = datetime.utcnow()
-    game.pending_no_answer_from = None
-    game.pending_no_answer_to = None
-    game.round_number += 1
+    try:
+        _claim_active_round(
+            db,
+            round_obj,
+            status="no_answer",
+            winner_player=None,
+            completed_at=datetime.utcnow(),
+        )
+        _update_active_game_round(
+            db,
+            game,
+            expected_round,
+            {
+                "pending_no_answer_from": None,
+                "pending_no_answer_to": None,
+                "round_number": game.round_number + 1,
+            },
+        )
+    except ConflictGameActionError:
+        return False
     _create_next_round(db, game)
     return True
 
@@ -441,14 +507,27 @@ def handle_public_game_unattended_time_expired(
     if round_obj.status != "active":
         return False
 
-    round_obj.status = "no_answer"
-    round_obj.winner_player = None
-    round_obj.completed_at = datetime.utcnow()
-    game.status = "finished"
-    game.winner_player = None
-    game.pending_no_answer_from = None
-    game.pending_no_answer_to = None
-    db.flush()
+    try:
+        _claim_active_round(
+            db,
+            round_obj,
+            status="no_answer",
+            winner_player=None,
+            completed_at=datetime.utcnow(),
+        )
+        _update_active_game_round(
+            db,
+            game,
+            expected_round,
+            {
+                "status": "finished",
+                "winner_player": None,
+                "pending_no_answer_from": None,
+                "pending_no_answer_to": None,
+            },
+        )
+    except ConflictGameActionError:
+        return False
     return True
 
 
@@ -572,6 +651,75 @@ def _raise_if_current_round_locked(game: CareerQuizGame) -> None:
 def _raise_if_round_stale(game: CareerQuizGame, round_number: int) -> None:
     if round_number != game.round_number:
         raise ConflictGameActionError("round_stale")
+
+
+def _assert_active_game_round(
+    db: Session,
+    game: CareerQuizGame,
+    round_obj: CareerQuizRound,
+    round_number: int,
+) -> None:
+    exists = (
+        db.query(CareerQuizRound.id)
+        .join(CareerQuizGame, CareerQuizGame.id == CareerQuizRound.game_id)
+        .filter(CareerQuizRound.id == round_obj.id)
+        .filter(CareerQuizRound.status == "active")
+        .filter(CareerQuizGame.id == game.id)
+        .filter(CareerQuizGame.status == "active")
+        .filter(CareerQuizGame.round_number == round_number)
+        .first()
+    )
+    if exists is None:
+        raise ConflictGameActionError("round_stale")
+
+
+def _claim_active_round(
+    db: Session,
+    round_obj: CareerQuizRound,
+    *,
+    status: str,
+    winner_player: int | None,
+    completed_at: datetime,
+) -> None:
+    updated = (
+        db.query(CareerQuizRound)
+        .filter(CareerQuizRound.id == round_obj.id)
+        .filter(CareerQuizRound.status == "active")
+        .update(
+            {
+                "status": status,
+                "winner_player": winner_player,
+                "completed_at": completed_at,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated != 1:
+        raise ConflictGameActionError("round_stale")
+    round_obj.status = status
+    round_obj.winner_player = winner_player
+    round_obj.completed_at = completed_at
+
+
+def _update_active_game_round(
+    db: Session,
+    game: CareerQuizGame,
+    round_number: int,
+    values: dict[str, Any],
+) -> None:
+    update_values = dict(values)
+    update_values.setdefault("updated_at", datetime.utcnow())
+    updated = (
+        db.query(CareerQuizGame)
+        .filter(CareerQuizGame.id == game.id)
+        .filter(CareerQuizGame.status == "active")
+        .filter(CareerQuizGame.round_number == round_number)
+        .update(update_values, synchronize_session=False)
+    )
+    if updated != 1:
+        raise ConflictGameActionError("round_stale")
+    for key, value in update_values.items():
+        setattr(game, key, value)
 
 
 def _active_next_round_lock_starts_at(

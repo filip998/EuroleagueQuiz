@@ -422,45 +422,56 @@ def forfeit_online_game(
     game: PhotoQuizGame,
     *,
     forfeiting_player: int,
-) -> None:
+) -> bool:
     """Finish an online Photo Quiz game because one player disconnected.
 
     The forfeiting player loses; the remaining player wins.  The current
     active round is closed as ``no_answer`` so the answer is revealed on
-    both sides.  Idempotent: a no-op if the game is already finished.
+    both sides.  Returns ``False`` if another resolver already finished
+    the game/round before this forfeit could claim it.
     """
     if game.mode != "online_friend":
         raise ConflictGameActionError("Forfeit is only available in online games")
     if game.status != "active":
-        return
+        return False
     if forfeiting_player not in (1, 2):
         raise InvalidGameActionError("forfeiting_player must be 1 or 2")
 
     winning_player = 2 if forfeiting_player == 1 else 1
     now = datetime.utcnow()
+    round_number = game.round_number
 
     try:
         round_obj = _current_round(game)
-        if round_obj.status == "active":
-            try:
-                _claim_active_round(
-                    db,
-                    round_obj,
-                    status="no_answer",
-                    winner_player=None,
-                    completed_at=now,
-                )
-            except ConflictGameActionError:
-                pass
     except ConflictGameActionError:
-        pass
+        return False
+    if round_obj.status != "active":
+        return False
 
-    game.status = "finished"
-    game.winner_player = winning_player
-    game.pending_no_answer_from = None
-    game.pending_no_answer_to = None
-    game.updated_at = now
+    try:
+        _claim_active_round(
+            db,
+            round_obj,
+            status="no_answer",
+            winner_player=None,
+            completed_at=now,
+        )
+    except ConflictGameActionError:
+        return False
+    _update_active_game_round(
+        db,
+        game,
+        round_number,
+        {
+            "status": "finished",
+            "winner_player": winning_player,
+            "pending_no_answer_from": None,
+            "pending_no_answer_to": None,
+            "updated_at": now,
+        },
+    )
     db.flush()
+    return True
 
 
 def handle_public_round_time_expired(

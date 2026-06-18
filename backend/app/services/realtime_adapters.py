@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.game_actions import (
     GAME_ACTION_NOOP,
+    ConflictGameActionError,
     InvalidGameActionError,
     UnsupportedGameActionError,
 )
@@ -550,8 +551,13 @@ class RosterGuessRealtimeAdapter:
     ) -> Any:
         if not getattr(game, "is_race", False):
             return GAME_ACTION_NOOP
-        roster_service.forfeit_online_game(db, game, forfeiting_player=forfeiting_player)
-        return game
+        try:
+            changed = roster_service.forfeit_online_game(
+                db, game, forfeiting_player=forfeiting_player
+            )
+        except ConflictGameActionError:
+            return GAME_ACTION_NOOP
+        return game if changed else GAME_ACTION_NOOP
 
 
 class CareerQuizRealtimeAdapter:
@@ -778,8 +784,13 @@ class CareerQuizRealtimeAdapter:
         forfeiting_player: int,
         result: RealtimeResult,
     ) -> Any:
-        career_service.forfeit_online_game(db, game, forfeiting_player=forfeiting_player)
-        return game
+        try:
+            changed = career_service.forfeit_online_game(
+                db, game, forfeiting_player=forfeiting_player
+            )
+        except ConflictGameActionError:
+            return GAME_ACTION_NOOP
+        return game if changed else GAME_ACTION_NOOP
 
 
 class PhotoQuizRealtimeAdapter:
@@ -1010,5 +1021,10 @@ class PhotoQuizRealtimeAdapter:
         forfeiting_player: int,
         result: RealtimeResult,
     ) -> Any:
-        photo_service.forfeit_online_game(db, game, forfeiting_player=forfeiting_player)
-        return game
+        try:
+            changed = photo_service.forfeit_online_game(
+                db, game, forfeiting_player=forfeiting_player
+            )
+        except ConflictGameActionError:
+            return GAME_ACTION_NOOP
+        return game if changed else GAME_ACTION_NOOP
