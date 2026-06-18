@@ -249,6 +249,20 @@ class TicTacToeRealtimeAdapter:
         )
         return game
 
+    def timer_state_from_game(self, game: Any) -> TurnTimerState | None:
+        return TurnTimerState(
+            seconds=getattr(game, "turn_seconds", None),
+            current_player=getattr(game, "current_player", 0),
+            round_number=game.round_number,
+        )
+
+    def timer_state_from_state(self, game_state: dict[str, Any]) -> TurnTimerState | None:
+        return TurnTimerState(
+            seconds=game_state.get("turn_seconds"),
+            current_player=game_state.get("current_player", 0),
+            round_number=game_state["round_number"],
+        )
+
     def handle_player_forfeit(
         self,
         db: Session,
@@ -282,6 +296,9 @@ class RosterGuessRealtimeAdapter:
     }
     client_actions = websocket_actions
 
+    def __init__(self, matchmaking: Any | None = None):
+        self.matchmaking = matchmaking
+
     def get_game(self, db: Session, game_id: int) -> Any:
         return roster_service.get_game_or_404(db, game_id)
 
@@ -311,17 +328,27 @@ class RosterGuessRealtimeAdapter:
     ) -> RealtimeActionOutcome:
         data = command.payload
         if command.action == GameActionName.CREATE:
-            game = roster_service.create_game(
-                db,
-                mode=data.get("mode", "single_player"),
-                target_wins=data.get("target_wins", 3),
-                timer_mode=data.get("timer_mode", "40s"),
-                player1_name=data.get("player1_name"),
-                player2_name=data.get("player2_name"),
-                season_range_start=data.get("season_range_start"),
-                season_range_end=data.get("season_range_end"),
-                guest_id=data.get("guest_id"),
-            )
+            if data.get("game_type") == roster_service.GAME_TYPE_RACE:
+                game = roster_service.create_race_game(
+                    db,
+                    target_wins=data.get("target_wins", 3),
+                    player1_name=data.get("player1_name"),
+                    season_range_start=data.get("season_range_start"),
+                    season_range_end=data.get("season_range_end"),
+                    guest_id=data.get("guest_id"),
+                )
+            else:
+                game = roster_service.create_game(
+                    db,
+                    mode=data.get("mode", "single_player"),
+                    target_wins=data.get("target_wins", 3),
+                    timer_mode=data.get("timer_mode", "40s"),
+                    player1_name=data.get("player1_name"),
+                    player2_name=data.get("player2_name"),
+                    season_range_start=data.get("season_range_start"),
+                    season_range_end=data.get("season_range_end"),
+                    guest_id=data.get("guest_id"),
+                )
             return RealtimeActionOutcome(game=game, broadcast=False)
 
         if command.action == GameActionName.JOIN:
@@ -330,6 +357,11 @@ class RosterGuessRealtimeAdapter:
                 _required_str(data, "join_code").upper(),
                 data.get("player_name"),
                 guest_id=data.get("guest_id"),
+                expected_game_type=(
+                    roster_service.GAME_TYPE_RACE
+                    if data.get("game_type") == roster_service.GAME_TYPE_RACE
+                    else roster_service.GAME_TYPE_CLASSIC
+                ),
             )
             return RealtimeActionOutcome(game=game, broadcast=True, schedule_timer=True)
 
@@ -354,20 +386,33 @@ class RosterGuessRealtimeAdapter:
         if action == GameActionName.GUESS:
             acting_player = _online_actor(game, player)
             prev_round_number = game.round_number
+            is_race = roster_service.is_race_game(game)
             result = roster_service.submit_guess(
                 db,
                 game=game,
                 player_id=_required_int(data, "player_id"),
                 acting_player=acting_player,
+                round_number=_required_int(data, "round_number") if is_race else None,
             )
+            completed_round = result in _ROSTER_ROUND_RESULTS
+            match_won = result == RealtimeResult.MATCH_WON.value
             return RealtimeActionOutcome(
                 game=game,
                 result=result,
                 completed_round_number=(
-                    prev_round_number if result in _ROSTER_ROUND_RESULTS else None
+                    prev_round_number if completed_round else None
                 ),
-                schedule_timer=result != RealtimeResult.MATCH_WON,
-                cancel_timer=result == RealtimeResult.MATCH_WON,
+                schedule_timer=(
+                    completed_round and not match_won
+                    if is_race
+                    else not match_won
+                ),
+                cancel_timer=match_won,
+                broadcast_to_player=(
+                    acting_player
+                    if is_race and result == RealtimeResult.INCORRECT.value
+                    else None
+                ),
             )
 
         if action == GameActionName.OFFER_END:
@@ -417,6 +462,14 @@ class RosterGuessRealtimeAdapter:
         expected_player: int,
         expected_round: int,
     ) -> Any:
+        if roster_service.is_race_game(game):
+            if not roster_service.handle_race_time_expired(
+                db,
+                game,
+                expected_round=expected_round,
+            ):
+                return GAME_ACTION_NOOP
+            return game
         if (
             game.status != "active"
             or game.current_player != expected_player
@@ -430,6 +483,31 @@ class RosterGuessRealtimeAdapter:
             expected_round=expected_round,
         )
         return game
+
+    def timer_state_from_game(self, game: Any) -> TurnTimerState | None:
+        if roster_service.is_race_game(game):
+            return None
+        return TurnTimerState(
+            seconds=getattr(game, "turn_seconds", None),
+            current_player=getattr(game, "current_player", 0),
+            round_number=game.round_number,
+        )
+
+    def timer_state_from_state(self, game_state: dict[str, Any]) -> TurnTimerState | None:
+        if game_state.get("game_type") == roster_service.GAME_TYPE_RACE:
+            delay = roster_service.race_round_timer_delay_seconds_from_state(game_state)
+            if delay is None:
+                return None
+            return TurnTimerState(
+                seconds=delay,
+                current_player=0,
+                round_number=game_state["round_number"],
+            )
+        return TurnTimerState(
+            seconds=game_state.get("turn_seconds"),
+            current_player=game_state.get("current_player", 0),
+            round_number=game_state["round_number"],
+        )
 
     def handle_player_forfeit(
         self,

@@ -12,6 +12,7 @@ import {
   loadOnlineInfo,
   recoverOnlineInfo,
   recoverPhotoOnlineInfo,
+  recoverRosterOnlineInfo,
   clearOnlineInfo,
 } from "../onlineRecovery";
 
@@ -122,6 +123,58 @@ describe("recoverPhotoOnlineInfo", () => {
     const info = recoverPhotoOnlineInfo(7, publicQuickMatch);
     expect(info).toEqual({ playerNumber: 1, isOnline: true });
     expect(recallMock).not.toHaveBeenCalled();
+  });
+
+  describe("recoverRosterOnlineInfo", () => {
+    const publicRosterRace = {
+      mode: "online_friend",
+      game_type: "race",
+      is_public: true,
+      preset: "modern-standard",
+    };
+
+    it("prefers the per-tab sessionStorage seat", () => {
+      saveOnlineInfo(7, { playerNumber: 1, isOnline: true });
+      const info = recoverRosterOnlineInfo(7, publicRosterRace);
+      expect(info).toEqual({ playerNumber: 1, isOnline: true });
+      expect(recallMock).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the roster-namespaced seat map for public Race Quick Match games", () => {
+      recallMock.mockReturnValue(2);
+      const info = recoverRosterOnlineInfo(7, publicRosterRace);
+      expect(info).toEqual({ playerNumber: 2, isOnline: true });
+      expect(recallMock).toHaveBeenCalledWith("roster:7");
+    });
+
+    it("does not fall back for private Race friend games", () => {
+      recallMock.mockReturnValue(2);
+      expect(
+        recoverRosterOnlineInfo(7, {
+          mode: "online_friend",
+          game_type: "race",
+        })
+      ).toBeNull();
+      expect(recallMock).not.toHaveBeenCalled();
+    });
+
+    it("does not fall back for Classic online games", () => {
+      recallMock.mockReturnValue(2);
+      expect(
+        recoverRosterOnlineInfo(7, {
+          mode: "online_friend",
+          game_type: "classic",
+          is_public: true,
+          preset: "modern-standard",
+        })
+      ).toBeNull();
+      expect(recallMock).not.toHaveBeenCalled();
+    });
+
+    it("returns null when neither source has a seat", () => {
+      recallMock.mockReturnValue(null);
+      expect(recoverRosterOnlineInfo(7, publicRosterRace)).toBeNull();
+    });
   });
 
   it("falls back to the photo-namespaced seat map for public Quick Match games", () => {

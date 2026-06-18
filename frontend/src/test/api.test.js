@@ -11,7 +11,12 @@ import {
   autocompletePlayer,
   connectTicTacToeRealtime,
   createRosterGame,
+  createRosterRaceGame,
+  joinRosterRaceGame,
   joinRosterGame,
+  quickMatchRosterRace,
+  cancelRosterRaceQuickMatch,
+  getRosterRaceQuickMatchPools,
   submitRosterGuess,
   autocompleteRosterPlayer,
   createHigherLowerGame,
@@ -326,6 +331,116 @@ describe("Roster Guess API", () => {
       })
     );
     expect(result.result).toBe("correct");
+  });
+
+  it("createRosterRaceGame posts race friend settings with guest_id", async () => {
+    const payload = {
+      target_wins: 3,
+      player1_name: "Racer",
+      season_range_start: 2018,
+      season_range_end: 2025,
+    };
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 12 })));
+
+    const result = await createRosterRaceGame(payload);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/race/games",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ...payload, guest_id: "test-guest-id" }),
+      })
+    );
+    expect(result.state.id).toBe(12);
+  });
+
+  it("joinRosterRaceGame posts join_code, player_name and guest_id", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 13 })));
+
+    const result = await joinRosterRaceGame("ABC123", "Racer 2");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/race/games/join",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          join_code: "ABC123",
+          player_name: "Racer 2",
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+    expect(result.state.id).toBe(13);
+  });
+
+  it("quickMatchRosterRace posts preset, player_name and guest_id", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(stateEnvelope({ id: 14, status: "waiting_for_opponent" }))
+    );
+
+    const result = await quickMatchRosterRace({ preset: "modern-standard", player_name: "Ace" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/quick-match",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          preset: "modern-standard",
+          player_name: "Ace",
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+    expect(result.state.id).toBe(14);
+  });
+
+  it("cancelRosterRaceQuickMatch posts game_id, preset and guest_id", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 14 })));
+
+    await cancelRosterRaceQuickMatch({ preset: "modern-standard", game_id: 14 });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/quick-match/cancel",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          preset: "modern-standard",
+          game_id: 14,
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+  });
+
+  it("getRosterRaceQuickMatchPools GETs the roster pool counts", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse({
+        pools: { "modern-standard": { searching: 2, in_progress: 1 } },
+        poll_interval_seconds: 5,
+      })
+    );
+
+    const result = await getRosterRaceQuickMatchPools();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/quick-match/pools",
+      expect.objectContaining({ method: "GET" })
+    );
+    expect(result.pools["modern-standard"].searching).toBe(2);
+  });
+
+  it("submitRosterGuess can include player query and round_number for Race", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 }, "correct")));
+
+    await submitRosterGuess(10, 456, { playerNumber: 2, roundNumber: 3 });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/games/10/guess?player=2",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ player_id: 456, round_number: 3 }),
+      })
+    );
   });
 
   it("autocompleteRosterPlayer sends query", async () => {

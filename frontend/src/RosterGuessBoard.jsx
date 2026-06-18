@@ -1,9 +1,18 @@
 import { useState, useEffect, useRef } from "react";
-import { getRosterGame, submitRosterGuess, offerEndRound, respondEndRound, connectRosterGuessRealtime, autocompleteRosterPlayer, giveUpRosterRound } from "./api";
+import { getRosterGame, submitRosterGuess, offerEndRound, respondEndRound, connectRosterGuessRealtime, autocompleteRosterPlayer, giveUpRosterRound, cancelRosterRaceQuickMatch } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import { LogoMini } from "./Logo";
 import ClubLogo from "./ClubLogo";
+import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
+import { clearOnlineInfo } from "./onlineRecovery";
+import { forgetQuickMatchSeat } from "./quickMatchSeats";
+import {
+  ROSTER_RACE_ROUND_SECONDS,
+  rosterRacePresetLabel,
+  rosterRaceSeatKey,
+  useRosterRaceQuickMatchPools,
+} from "./rosterRaceQuickMatch";
 
 const POSITION_ORDER = { "Guard": 0, "Guard-Forward": 1, "Forward": 2, "Forward-Center": 3, "Center": 4 };
 function posRank(p) { return POSITION_ORDER[p] ?? 5; }
@@ -29,19 +38,36 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [raceTimerAnchor, setRaceTimerAnchor] = useState(null);
   const searchInputRef = useRef(null);
 
   const isOnline = onlineInfo?.isOnline;
   const myPlayer = onlineInfo?.playerNumber;
   const isSolo = game?.mode === "single_player";
+  const isRace = game?.game_type === "race";
+  const isPublicQuickMatch = isRace && Boolean(game?.is_public) && Boolean(game?.preset);
   const realtimeUnavailableMessage = "Realtime connection unavailable. Reconnecting...";
 
   function handleRealtimeState(message) {
     const result = message.result;
     setGame(message.state);
     setError(null);
-    if (result && ["round_won","round_complete","match_won","board_complete"].includes(result)) {
-      startRoundTransition(result, message.completedRound || message.state);
+    const raceTimerReveal = message.state?.game_type === "race"
+      && result === "time_expired"
+      && message.state.latest_completed_round?.next_round_starts_at;
+    if (
+      result
+      && (
+        ["round_won","round_complete","match_won","board_complete"].includes(result)
+        || raceTimerReveal
+      )
+    ) {
+      const completed = message.state?.game_type === "race"
+        ? message.state.latest_completed_round || message.completedRound
+        : message.completedRound || message.state;
+      startRoundTransition(result, completed, message.state);
     } else if (result) {
       setLastResult(result);
     }
@@ -59,6 +85,17 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   });
 
   const round = game?.round;
+  const revealNextRoundStartsAt = game?.latest_completed_round?.next_round_starts_at || null;
+  const serverRevealCountdown = getCountdownRemaining(revealNextRoundStartsAt, nowMs);
+  const roundLocked = isRace && serverRevealCountdown > 0;
+  const raceTimerEligible = isRace && game?.status === "active" && !roundLocked;
+  const raceTimerActive = raceTimerEligible && raceTimerAnchor?.round === game?.round_number;
+  const raceTimerRemaining = raceTimerActive
+    ? Math.min(
+        ROSTER_RACE_ROUND_SECONDS,
+        Math.max(0, Math.ceil((raceTimerAnchor.deadlineMs - nowMs) / 1000))
+      )
+    : null;
 
   useEffect(() => {
     if (!game?.turn_seconds || game.status !== "active") { setTimeLeft(null); return; }
@@ -86,6 +123,25 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
     return () => clearTimeout(t);
   }, [roundTransition]);
 
+  useEffect(() => {
+    if (!revealNextRoundStartsAt && !raceTimerActive) return undefined;
+    const t = setInterval(() => setNowMs(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [revealNextRoundStartsAt, raceTimerActive]);
+
+  useEffect(() => {
+    if (!raceTimerEligible) {
+      if (raceTimerAnchor !== null) setRaceTimerAnchor(null);
+      return;
+    }
+    if (raceTimerAnchor?.round !== game?.round_number) {
+      setRaceTimerAnchor({
+        round: game?.round_number,
+        deadlineMs: Date.now() + ROSTER_RACE_ROUND_SECONDS * 1000,
+      });
+    }
+  }, [raceTimerEligible, game?.round_number, raceTimerAnchor]);
+
   // Reveal countdown after round ends or give up
   useEffect(() => {
     if (revealCountdown === null) return;
@@ -94,10 +150,15 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
     return () => clearTimeout(t);
   }, [revealCountdown]);
 
-  function startRoundTransition(result, completedRoundOrGame) {
+  function startRoundTransition(result, completedRoundOrGame, nextState = null) {
     const completedRound = completedRoundOrGame?.slots ? completedRoundOrGame : completedRoundOrGame?.round;
     const unguessed = completedRound?.slots?.filter(s => s.guessed_by_player == null).length || 0;
-    const revealTime = Math.max(3, unguessed * 2);
+    const nextRoundStartsAt = completedRound?.next_round_starts_at
+      || nextState?.latest_completed_round?.next_round_starts_at
+      || null;
+    const revealTime = nextState?.game_type === "race"
+      ? Math.max(0, getCountdownRemaining(nextRoundStartsAt, Date.now()))
+      : Math.max(3, unguessed * 2);
     setRevealCountdown(revealTime);
     setRoundTransition({ countdown: revealTime, completedRound, result });
     setLastResult(result);
@@ -114,17 +175,20 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const isMyTurn = !isOnline || game?.current_player === myPlayer;
+  const isMyTurn = isRace || !isOnline || game?.current_player === myPlayer;
   const currentPlayerName = game?.current_player === 1 ? game?.player1_name : game?.player2_name;
   const inTransition = !!roundTransition;
-  const isRevealing = revealCountdown !== null && revealCountdown > 0;
+  const isRevealing = (revealCountdown !== null && revealCountdown > 0) || roundLocked;
   const roundOver = round?.status === "completed" || round?.status === "given_up";
 
   async function handlePlayerSelect(player) {
     setSearchQuery(""); setSearchResults([]); setLoading(true); setError(null);
     try {
       if (isOnline) {
-        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.GUESS, { player_id: player.player_id })) {
+        const payload = isRace
+          ? { player_id: player.player_id, round_number: game.round_number }
+          : { player_id: player.player_id };
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.GUESS, payload)) {
           setError(realtimeUnavailableMessage);
         }
         return;
@@ -171,6 +235,19 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 
+  async function handleQuickCancel() {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await cancelRosterRaceQuickMatch({ preset: game.preset, game_id: game.id });
+      clearOnlineInfo(game.id);
+      forgetQuickMatchSeat(rosterRaceSeatKey(game.id));
+      onNewGame?.();
+    } catch {
+      setCancelling(false);
+    }
+  }
+
   function handleSearchKeyDown(e) {
     if (e.key === "Escape") { setSearchQuery(""); setSearchResults([]); searchInputRef.current?.blur(); }
     if (e.key === "Enter" && searchResults.length === 1) handlePlayerSelect(searchResults[0]);
@@ -179,6 +256,18 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   const resultMessages = { correct: "\u2705 Correct!", incorrect: "\u274c Wrong player.", round_won: "\ud83c\udfc6 Round over!", round_complete: "\ud83c\udfc6 Round over!", match_won: "\ud83c\udf89 Match won!", board_complete: "\u2705 Roster complete!", end_offered: "\ud83e\udd1d End offered.", end_accepted: "\ud83e\udd1d Round ended!", end_declined: "Declined.", time_expired: "\u23f0 Time\u2019s up!", given_up: "\ud83c\udff3\ufe0f Gave up \u2014 full roster revealed." };
 
   if (game?.status === "waiting_for_opponent") {
+    if (isPublicQuickMatch) {
+      return (
+        <QuickMatchSearchingLobby
+          preset={game.preset}
+          onCancel={handleQuickCancel}
+          cancelling={cancelling}
+          usePools={useRosterRaceQuickMatchPools}
+          getPresetLabel={rosterRacePresetLabel}
+          title="SEARCHING ROSTER RACE…"
+        />
+      );
+    }
     return (<div className="min-h-screen flex flex-col"><div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" /><div className="flex-1 flex items-center justify-center p-4"><div className="text-center animate-fade-in-up"><div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-elq-orange/10 mb-6 animate-pulse-ring"><svg className="w-8 h-8 text-elq-orange animate-spin-slow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg></div><h2 className="font-display text-4xl text-elq-dark mb-3">WAITING FOR OPPONENT</h2><p className="text-elq-muted mb-6">Share this code</p><div className="inline-block bg-elq-bg border-2 border-dashed border-elq-orange/30 rounded-2xl px-10 py-6 mb-6 select-all"><span className="font-mono text-5xl tracking-[0.3em] text-elq-dark font-bold">{game.join_code}</span></div><p className="text-sm text-elq-muted mb-8">Game starts when they join.</p><button onClick={onHome || onNewGame} className="text-sm text-elq-muted hover:text-elq-orange transition-colors underline underline-offset-2">Cancel</button></div></div></div>);
   }
 
@@ -205,7 +294,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
           <span className="text-[11px] text-elq-muted">{isSolo ? "" : `Rd ${game.round_number} \u00b7 First to ${game.target_wins}`}</span>
         </div>
       </div>
-      {isOnline && (<div className="bg-elq-bg text-center py-1 text-[11px] text-elq-muted border-b border-elq-border flex-shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block mr-1.5" />You are <strong>{game[`player${myPlayer}_name`]}</strong>{!isMyTurn && <span className="text-elq-orange ml-1">&mdash; Opponent&apos;s turn</span>}</div>)}
+      {isOnline && (<div className="bg-elq-bg text-center py-1 text-[11px] text-elq-muted border-b border-elq-border flex-shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block mr-1.5" />You are <strong>{game[`player${myPlayer}_name`]}</strong>{!isRace && !isMyTurn && <span className="text-elq-orange ml-1">&mdash; Opponent&apos;s turn</span>}{isRace && <span className="text-elq-orange ml-1">&mdash; Race mode</span>}</div>)}
       {isSolo ? (
       <div className="bg-white border-b border-elq-border flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2 text-center">
@@ -216,7 +305,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
       <div className="bg-white border-b border-elq-border flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 flex-1 min-w-0"><span className={`font-semibold text-sm truncate ${game.current_player === 1 && game.status === "active" ? "text-elq-player1" : "text-elq-muted"}`}>{game.player1_name}</span><span className="text-xl font-bold text-elq-dark">{game.player1_score}</span>{game.current_player === 1 && game.status === "active" && <span className="w-1.5 h-1.5 rounded-full bg-elq-player1 animate-pulse flex-shrink-0" />}</div>
-          <div className="text-center flex-shrink-0 px-3">{game.turn_seconds && game.status === "active" && timeLeft !== null ? (<span className={`text-lg font-bold font-mono tabular-nums ${timeLeft <= 5 ? "animate-timer-critical" : "text-elq-dark"}`}>{timeLeft}<span className="text-[10px] text-elq-muted font-normal">s</span></span>) : (<span className="text-xs text-elq-muted">{game.status === "active" ? `${currentPlayerName}\u2019s turn` : ""}</span>)}</div>
+          <div className="text-center flex-shrink-0 px-3">{isRace && raceTimerRemaining != null ? (<span className={`text-lg font-bold font-mono tabular-nums ${raceTimerRemaining <= 10 ? "animate-timer-critical" : "text-elq-dark"}`}>{raceTimerRemaining}<span className="text-[10px] text-elq-muted font-normal">s</span></span>) : game.turn_seconds && game.status === "active" && timeLeft !== null ? (<span className={`text-lg font-bold font-mono tabular-nums ${timeLeft <= 5 ? "animate-timer-critical" : "text-elq-dark"}`}>{timeLeft}<span className="text-[10px] text-elq-muted font-normal">s</span></span>) : (<span className="text-xs text-elq-muted">{game.status === "active" ? (isRace ? "Race clock" : `${currentPlayerName}\u2019s turn`) : ""}</span>)}</div>
           <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">{game.current_player === 2 && game.status === "active" && <span className="w-1.5 h-1.5 rounded-full bg-elq-player2 animate-pulse flex-shrink-0" />}<span className="text-xl font-bold text-elq-dark">{game.player2_score}</span><span className={`font-semibold text-sm truncate ${game.current_player === 2 && game.status === "active" ? "text-elq-player2" : "text-elq-muted"}`}>{game.player2_name}</span></div>
         </div>
       </div>
@@ -227,7 +316,7 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
           <div className="flex items-center gap-3 text-[11px] text-white/60 whitespace-nowrap">
             <span>{displayRound.guessed_count}/{displayRound.total_slots}</span>
             {!isSolo && (displayRound.player1_correct > 0 || displayRound.player2_correct > 0) && (<span><span className="text-blue-300">{displayRound.player1_correct}</span> &ndash; <span className="text-red-300">{displayRound.player2_correct}</span></span>)}
-            {isRevealing && <span className="text-elq-orange font-semibold">{revealCountdown}s</span>}
+            {isRevealing && <span className="text-elq-orange font-semibold">{revealCountdown ?? serverRevealCountdown}s</span>}
           </div>
         </div>
       </div>
@@ -353,14 +442,21 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
           {game.status === "active" && !inTransition && !isRevealing && !roundOver && (
             <>
               {game.pending_end ? (<div className="flex items-center gap-3 text-sm"><span className="text-elq-text"><strong>{game.pending_end.offered_by === 1 ? game.player1_name : game.player2_name}</strong> wants to end.</span>{(!isOnline || myPlayer === game.pending_end.respond_to) && (<><button onClick={() => handleRespondEnd(true)} disabled={loading} className="px-3 py-1 bg-elq-success text-white text-xs font-semibold rounded-lg hover:opacity-90 disabled:opacity-50">Accept</button><button onClick={() => handleRespondEnd(false)} disabled={loading} className="px-3 py-1 bg-white border border-elq-border text-elq-text text-xs font-semibold rounded-lg hover:bg-elq-bg disabled:opacity-50">Decline</button></>)}</div>) : (<>
-                {isMyTurn && game.mode !== "single_player" && (<button onClick={handleOfferEnd} disabled={loading} className="text-xs text-elq-muted hover:text-elq-text transition-colors">End Round</button>)}
+                {isMyTurn && !isRace && game.mode !== "single_player" && (<button onClick={handleOfferEnd} disabled={loading} className="text-xs text-elq-muted hover:text-elq-text transition-colors">End Round</button>)}
                 {game.mode === "single_player" && (<button onClick={handleGiveUp} disabled={loading} className="text-xs text-red-400 hover:text-red-600 transition-colors font-medium">Give Up</button>)}
               </>)}
             </>
           )}
-          {isRevealing && !inTransition && (<span className="text-xs text-elq-muted">Reviewing roster... <strong className="text-elq-orange">{revealCountdown}s</strong></span>)}
+          {isRevealing && !inTransition && (<span className="text-xs text-elq-muted">Reviewing roster... <strong className="text-elq-orange">{revealCountdown ?? serverRevealCountdown}s</strong></span>)}
         </div>
       </div>
     </div>
   );
+}
+
+function getCountdownRemaining(deadline, nowMs) {
+  if (!deadline) return 0;
+  const deadlineMs = new Date(deadline).getTime();
+  if (Number.isNaN(deadlineMs)) return 0;
+  return Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
 }

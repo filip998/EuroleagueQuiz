@@ -13,10 +13,11 @@ from app.models import (
     PlayerSeasonTeam,
     QuizTicTacToeGame,
     QuizTicTacToeRound,
+    RosterGuessGame,
     Season,
     Team,
 )
-from app.services import matchmaking, tictactoe
+from app.services import matchmaking, roster_guess, tictactoe
 from app.services.matchmaking import (
     MatchmakingCancelRequest,
     MatchmakingRequest,
@@ -24,7 +25,10 @@ from app.services.matchmaking import (
     cancel_search,
     find_or_create_match,
 )
-from app.services.matchmaking_adapters import TicTacToeMatchmakingAdapter
+from app.services.matchmaking_adapters import (
+    RosterGuessMatchmakingAdapter,
+    TicTacToeMatchmakingAdapter,
+)
 
 
 @pytest.fixture()
@@ -650,6 +654,128 @@ def test_two_simultaneous_requests_to_empty_pool_create_exactly_one_match(
             .scalar()
         )
         assert waiting_count == 0
+
+
+def test_roster_guess_matchmaking_exposes_twelve_race_presets(session_factory):
+    adapter = RosterGuessMatchmakingAdapter()
+    assert len(adapter.preset_keys()) == 12
+    assert "full-quick" in adapter.preset_keys()
+    assert "modern-standard" in adapter.preset_keys()
+    assert "nostalgia-long" in adapter.preset_keys()
+
+    with session_factory() as db:
+        result = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="modern-quick",
+                    player_name="Host",
+                    guest_id="roster-host",
+                ),
+            )
+        )
+
+        assert result.status == MatchmakingStatus.SEARCHING
+        assert result.game.mode == "online_friend"
+        assert result.game.game_type == roster_guess.GAME_TYPE_RACE
+        assert result.game.is_public is True
+        assert result.game.preset == "modern-quick"
+        assert result.game.target_wins == 1
+        assert result.game.season_range_start == 2018
+        assert result.game.season_range_end == 2025
+        assert result.game.round_seconds == roster_guess.RACE_ROUND_SECONDS
+
+
+def test_roster_guess_matchmaking_pairs_and_is_idempotent(session_factory):
+    adapter = RosterGuessMatchmakingAdapter()
+    with session_factory() as db:
+        first = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="full-standard",
+                    player_name="Host",
+                    guest_id="same-roster-guest",
+                ),
+            )
+        )
+        retry = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="full-standard",
+                    player_name="Retry",
+                    guest_id="same-roster-guest",
+                ),
+            )
+        )
+        second = asyncio.run(
+            find_or_create_match(
+                db,
+                adapter,
+                MatchmakingRequest(
+                    preset="full-standard",
+                    player_name="Joiner",
+                    guest_id="other-roster-guest",
+                ),
+            )
+        )
+
+        assert first.status == MatchmakingStatus.SEARCHING
+        assert retry.status == MatchmakingStatus.SEARCHING
+        assert retry.game.id == first.game.id
+        assert second.status == MatchmakingStatus.MATCHED
+        assert second.game.id == first.game.id
+        assert second.game.status == "active"
+        assert second.game.round_number == 1
+        assert second.game.player2_guest_id == "other-roster-guest"
+        assert db.query(RosterGuessGame).count() == 1
+
+
+def test_roster_guess_pool_counts_ignore_private_and_unknown_presets(session_factory):
+    adapter = RosterGuessMatchmakingAdapter()
+    with session_factory() as db:
+        private_game = roster_guess.create_race_game(
+            db,
+            target_wins=3,
+            player1_name="Private",
+            season_range_start=2000,
+            season_range_end=2025,
+            guest_id="private-roster-guest",
+            is_public=False,
+            preset="full-standard",
+        )
+        unknown = roster_guess.create_race_game(
+            db,
+            target_wins=3,
+            player1_name="Unknown",
+            season_range_start=2000,
+            season_range_end=2025,
+            guest_id="unknown-roster-guest",
+            is_public=True,
+            preset="arcade",
+        )
+        standard = roster_guess.create_race_game(
+            db,
+            target_wins=3,
+            player1_name="Public",
+            season_range_start=2000,
+            season_range_end=2025,
+            guest_id="public-roster-guest",
+            is_public=True,
+            preset="full-standard",
+        )
+        db.commit()
+
+        counts = adapter.pool_presence_counts(db)
+        assert counts["full-standard"].searching == 1
+        assert counts["full-standard"].in_progress == 0
+        assert private_game.id != standard.id
+        assert unknown.preset == "arcade"
+        assert set(counts) == set(adapter.preset_keys())
 
 
 def _seed_tictactoe_board_data(db):

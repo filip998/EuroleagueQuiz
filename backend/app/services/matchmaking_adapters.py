@@ -12,8 +12,9 @@ from app.game_actions import (
     InvalidGameActionError,
     NotFoundGameActionError,
 )
-from app.models import PhotoQuizGame, QuizTicTacToeGame
+from app.models import PhotoQuizGame, QuizTicTacToeGame, RosterGuessGame
 from app.services import photo_quiz as photo_service
+from app.services import roster_guess as roster_service
 from app.services import tictactoe as ttt_service
 from app.services.game_action_orchestration import GameKind
 from app.services.matchmaking import (
@@ -46,13 +47,29 @@ class PhotoQuizMatchmakingPreset:
 
 
 @dataclass(frozen=True)
+class RosterGuessMatchmakingPreset:
+    target_wins: int
+    season_range_start: int
+    season_range_end: int
+    round_seconds: int = roster_service.RACE_ROUND_SECONDS
+    reveal_seconds: int = roster_service.RACE_REVEAL_SECONDS
+
+
+@dataclass(frozen=True)
 class PhotoQuizQuickMatchPoolCounts:
+    searching: int = 0
+    in_progress: int = 0
+
+
+@dataclass(frozen=True)
+class RosterGuessQuickMatchPoolCounts:
     searching: int = 0
     in_progress: int = 0
 
 
 TICTACTOE_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS = 5
 PHOTO_QUIZ_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS = 5
+ROSTER_GUESS_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS = 5
 
 DEFAULT_TICTACTOE_MATCHMAKING_PRESETS = {
     "blitz": TicTacToeMatchmakingPreset(target_wins=3, timer_mode="15s"),
@@ -64,6 +81,27 @@ DEFAULT_PHOTO_QUIZ_MATCHMAKING_PRESETS = {
     "quick": PhotoQuizMatchmakingPreset(target_wins=1),
     "standard": PhotoQuizMatchmakingPreset(target_wins=3),
     "long": PhotoQuizMatchmakingPreset(target_wins=5),
+}
+
+_ROSTER_GUESS_ERA_RANGES = {
+    "full": (2000, 2025),
+    "modern": (2018, 2025),
+    "nostalgia": (2000, 2010),
+    "recent": (2010, 2025),
+}
+_ROSTER_GUESS_LENGTH_TARGETS = {
+    "quick": 1,
+    "standard": 3,
+    "long": 5,
+}
+DEFAULT_ROSTER_GUESS_MATCHMAKING_PRESETS = {
+    f"{era}-{length}": RosterGuessMatchmakingPreset(
+        target_wins=target_wins,
+        season_range_start=season_start,
+        season_range_end=season_end,
+    )
+    for era, (season_start, season_end) in _ROSTER_GUESS_ERA_RANGES.items()
+    for length, target_wins in _ROSTER_GUESS_LENGTH_TARGETS.items()
 }
 
 
@@ -500,4 +538,230 @@ class PhotoQuizMatchmakingAdapter:
         if not isinstance(config.round_seconds, int) or config.round_seconds <= 0:
             raise InvalidGameActionError(
                 f"Invalid Photo Quiz round_seconds for preset '{preset}'"
+            )
+
+
+class RosterGuessMatchmakingAdapter:
+    game_kind = GameKind.ROSTER_GUESS.value
+
+    def __init__(
+        self,
+        presets: Mapping[str, RosterGuessMatchmakingPreset] | None = None,
+    ):
+        source = DEFAULT_ROSTER_GUESS_MATCHMAKING_PRESETS if presets is None else presets
+        self._presets = {}
+        for key, value in source.items():
+            preset_key = clean_preset(key)
+            self._validate_preset_config(preset_key, value)
+            self._presets[preset_key] = value
+
+    def preset_keys(self) -> tuple[str, ...]:
+        return tuple(self._presets.keys())
+
+    def pool_presence_counts(
+        self,
+        db: Session,
+    ) -> dict[str, RosterGuessQuickMatchPoolCounts]:
+        counts = {
+            preset: RosterGuessQuickMatchPoolCounts() for preset in self.preset_keys()
+        }
+        if not counts:
+            return counts
+
+        rows = (
+            db.query(
+                RosterGuessGame.preset,
+                RosterGuessGame.status,
+                func.count(RosterGuessGame.id),
+            )
+            .filter(
+                RosterGuessGame.mode == "online_friend",
+                RosterGuessGame.game_type == roster_service.GAME_TYPE_RACE,
+                RosterGuessGame.is_public.is_(True),
+                RosterGuessGame.preset.in_(tuple(counts)),
+                RosterGuessGame.status.in_(("waiting_for_opponent", "active")),
+            )
+            .group_by(RosterGuessGame.preset, RosterGuessGame.status)
+            .all()
+        )
+
+        for preset, status, total in rows:
+            current = counts[preset]
+            total_count = int(total or 0)
+            if status == "waiting_for_opponent":
+                counts[preset] = RosterGuessQuickMatchPoolCounts(
+                    searching=total_count,
+                    in_progress=current.in_progress,
+                )
+            elif status == "active":
+                counts[preset] = RosterGuessQuickMatchPoolCounts(
+                    searching=current.searching,
+                    in_progress=total_count,
+                )
+
+        return counts
+
+    def find_existing_game(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> ExistingMatchmakingGame | None:
+        self._preset_config(request.preset)
+        game = (
+            db.query(RosterGuessGame)
+            .filter(
+                RosterGuessGame.mode == "online_friend",
+                RosterGuessGame.game_type == roster_service.GAME_TYPE_RACE,
+                RosterGuessGame.status.in_(("waiting_for_opponent", "active")),
+                RosterGuessGame.is_public.is_(True),
+                RosterGuessGame.preset == request.preset,
+                or_(
+                    RosterGuessGame.player1_guest_id == request.guest_id,
+                    RosterGuessGame.player2_guest_id == request.guest_id,
+                ),
+            )
+            .order_by(
+                RosterGuessGame.status.asc(),
+                RosterGuessGame.created_at.asc(),
+                RosterGuessGame.id.asc(),
+            )
+            .first()
+        )
+        if game is None:
+            return None
+
+        player = 1 if clean_guest_id(game.player1_guest_id) == request.guest_id else 2
+        status = (
+            MatchmakingStatus.MATCHED
+            if game.status == "active"
+            else MatchmakingStatus.SEARCHING
+        )
+        return ExistingMatchmakingGame(status=status, game=game, player=player)
+
+    def find_waiting_game(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> RosterGuessGame | None:
+        self._preset_config(request.preset)
+        query = db.query(RosterGuessGame).filter(
+            RosterGuessGame.mode == "online_friend",
+            RosterGuessGame.game_type == roster_service.GAME_TYPE_RACE,
+            RosterGuessGame.status == "waiting_for_opponent",
+            RosterGuessGame.is_public.is_(True),
+            RosterGuessGame.preset == request.preset,
+        )
+        if request.guest_id is not None:
+            query = query.filter(
+                or_(
+                    RosterGuessGame.player1_guest_id.is_(None),
+                    RosterGuessGame.player1_guest_id != request.guest_id,
+                )
+            )
+        return query.order_by(
+            RosterGuessGame.created_at.asc(),
+            RosterGuessGame.id.asc(),
+        ).first()
+
+    def create_waiting_game(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> RosterGuessGame:
+        preset = self._preset_config(request.preset)
+        return roster_service.create_race_game(
+            db,
+            target_wins=preset.target_wins,
+            player1_name=request.player_name,
+            season_range_start=preset.season_range_start,
+            season_range_end=preset.season_range_end,
+            guest_id=request.guest_id,
+            is_public=True,
+            preset=request.preset,
+            round_seconds=preset.round_seconds,
+            reveal_seconds=preset.reveal_seconds,
+        )
+
+    def join_waiting_game(
+        self,
+        db: Session,
+        game: RosterGuessGame,
+        request: MatchmakingRequest,
+        *,
+        starting_player: int,
+    ) -> RosterGuessGame:
+        if (
+            game.mode != "online_friend"
+            or game.game_type != roster_service.GAME_TYPE_RACE
+            or game.status != "waiting_for_opponent"
+            or not game.is_public
+            or game.preset != request.preset
+        ):
+            raise ConflictGameActionError("Matchmaking game is no longer available")
+        if (
+            request.guest_id is not None
+            and clean_guest_id(game.player1_guest_id) == request.guest_id
+        ):
+            raise ConflictGameActionError("Cannot match a game created by the same guest")
+        return roster_service.join_game(
+            db,
+            game.join_code,
+            player2_name=request.player_name,
+            guest_id=request.guest_id,
+            allow_public=True,
+        )
+
+    def cancel_waiting_game(
+        self,
+        db: Session,
+        request: MatchmakingCancelRequest,
+    ) -> RosterGuessGame:
+        self._preset_config(request.preset)
+        game = (
+            db.query(RosterGuessGame)
+            .filter(
+                RosterGuessGame.id == request.game_id,
+                RosterGuessGame.mode == "online_friend",
+                RosterGuessGame.game_type == roster_service.GAME_TYPE_RACE,
+                RosterGuessGame.status == "waiting_for_opponent",
+                RosterGuessGame.is_public.is_(True),
+                RosterGuessGame.preset == request.preset,
+            )
+            .first()
+        )
+        if game is None:
+            raise NotFoundGameActionError("Matchmaking search not found")
+        if clean_guest_id(game.player1_guest_id) != request.guest_id:
+            raise ConflictGameActionError("Cannot cancel another player's search")
+
+        db.delete(game)
+        db.flush()
+        return game
+
+    def _preset_config(self, preset: str) -> RosterGuessMatchmakingPreset:
+        try:
+            return self._presets[preset]
+        except KeyError as exc:
+            raise InvalidGameActionError("Unknown Roster Guess matchmaking preset") from exc
+
+    @staticmethod
+    def _validate_preset_config(
+        preset: str,
+        config: RosterGuessMatchmakingPreset,
+    ) -> None:
+        if config.target_wins not in roster_service.RACE_TARGET_WINS_OPTIONS:
+            raise InvalidGameActionError(
+                f"Invalid Roster Guess target_wins for preset '{preset}'"
+            )
+        if config.season_range_start > config.season_range_end:
+            raise InvalidGameActionError(
+                f"Invalid Roster Guess season range for preset '{preset}'"
+            )
+        if config.round_seconds <= 0:
+            raise InvalidGameActionError(
+                f"Invalid Roster Guess round_seconds for preset '{preset}'"
+            )
+        if config.reveal_seconds < 0:
+            raise InvalidGameActionError(
+                f"Invalid Roster Guess reveal_seconds for preset '{preset}'"
             )
