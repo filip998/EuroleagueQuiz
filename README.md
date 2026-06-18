@@ -26,7 +26,7 @@ Then open `http://localhost:5173` to play.
 
 ## Games
 
-- **TicTacToe** — Claim cells on a 3×3 board by naming players who match both row and column team criteria. Solo, local 1v1, and online modes. Opening `/tictactoe` lands on online **Quick Match** — a near-one-click, lichess-style pool grid — with Solo, Local 1v1, and Play-a-Friend one tap away.
+- **TicTacToe** — Claim cells on a 3×3 board by naming players who match both the row and column clue. Clues go beyond teams: shared teammates, nationality, season, position (Guard/Forward/Center), EuroLeague champions, and stat milestones (e.g. 15+ PPG). Solo, local 1v1, and online modes. Opening `/tictactoe` lands on online **Quick Match** — a near-one-click, lichess-style pool grid — with Solo, Local 1v1, and Play-a-Friend one tap away.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo, local/online Classic, plus online-only Race with public Quick Match and private Play-a-Friend.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice, 2-player online friend races, and public Quick Match races.
