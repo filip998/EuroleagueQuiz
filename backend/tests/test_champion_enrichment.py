@@ -95,6 +95,8 @@ def test_champion_enrichment_uses_title_squad_rule_and_is_idempotent(
         season=season,
         registration_end=None,
     )
+    for row in (full_season, departure, signing, opponent):
+        row.is_champion = None
     champion_session.add_all(
         [
             Game(
@@ -131,7 +133,7 @@ def test_champion_enrichment_uses_title_squad_rule_and_is_idempotent(
     assert champion_counts_by_season(first_reports) == {2024: 2}
     assert first_reports[0].final_four_date == date(2025, 5, 25)
     assert first_reports[0].set_true_count == 2
-    assert first_reports[0].set_false_count == 0
+    assert first_reports[0].set_false_count == 2
     assert season.champion_team_id == champion.id
 
     champion_session.refresh(full_season)
