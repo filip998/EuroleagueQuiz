@@ -7,6 +7,7 @@ import BoardHeaderNav from "./BoardHeaderNav";
 import OnlineScoreboard from "./OnlineScoreboard";
 import ClubLogo from "./ClubLogo";
 import WaitingLobby from "./WaitingLobby";
+import ResignControl from "./ResignControl";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import { buildInviteUrl } from "./inviteLink";
 import { clearOnlineInfo } from "./onlineRecovery";
@@ -109,7 +110,6 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const [timeLeft, setTimeLeft] = useState(null);
   const [roundTransition, setRoundTransition] = useState(null);
   const [cancelling, setCancelling] = useState(false);
-  const [resignConfirm, setResignConfirm] = useState(false);
   const [resultDismissed, setResultDismissed] = useState(false);
 
   const isOnline = onlineInfo?.isOnline;
@@ -337,7 +337,6 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       setError(err.message);
     } finally {
       setLoading(false);
-      setResignConfirm(false);
     }
   }
 
@@ -716,40 +715,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
         {/* Resign control for online games */}
         {isOnline && game.status === "active" && !inTransition && (
-          <div className="mt-4 text-center">
-            {resignConfirm ? (
-              <div className="inline-flex flex-col items-center gap-2 bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
-                <p className="text-sm text-elq-text">Resign the match? Your opponent wins.</p>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={handleResign}
-                    disabled={loading}
-                    className="px-5 py-2 bg-red-500 text-white font-medium rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
-                  >
-                    Resign
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setResignConfirm(false)}
-                    disabled={loading}
-                    className="px-5 py-2 bg-white border border-elq-border text-elq-text font-medium rounded-lg hover:bg-elq-bg transition-colors disabled:opacity-50"
-                  >
-                    Keep playing
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setResignConfirm(true)}
-                disabled={loading}
-                className="text-sm text-elq-muted hover:text-red-500 transition-colors underline underline-offset-2"
-              >
-                Resign
-              </button>
-            )}
-          </div>
+          <ResignControl onResign={handleResign} disabled={loading} />
         )}
       </div>
 

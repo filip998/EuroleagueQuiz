@@ -19,6 +19,7 @@ import {
   getRosterRaceQuickMatchPools,
   submitRosterGuess,
   autocompleteRosterPlayer,
+  resignRosterRaceGame,
   createHigherLowerGame,
   submitHigherLowerAnswer,
   getHigherLowerLeaderboard,
@@ -31,6 +32,7 @@ import {
   offerCareerNoAnswer,
   respondCareerNoAnswer,
   submitCareerGuess,
+  resignCareerGame,
   connectCareerRealtime,
   createPhotoSoloRound,
   submitPhotoSoloGuess,
@@ -40,6 +42,7 @@ import {
   getPhotoGame,
   joinPhotoGame,
   submitPhotoGuess,
+  resignPhotoGame,
   offerPhotoNoAnswer,
   respondPhotoNoAnswer,
   connectPhotoRealtime,
@@ -910,5 +913,56 @@ describe("Error handling", () => {
     );
 
     await expect(getGame(999)).rejects.toThrow("Internal Server Error");
+  });
+});
+
+describe("Online resign endpoints", () => {
+  it("resignCareerGame POSTs the give-up endpoint with the player query", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(
+        stateEnvelope({ id: 7, status: "finished", winner_player: 2 }, "resigned")
+      )
+    );
+
+    const result = await resignCareerGame(7, 1);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/games/7/give-up?player=1",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(result.result).toBe("resigned");
+    expect(result.state.status).toBe("finished");
+  });
+
+  it("resignPhotoGame POSTs the give-up endpoint with the player query", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(
+        stateEnvelope({ id: 9, status: "finished", winner_player: 1 }, "resigned")
+      )
+    );
+
+    const result = await resignPhotoGame(9, 2);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/photo/games/9/give-up?player=2",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(result.result).toBe("resigned");
+  });
+
+  it("resignRosterRaceGame POSTs the give-up endpoint with the player query", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(
+        stateEnvelope({ id: 30, status: "finished", winner_player: 2 }, "resigned")
+      )
+    );
+
+    const result = await resignRosterRaceGame(30, 1);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/games/30/give-up?player=1",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(result.result).toBe("resigned");
   });
 });

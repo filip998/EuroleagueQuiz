@@ -290,12 +290,14 @@ async def respond_end_round(
 @router.post("/roster-guess/games/{game_id}/give-up")
 async def give_up_round(
     game_id: int,
+    player: int | None = Query(None),
     db: Session = Depends(get_db),
 ):
     return await _roster_guess_http_action(
         db,
         GameActionName.GIVE_UP,
         game_id=game_id,
+        player=player,
     )
 
 

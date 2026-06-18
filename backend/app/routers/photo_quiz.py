@@ -271,6 +271,20 @@ async def submit_guess(
     )
 
 
+@router.post("/photo/games/{game_id}/give-up")
+async def resign_game(
+    game_id: int,
+    player: int = Query(..., ge=1, le=2),
+    db: Session = Depends(get_db),
+):
+    return await _photo_quiz_http_action(
+        db,
+        GameActionName.GIVE_UP,
+        game_id=game_id,
+        player=player,
+    )
+
+
 @router.post("/photo/games/{game_id}/no-answer-offer")
 async def offer_no_answer(
     game_id: int,

@@ -811,19 +811,23 @@ def forfeit_online_game(
     game: RosterGuessGame,
     *,
     forfeiting_player: int,
-) -> None:
-    """Finish an online Roster Guess Race game because one player disconnected.
+) -> bool:
+    """Finish an online Roster Guess Race game because one player resigned/disconnected.
 
     The forfeiting player loses; the remaining player wins.  The current
     active race round is completed so both sides see the roster reveal.
     For non-race online games the function is a no-op (disconnect forfeits
     are only enabled for Race games via the adapter's eligibility check).
     Idempotent: a no-op if the game is already finished.
+
+    Returns ``True`` only when this call transitioned the game from
+    ``active`` to ``finished``; ``False`` if it was already finished (so
+    callers can avoid broadcasting a misleading terminal result).
     """
     if game.mode != "online_friend":
         raise RosterGuessConflictError("Forfeit is only available in online games")
     if game.status != "active":
-        return
+        return False
     if forfeiting_player not in (1, 2):
         raise RosterGuessError("forfeiting_player must be 1 or 2")
 
@@ -854,6 +858,7 @@ def forfeit_online_game(
     game.pending_end_to = None
     game.updated_at = now
     db.flush()
+    return True
 
 
 # ---------------------------------------------------------------------------

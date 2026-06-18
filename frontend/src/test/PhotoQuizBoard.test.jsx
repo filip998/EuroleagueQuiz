@@ -13,6 +13,7 @@ vi.mock("../api", () => ({
   respondPhotoNoAnswer: vi.fn(),
   submitPhotoGuess: vi.fn(),
   submitPhotoSoloGuess: vi.fn(),
+  resignPhotoGame: vi.fn(),
 }));
 
 // Recovery cleanup on cancel is asserted via these spies; the real behaviour is
@@ -50,6 +51,7 @@ import {
   respondPhotoNoAnswer,
   submitPhotoGuess,
   submitPhotoSoloGuess,
+  resignPhotoGame,
 } from "../api";
 import { clearOnlineInfo } from "../onlineRecovery";
 import { forgetQuickMatchSeat } from "../quickMatchSeats";
@@ -956,6 +958,83 @@ describe("PhotoQuizBoard Quick Match", () => {
   });
 });
 
+describe("PhotoQuizBoard online resign", () => {
+  it("resigns through the give-up endpoint and shows the self-resign outcome", async () => {
+    resignPhotoGame.mockResolvedValue({
+      state: activePhotoGame({ status: "finished", winner_player: 2 }),
+      result: "resigned",
+    });
+
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Resign"));
+    expect(
+      screen.getByText("Resign the match? Your opponent wins.")
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Resign"));
+
+    await waitFor(() => expect(resignPhotoGame).toHaveBeenCalledWith(7, 1));
+    expect(await screen.findByText("You resigned.")).toBeInTheDocument();
+  });
+
+  it("renders an opponent resignation delivered over realtime", () => {
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame()}
+        onlineInfo={{ playerNumber: 2 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    emitPhotoRealtimeState({
+      state: activePhotoGame({ status: "finished", winner_player: 2 }),
+      result: "resigned",
+    });
+
+    expect(screen.getByText("Your opponent resigned.")).toBeInTheDocument();
+  });
+
+  it("does not offer a resign control once the game is finished", () => {
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame({ status: "finished", winner_player: 2 })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Resign")).not.toBeInTheDocument();
+  });
+
+  it("hides the resign control during the inter-round reveal lock", () => {
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame({
+          latest_completed_round: completedRound({
+            round_number: 1,
+            name: "Locked Player",
+            next_round_starts_at: new Date(Date.now() + 10_000).toISOString(),
+          }),
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByPlaceholderText("Type a player name...")).toBeDisabled();
+    expect(screen.queryByText("Resign")).not.toBeInTheDocument();
+  });
+});
 function activePhotoGame(overrides = {}) {
   return {
     id: 7,

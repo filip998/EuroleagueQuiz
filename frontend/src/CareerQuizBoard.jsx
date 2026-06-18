@@ -10,6 +10,7 @@ import {
   offerCareerNoAnswer,
   revealCareerSoloAnswer,
   respondCareerNoAnswer,
+  resignCareerGame,
   submitCareerGuess,
   submitCareerSoloGuess,
 } from "./api";
@@ -18,6 +19,7 @@ import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import BoardHeaderNav from "./BoardHeaderNav";
 import OnlineScoreboard from "./OnlineScoreboard";
 import WaitingLobby from "./WaitingLobby";
+import ResignControl from "./ResignControl";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import { buildInviteUrl } from "./inviteLink";
 import { clearOnlineInfo } from "./onlineRecovery";
@@ -88,6 +90,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const [soloHintError, setSoloHintError] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [cancelling, setCancelling] = useState(false);
+  const [resigning, setResigning] = useState(false);
   const [roundTimerAnchor, setRoundTimerAnchor] = useState(null);
   const [lastResult, setLastResult] = useState(null);
   const soloRoundTokenRef = useRef(soloInitialRound?.round_token || null);
@@ -186,6 +189,11 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
     if (result.result === "opponent_left") {
       setLastResult("opponent_left");
+      return;
+    }
+
+    if (result.result === "resigned") {
+      setLastResult("resigned");
       return;
     }
 
@@ -365,6 +373,18 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     }
   }
 
+  async function handleResign() {
+    setResigning(true);
+    try {
+      const result = await resignCareerGame(game.id, playerNumber);
+      handleRealtimeState(result);
+    } catch (error) {
+      setMessage(error.message || CAREER_FEEDBACK_MESSAGES.realtimeUnavailable);
+    } finally {
+      setResigning(false);
+    }
+  }
+
   async function resyncCareerGame() {
     setMessage("");
     setNoAnswerOfferMessageRoundNumber(null);
@@ -427,6 +447,11 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
           {lastResult === "opponent_left" && (
             <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
               Your opponent left the game.
+            </p>
+          )}
+          {lastResult === "resigned" && (
+            <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+              {game.winner_player === playerNumber ? "Your opponent resigned." : "You resigned."}
             </p>
           )}
           <div className="text-5xl mb-3">🏆</div>
@@ -563,6 +588,9 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
             )}
           </div>
         </div>
+        {isOnline && game?.status === "active" && !roundLocked && (
+          <ResignControl onResign={handleResign} disabled={resigning} />
+        )}
       </div>
     </Shell>
   );

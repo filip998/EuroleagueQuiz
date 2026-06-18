@@ -1460,6 +1460,84 @@ def test_photo_http_create_join_get_and_guess_envelopes(photo_client: TestClient
     assert guess_body["payload"]["terminal"] is True
 
 
+def test_photo_http_resign_finishes_game_and_notifies_opponent(
+    photo_client: TestClient,
+    photo_quick_match_effects,
+):
+    create = photo_client.post(
+        "/quiz/photo/games",
+        json={"target_wins": 3, "player1_name": "Host"},
+    )
+    assert create.status_code == 200
+    game = _state_payload(create)["game"]
+
+    join = photo_client.post(
+        "/quiz/photo/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner"},
+    )
+    assert join.status_code == 200
+    assert _state_payload(join)["game"]["status"] == "active"
+
+    resign = photo_client.post(f"/quiz/photo/games/{game['id']}/give-up?player=1")
+    assert resign.status_code == 200
+    payload = _state_payload(resign)
+    assert payload["result"] == "resigned"
+    assert payload["terminal"] is True
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] == 2
+
+    with photo_client.session_local() as db:
+        stored = db.get(PhotoQuizGame, game["id"])
+        assert stored.status == "finished"
+        assert stored.winner_player == 2
+
+    # The terminal resign state is broadcast to the opponent over realtime.
+    assert photo_quick_match_effects["broadcasts"], "expected a resign broadcast"
+    last_game_id, last_state, last_kwargs = photo_quick_match_effects["broadcasts"][-1]
+    assert last_game_id == game["id"]
+    resign_result = getattr(last_kwargs.get("result"), "value", last_kwargs.get("result"))
+    assert resign_result == "resigned"
+    assert last_state["winner_player"] == 2
+
+
+def test_photo_http_resign_requires_player_identity(photo_client: TestClient):
+    create = photo_client.post(
+        "/quiz/photo/games",
+        json={"target_wins": 3, "player1_name": "Host"},
+    )
+    game = _state_payload(create)["game"]
+    photo_client.post(
+        "/quiz/photo/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner"},
+    )
+
+    missing = photo_client.post(f"/quiz/photo/games/{game['id']}/give-up")
+    assert missing.status_code == 422
+
+
+def test_photo_http_double_resign_does_not_flip_winner(photo_client: TestClient):
+    create = photo_client.post(
+        "/quiz/photo/games",
+        json={"target_wins": 3, "player1_name": "Host"},
+    )
+    game = _state_payload(create)["game"]
+    photo_client.post(
+        "/quiz/photo/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner"},
+    )
+
+    first = photo_client.post(f"/quiz/photo/games/{game['id']}/give-up?player=1")
+    assert first.status_code == 200
+    assert _state_payload(first)["game"]["winner_player"] == 2
+
+    second = photo_client.post(f"/quiz/photo/games/{game['id']}/give-up?player=2")
+    assert second.status_code == 200
+    payload = _state_payload(second)
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] == 2
+    assert "result" not in payload
+
+
 def test_photo_http_rejects_replayed_no_answer_response_for_reoffer(
     photo_client: TestClient,
 ):

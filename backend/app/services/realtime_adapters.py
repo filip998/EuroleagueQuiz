@@ -444,7 +444,19 @@ class RosterGuessRealtimeAdapter:
 
         if action == GameActionName.GIVE_UP:
             if getattr(game, "is_race", False):
-                raise InvalidGameActionError("Give up is not available in Race mode")
+                acting_player = _online_actor(game, player)
+                forfeited = roster_service.forfeit_online_game(
+                    db,
+                    game,
+                    forfeiting_player=acting_player,
+                )
+                if not forfeited:
+                    return RealtimeActionOutcome(game=game, broadcast=False)
+                return RealtimeActionOutcome(
+                    game=game,
+                    result=RealtimeResult.RESIGNED,
+                    cancel_timer=True,
+                )
             given_up_round = roster_service.give_up(db, game)
             return RealtimeActionOutcome(
                 game=game,
@@ -562,6 +574,7 @@ class CareerQuizRealtimeAdapter:
         GameActionName.GUESS.value,
         GameActionName.OFFER_NO_ANSWER.value,
         GameActionName.RESPOND_NO_ANSWER.value,
+        GameActionName.GIVE_UP.value,
     }
     websocket_actions = {
         RealtimeClientAction.GUESS.value,
@@ -696,6 +709,21 @@ class CareerQuizRealtimeAdapter:
                 schedule_timer=result == "accepted" and game.status == "active",
             )
 
+        if action == GameActionName.GIVE_UP:
+            acting_player = _online_actor(game, player)
+            forfeited = career_service.forfeit_online_game(
+                db,
+                game,
+                forfeiting_player=acting_player,
+            )
+            if not forfeited:
+                return RealtimeActionOutcome(game=game, broadcast=False)
+            return RealtimeActionOutcome(
+                game=game,
+                result=RealtimeResult.RESIGNED,
+                cancel_timer=True,
+            )
+
         raise AssertionError(f"Unhandled Career Quiz game action: {action}")
 
     def handle_time_expired(
@@ -790,6 +818,7 @@ class PhotoQuizRealtimeAdapter:
         GameActionName.GUESS.value,
         GameActionName.OFFER_NO_ANSWER.value,
         GameActionName.RESPOND_NO_ANSWER.value,
+        GameActionName.GIVE_UP.value,
     }
     websocket_actions = {
         RealtimeClientAction.GUESS.value,
@@ -926,6 +955,21 @@ class PhotoQuizRealtimeAdapter:
                     prev_round_number if accepted else None
                 ),
                 schedule_timer=accepted and game.status == "active",
+            )
+
+        if action == GameActionName.GIVE_UP:
+            acting_player = _online_actor(game, player)
+            forfeited = photo_service.forfeit_online_game(
+                db,
+                game,
+                forfeiting_player=acting_player,
+            )
+            if not forfeited:
+                return RealtimeActionOutcome(game=game, broadcast=False)
+            return RealtimeActionOutcome(
+                game=game,
+                result=RealtimeResult.RESIGNED,
+                cancel_timer=True,
             )
 
         raise AssertionError(f"Unhandled Photo Quiz game action: {action}")

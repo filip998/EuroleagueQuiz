@@ -5,6 +5,7 @@ import {
   cancelRosterRaceQuickMatch,
   connectRosterGuessRealtime,
   getRosterGame,
+  resignRosterRaceGame,
   submitRosterGuess,
 } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
@@ -22,6 +23,7 @@ import {
 import ClubLogo from "./ClubLogo";
 import BoardHeaderNav from "./BoardHeaderNav";
 import OnlineScoreboard from "./OnlineScoreboard";
+import ResignControl from "./ResignControl";
 
 const POSITION_ORDER = { Guard: 0, "Guard-Forward": 1, Forward: 2, "Forward-Center": 3, Center: 4 };
 
@@ -42,6 +44,7 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
   );
   const [completedRound, setCompletedRound] = useState(initialState?.latest_completed_round ?? null);
   const [cancelling, setCancelling] = useState(false);
+  const [resigning, setResigning] = useState(false);
   const [lastResult, setLastResult] = useState(null);
   const searchInputRef = useRef(null);
 
@@ -113,6 +116,11 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
       setMessage("");
       return;
     }
+    if (result.result === "resigned") {
+      setLastResult("resigned");
+      setMessage("");
+      return;
+    }
     if (result.result === "correct") {
       setMessage("Claimed!");
     } else if (result.result === "incorrect") {
@@ -174,6 +182,17 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
       setGame(await getRosterGame(game.id));
     } catch {
       // Polling through useOnlineGameRealtime will retry transient refresh failures.
+    }
+  }
+
+  async function handleResign() {
+    setResigning(true);
+    try {
+      handleRealtimeState(await resignRosterRaceGame(game.id, playerNumber));
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setResigning(false);
     }
   }
 
@@ -241,6 +260,11 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
           {lastResult === "opponent_left" && (
             <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
               Your opponent left the game.
+            </p>
+          )}
+          {lastResult === "resigned" && (
+            <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+              {game.winner_player === playerNumber ? "Your opponent resigned." : "You resigned."}
             </p>
           )}
           <div className="text-5xl mb-3">🏆</div>
@@ -348,6 +372,9 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
             <RaceSlot key={slot.id} slot={slot} />
           ))}
         </div>
+        {isOnline && playerNumber && game?.status === "active" && !roundLocked && (
+          <ResignControl onResign={handleResign} disabled={resigning} />
+        )}
       </div>
     </Shell>
   );
