@@ -223,6 +223,64 @@ def test_champion_enrichment_skips_missing_final_four_date_without_fallback(
     assert row.is_champion is False
 
 
+def test_champion_enrichment_clears_flags_for_no_champion_season(champion_session):
+    team = Team(euroleague_code="CAN", name="Canceled Team", short_name="Canceled")
+    season = Season(year=2019, name="2019-2020", champion_team=team)
+    champion_session.add_all([season, team])
+    champion_session.flush()
+
+    previously_true = _add_player_season_team(
+        champion_session,
+        code="CAN1",
+        team=team,
+        season=season,
+        registration_end=None,
+    )
+    previously_true.is_champion = True
+    previously_null = _add_player_season_team(
+        champion_session,
+        code="CAN2",
+        team=team,
+        season=season,
+        registration_end=None,
+    )
+    previously_null.is_champion = None
+    champion_session.flush()
+
+    champion_map = {
+        2019: ChampionSeason(None, note="Season canceled with no champion."),
+    }
+    first_reports = enrich_champion_flags(
+        champion_session,
+        start_year=2019,
+        end_year=2019,
+        champion_seasons=champion_map,
+    )
+    champion_session.flush()
+
+    assert champion_counts_by_season(first_reports) == {2019: 0}
+    assert first_reports[0].skipped_reason == "no_champion"
+    assert first_reports[0].set_true_count == 0
+    assert first_reports[0].set_false_count == 2
+    assert season.champion_team_id is None
+    champion_session.refresh(previously_true)
+    champion_session.refresh(previously_null)
+    assert previously_true.is_champion is False
+    assert previously_null.is_champion is False
+
+    second_reports = enrich_champion_flags(
+        champion_session,
+        start_year=2019,
+        end_year=2019,
+        champion_seasons=champion_map,
+    )
+    champion_session.flush()
+
+    assert champion_counts_by_season(second_reports) == {2019: 0}
+    assert second_reports[0].set_true_count == 0
+    assert second_reports[0].set_false_count == 0
+
+
 def test_parse_euroleague_game_date_is_locale_independent():
     assert parse_euroleague_game_date("Apr 30, 2006") == date(2006, 4, 30)
     assert parse_euroleague_game_date("May 5, 2002") == date(2002, 5, 5)
