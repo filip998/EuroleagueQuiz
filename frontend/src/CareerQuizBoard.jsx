@@ -80,6 +80,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const playerNumber = onlineInfo?.playerNumber || 1;
   const timeline = solo ? soloRound.timeline : game?.current_round?.timeline || [];
   const currentRoundNumber = getCareerGameRoundNumber(game);
+  const roundKey = solo ? soloRound?.round_token : currentRoundNumber;
   const revealNextRoundStartsAt = completedRound?.next_round_starts_at
     || game?.latest_completed_round?.next_round_starts_at
     || null;
@@ -381,7 +382,11 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
           </div>
 
           <div>
-            <CareerGuessBox onGuess={handleGuess} disabled={Boolean(answer) || roundLocked} />
+            <CareerGuessBox
+              onGuess={handleGuess}
+              disabled={Boolean(answer) || roundLocked}
+              roundKey={roundKey}
+            />
 
             {solo && (
               <SoloHintsPanel
@@ -873,11 +878,22 @@ function isCareerActionSyncConflict(error) {
   ].some((code) => code === "round_locked" || code === "round_stale");
 }
 
-function CareerGuessBox({ onGuess, disabled }) {
+function CareerGuessBox({ onGuess, disabled, roundKey }) {
   const [query, setQuery] = useState("");
   const [players, setPlayers] = useState([]);
+  const [prevRoundKey, setPrevRoundKey] = useState(roundKey);
+
+  if (roundKey !== prevRoundKey) {
+    // Reset the in-progress guess and autocomplete results whenever the active
+    // round changes (opponent answered first, per-round timer expiry/auto-skip,
+    // or mutual no-answer skip) so the next round opens with an empty box.
+    setPrevRoundKey(roundKey);
+    setQuery("");
+    setPlayers([]);
+  }
 
   useEffect(() => {
+    let cancelled = false;
     const timer = setTimeout(async () => {
       if (!query || disabled) {
         setPlayers([]);
@@ -885,12 +901,19 @@ function CareerGuessBox({ onGuess, disabled }) {
       }
       try {
         const result = await autocompleteCareerPlayer(query);
-        setPlayers(result.players || []);
+        if (!cancelled) {
+          setPlayers(result.players || []);
+        }
       } catch {
-        setPlayers([]);
+        if (!cancelled) {
+          setPlayers([]);
+        }
       }
     }, 200);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [query, disabled]);
 
   function selectPlayer(player) {
