@@ -177,3 +177,21 @@ describe("HigherLowerBoard", () => {
     expect(screen.getByText("HIGHER OR LOWER")).toBeInTheDocument();
   });
 });
+
+describe("HigherLowerBoard header navigation", () => {
+  it("exposes a single consistent Home control that returns to the app home", () => {
+    const onHome = vi.fn();
+
+    render(
+      <HigherLowerBoard
+        initialState={mockInitialState}
+        onNewGame={vi.fn()}
+        onHome={onHome}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to home" }));
+
+    expect(onHome).toHaveBeenCalledTimes(1);
+  });
+});

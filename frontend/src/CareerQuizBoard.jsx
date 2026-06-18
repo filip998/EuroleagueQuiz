@@ -14,6 +14,7 @@ import {
 } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
+import BoardHeaderNav from "./BoardHeaderNav";
 import WaitingLobby from "./WaitingLobby";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import { buildInviteUrl } from "./inviteLink";
@@ -1056,9 +1057,7 @@ function Shell({ children, onHome }) {
     <div className="min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
       <div className="p-4">
-        <button onClick={onHome} className="text-sm text-elq-muted hover:text-elq-orange">
-          ← Home
-        </button>
+        <BoardHeaderNav onHome={onHome} />
       </div>
       <div className="flex-1 flex items-center justify-center p-4 pt-0">
         {children}
