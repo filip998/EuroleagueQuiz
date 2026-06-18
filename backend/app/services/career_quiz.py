@@ -147,6 +147,8 @@ def create_game(
         mode="online_friend",
         status="waiting_for_opponent",
         join_code=_generate_join_code(db),
+        is_public=False,
+        preset=None,
         target_wins=target_wins,
         wrong_guess_visibility=wrong_guess_visibility,
         player1_name=player1_name or "Player 1",
@@ -166,6 +168,7 @@ def join_game(
     *,
     player_name: str | None = None,
     guest_id: str | None = None,
+    allow_public: bool = False,
 ) -> CareerQuizGame:
     game = (
         db.query(CareerQuizGame)
@@ -174,11 +177,32 @@ def join_game(
     )
     if game is None:
         raise NotFoundGameActionError("Game not found")
+    if game.is_public and not allow_public:
+        raise ConflictGameActionError("Public games must be joined through quick match")
     if game.status != "waiting_for_opponent":
+        raise ConflictGameActionError("Game is not waiting for an opponent")
+    joined_at = datetime.utcnow()
+    updated = (
+        db.query(CareerQuizGame)
+        .filter(CareerQuizGame.id == game.id)
+        .filter(CareerQuizGame.status == "waiting_for_opponent")
+        .update(
+            {
+                "player2_name": player_name or "Player 2",
+                "player2_guest_id": _clean_guest_id(guest_id)
+                or game.player2_guest_id,
+                "status": "active",
+                "updated_at": joined_at,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated != 1:
         raise ConflictGameActionError("Game is not waiting for an opponent")
     game.player2_name = player_name or "Player 2"
     game.player2_guest_id = _clean_guest_id(guest_id) or game.player2_guest_id
     game.status = "active"
+    game.updated_at = joined_at
     _create_next_round(db, game)
     return game
 
@@ -251,6 +275,8 @@ def offer_no_answer(
         raise InvalidGameActionError("Player identity is required")
     if game.status != "active":
         raise ConflictGameActionError("Game is not active")
+    if game.is_public:
+        raise ConflictGameActionError("No-answer offers are disabled for public games")
     _raise_if_round_stale(game, round_number)
     _raise_if_current_round_locked(game)
     game.pending_no_answer_from = acting_player
@@ -269,6 +295,8 @@ def respond_no_answer(
         raise InvalidGameActionError("Player identity is required")
     if game.status != "active":
         raise ConflictGameActionError("Game is not active")
+    if game.is_public:
+        raise ConflictGameActionError("No-answer offers are disabled for public games")
     _raise_if_round_stale(game, round_number)
     if acting_player != game.pending_no_answer_to:
         raise InvalidGameActionError("No answer offer is not pending for this player")
@@ -289,6 +317,102 @@ def respond_no_answer(
     return "accepted"
 
 
+def public_round_timer_delay_seconds(
+    game: CareerQuizGame,
+    *,
+    round_seconds: int,
+    now: datetime | None = None,
+) -> float | None:
+    if round_seconds <= 0:
+        return None
+    if (
+        game.mode != "online_friend"
+        or not game.is_public
+        or game.status != "active"
+    ):
+        return None
+    try:
+        round_obj = _current_round(game)
+    except ConflictGameActionError:
+        return None
+    if round_obj.status != "active":
+        return None
+
+    now_utc = _as_utc(now or datetime.now(timezone.utc))
+    delay_seconds = float(round_seconds)
+    next_round_starts_at = _active_next_round_lock_starts_at(game, now=now_utc)
+    if next_round_starts_at is not None:
+        delay_seconds += max((next_round_starts_at - now_utc).total_seconds(), 0.0)
+    return delay_seconds
+
+
+def handle_public_round_time_expired(
+    db: Session,
+    *,
+    game: CareerQuizGame,
+    expected_round: int,
+) -> bool:
+    if (
+        game.mode != "online_friend"
+        or not game.is_public
+        or game.status != "active"
+        or game.round_number != expected_round
+    ):
+        return False
+    if _active_next_round_lock_starts_at(game) is not None:
+        return False
+
+    try:
+        round_obj = _current_round(game)
+    except ConflictGameActionError:
+        return False
+    if round_obj.status != "active":
+        return False
+
+    round_obj.status = "no_answer"
+    round_obj.winner_player = None
+    round_obj.completed_at = datetime.utcnow()
+    game.pending_no_answer_from = None
+    game.pending_no_answer_to = None
+    game.round_number += 1
+    _create_next_round(db, game)
+    return True
+
+
+def handle_public_game_unattended_time_expired(
+    db: Session,
+    *,
+    game: CareerQuizGame,
+    expected_round: int,
+) -> bool:
+    if (
+        game.mode != "online_friend"
+        or not game.is_public
+        or game.status != "active"
+        or game.round_number != expected_round
+    ):
+        return False
+    if _active_next_round_lock_starts_at(game) is not None:
+        return False
+
+    try:
+        round_obj = _current_round(game)
+    except ConflictGameActionError:
+        return False
+    if round_obj.status != "active":
+        return False
+
+    round_obj.status = "no_answer"
+    round_obj.winner_player = None
+    round_obj.completed_at = datetime.utcnow()
+    game.status = "finished"
+    game.winner_player = None
+    game.pending_no_answer_from = None
+    game.pending_no_answer_to = None
+    db.flush()
+    return True
+
+
 def serialize_game_state(db: Session, game: CareerQuizGame) -> dict[str, Any]:
     current_round = None
     if game.status == "active":
@@ -301,7 +425,9 @@ def serialize_game_state(db: Session, game: CareerQuizGame) -> dict[str, Any]:
         "id": game.id,
         "mode": game.mode,
         "status": game.status,
-        "join_code": game.join_code,
+        "join_code": None if game.is_public else game.join_code,
+        "is_public": game.is_public,
+        "preset": game.preset,
         "target_wins": game.target_wins,
         "wrong_guess_visibility": game.wrong_guess_visibility,
         "player1_name": game.player1_name,

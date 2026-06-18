@@ -303,6 +303,24 @@ export function joinCareerGame(joinCode, playerName) {
   });
 }
 
+export function careerQuickMatch(payload) {
+  return actionRequest("POST", "/quiz/career/quick-match", {
+    ...payload,
+    guest_id: getGuestId(),
+  });
+}
+
+export function cancelCareerQuickMatch(payload) {
+  return actionRequest("POST", "/quiz/career/quick-match/cancel", {
+    ...payload,
+    guest_id: getGuestId(),
+  });
+}
+
+export function getCareerQuickMatchPools() {
+  return request("GET", "/quiz/career/quick-match/pools");
+}
+
 export function submitCareerGuess(gameId, playerNumber, playerId, roundNumber) {
   return actionRequest("POST", `/quiz/career/games/${gameId}/guess?player=${playerNumber}`, {
     player_id: playerId,

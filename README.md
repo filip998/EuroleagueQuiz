@@ -29,7 +29,7 @@ Then open `http://localhost:5173` to play.
 - **TicTacToe** — Claim cells on a 3×3 board by naming players who match both row and column team criteria. Solo, local 1v1, and online modes. Opening `/tictactoe` lands on online **Quick Match** — a near-one-click, lichess-style pool grid — with Solo, Local 1v1, and Play-a-Friend one tap away.
 - **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo, local/online Classic, plus online-only Race with public Quick Match and private Play-a-Friend.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
-- **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice and 2-player race modes.
+- **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice, 2-player online friend races, and public Quick Match races.
 - **Photo Quiz** — Guess the player from a headshot. Solo practice, 2-player online friend races, and public Quick Match races, drawn from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
 
 ## Backend
@@ -190,7 +190,12 @@ Photo Quiz rounds use signed Solo Round Tokens and expose only the resolved clue
 the answer is guessed correctly or revealed. Online Photo Quiz friend games use
 `POST /quiz/photo/games`, `/games/join`, `/games/{id}/guess`, `/no-answer-offer`,
 `/no-answer-response`, `GET /quiz/photo/games/{id}`, and `WS /quiz/photo/ws/{id}`;
-the round clue is the resolved `image_url`. Public Photo Quiz Quick Match uses
+the round clue is the resolved `image_url`. Public Career Quiz Quick Match uses
+`POST /quiz/career/quick-match`, `POST /quiz/career/quick-match/cancel`, and
+`GET /quiz/career/quick-match/pools` with `quick` / `standard` / `long`
+presets that set first-to-1 / first-to-3 / first-to-5, keep wrong guesses
+private, hide public join codes, and server-skip idle public rounds after 20
+seconds. Public Photo Quiz Quick Match uses
 `POST /quiz/photo/quick-match`, `POST /quiz/photo/quick-match/cancel`, and
 `GET /quiz/photo/quick-match/pools` with `quick` / `standard` / `long` presets
 that set first-to-1 / first-to-3 / first-to-5, keep wrong guesses private, allow
@@ -220,8 +225,9 @@ waiting-for-opponent polling, cleanup, and action dispatch stay out of the game 
 TicTacToe Quick Match setup screens can poll
 `GET /quiz/tictactoe/quick-match/pools` every 5 seconds for per-preset
 `searching` and `in_progress` presence counts derived from public pool rows.
-Photo Quiz exposes the same presence shape at `GET /quiz/photo/quick-match/pools`,
-counting only public Photo Quiz searches and active public matches. Roster Guess Race
+Career Quiz and Photo Quiz expose the same presence shape at
+`GET /quiz/career/quick-match/pools` and `GET /quiz/photo/quick-match/pools`,
+counting only public searches and active public matches. Roster Guess Race
 does the same under `GET /quiz/roster-guess/quick-match/pools`; public Race entries
 are created with `POST /quiz/roster-guess/quick-match`, cancelled with
 `POST /quiz/roster-guess/quick-match/cancel`, and use presets
@@ -302,7 +308,7 @@ shared-component pattern:
   an optional `formatPresence`. It carries no game specifics.
 - `QuickMatchSearchingLobby.jsx` — the generalized "searching the pool…" lobby. `usePools`,
   `getPresetLabel`, and `title` are props (defaulting to the TicTacToe pool source/copy), so
-  Photo Quiz already reuses it with its own pool feed and labels.
+  Career Quiz and Photo Quiz reuse it with their own pool feeds and labels.
 - `HomeQuickMatchCta.jsx` — the reusable home-card CTA `<Link>` (pass the setup route in
   `to`); it sits beside a card's main link without nesting anchors.
 - `identity.js` `getGuestName()` / `getDisplayName()` — the guest-name fallback (see Guest

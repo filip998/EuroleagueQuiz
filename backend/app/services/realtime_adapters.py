@@ -19,7 +19,10 @@ from app.services.game_action_orchestration import (
     GameActionName,
     RealtimeActionOutcome,
 )
-from app.services.matchmaking_adapters import PhotoQuizMatchmakingAdapter
+from app.services.matchmaking_adapters import (
+    CareerQuizMatchmakingAdapter,
+    PhotoQuizMatchmakingAdapter,
+)
 from app.services.race_rounds import public_round_timer_delay_seconds_from_state
 from app.services.realtime import TurnTimerState
 
@@ -561,6 +564,9 @@ class CareerQuizRealtimeAdapter:
     }
     client_actions = websocket_actions
 
+    def __init__(self, matchmaking: CareerQuizMatchmakingAdapter | None = None):
+        self.matchmaking = matchmaking or CareerQuizMatchmakingAdapter()
+
     def get_game(self, db: Session, game_id: int) -> Any:
         return career_service.get_game_or_404(db, game_id)
 
@@ -642,6 +648,8 @@ class CareerQuizRealtimeAdapter:
                 completed_round_number=(
                     prev_round_number if result in _CAREER_ROUND_RESULTS else None
                 ),
+                schedule_timer=result == RealtimeResult.ROUND_WON.value,
+                cancel_timer=result == RealtimeResult.MATCH_WON.value,
                 broadcast_to_player=(
                     acting_player
                     if result == RealtimeResult.INCORRECT.value
@@ -679,6 +687,7 @@ class CareerQuizRealtimeAdapter:
                 completed_round_number=(
                     prev_round_number if result == "accepted" else None
                 ),
+                schedule_timer=result == "accepted" and game.status == "active",
             )
 
         raise AssertionError(f"Unhandled Career Quiz game action: {action}")
@@ -691,7 +700,69 @@ class CareerQuizRealtimeAdapter:
         expected_player: int,
         expected_round: int,
     ) -> Any:
-        return GAME_ACTION_NOOP
+        if not career_service.handle_public_round_time_expired(
+            db,
+            game=game,
+            expected_round=expected_round,
+        ):
+            return GAME_ACTION_NOOP
+        return game
+
+    def handle_unattended_time_expired(
+        self,
+        db: Session,
+        game: Any,
+        *,
+        expected_player: int,
+        expected_round: int,
+    ) -> Any:
+        if not career_service.handle_public_game_unattended_time_expired(
+            db,
+            game=game,
+            expected_round=expected_round,
+        ):
+            return GAME_ACTION_NOOP
+        return game
+
+    def timer_state_from_game(self, game: Any) -> TurnTimerState | None:
+        round_seconds = self._round_seconds_for_preset(getattr(game, "preset", None))
+        if round_seconds is None:
+            return None
+        delay = career_service.public_round_timer_delay_seconds(
+            game,
+            round_seconds=round_seconds,
+        )
+        if delay is None:
+            return None
+        return TurnTimerState(
+            seconds=delay,
+            current_player=0,
+            round_number=game.round_number,
+        )
+
+    def timer_state_from_state(self, game_state: dict[str, Any]) -> TurnTimerState | None:
+        round_seconds = self._round_seconds_for_preset(game_state.get("preset"))
+        if round_seconds is None:
+            return None
+        timer_delay = public_round_timer_delay_seconds_from_state(
+            game_state,
+            round_seconds=round_seconds,
+        )
+        if timer_delay is None:
+            return None
+        return TurnTimerState(
+            seconds=timer_delay.seconds,
+            current_player=0,
+            round_number=timer_delay.round_number,
+        )
+
+    def _round_seconds_for_preset(self, preset: object) -> int | None:
+        if not isinstance(preset, str) or not preset:
+            return None
+        try:
+            return self.matchmaking.round_seconds_for_preset(preset)
+        except InvalidGameActionError:
+            return None
 
     def handle_player_forfeit(
         self,

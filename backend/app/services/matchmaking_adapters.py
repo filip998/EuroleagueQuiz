@@ -12,7 +12,8 @@ from app.game_actions import (
     InvalidGameActionError,
     NotFoundGameActionError,
 )
-from app.models import PhotoQuizGame, QuizTicTacToeGame, RosterGuessGame
+from app.models import CareerQuizGame, PhotoQuizGame, QuizTicTacToeGame, RosterGuessGame
+from app.services import career_quiz as career_service
 from app.services import photo_quiz as photo_service
 from app.services import roster_guess as roster_service
 from app.services import tictactoe as ttt_service
@@ -53,6 +54,19 @@ class PhotoQuizQuickMatchPoolCounts:
 
 
 @dataclass(frozen=True)
+class CareerQuizMatchmakingPreset:
+    target_wins: int
+    wrong_guess_visibility: str = "private"
+    round_seconds: int = 20
+
+
+@dataclass(frozen=True)
+class CareerQuizQuickMatchPoolCounts:
+    searching: int = 0
+    in_progress: int = 0
+
+
+@dataclass(frozen=True)
 class RosterGuessMatchmakingPreset:
     target_wins: int
     season_range_start: int
@@ -69,6 +83,7 @@ class RosterGuessQuickMatchPoolCounts:
 
 TICTACTOE_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS = 5
 PHOTO_QUIZ_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS = 5
+CAREER_QUIZ_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS = 5
 ROSTER_GUESS_QUICK_MATCH_POOL_POLL_INTERVAL_SECONDS = 5
 
 DEFAULT_TICTACTOE_MATCHMAKING_PRESETS = {
@@ -81,6 +96,12 @@ DEFAULT_PHOTO_QUIZ_MATCHMAKING_PRESETS = {
     "quick": PhotoQuizMatchmakingPreset(target_wins=1),
     "standard": PhotoQuizMatchmakingPreset(target_wins=3),
     "long": PhotoQuizMatchmakingPreset(target_wins=5),
+}
+
+DEFAULT_CAREER_QUIZ_MATCHMAKING_PRESETS = {
+    "quick": CareerQuizMatchmakingPreset(target_wins=1),
+    "standard": CareerQuizMatchmakingPreset(target_wins=3),
+    "long": CareerQuizMatchmakingPreset(target_wins=5),
 }
 
 _ROSTER_GUESS_ERAS = {
@@ -538,6 +559,226 @@ class PhotoQuizMatchmakingAdapter:
         if not isinstance(config.round_seconds, int) or config.round_seconds <= 0:
             raise InvalidGameActionError(
                 f"Invalid Photo Quiz round_seconds for preset '{preset}'"
+            )
+
+
+class CareerQuizMatchmakingAdapter:
+    game_kind = GameKind.CAREER_QUIZ.value
+
+    def __init__(
+        self,
+        presets: Mapping[str, CareerQuizMatchmakingPreset] | None = None,
+    ):
+        source = DEFAULT_CAREER_QUIZ_MATCHMAKING_PRESETS if presets is None else presets
+        self._presets = {}
+        for key, value in source.items():
+            preset_key = clean_preset(key)
+            self._validate_preset_config(preset_key, value)
+            self._presets[preset_key] = value
+
+    def preset_keys(self) -> tuple[str, ...]:
+        return tuple(self._presets.keys())
+
+    def round_seconds_for_preset(self, preset: str) -> int:
+        return self._preset_config(preset).round_seconds
+
+    def pool_presence_counts(
+        self,
+        db: Session,
+    ) -> dict[str, CareerQuizQuickMatchPoolCounts]:
+        counts = {
+            preset: CareerQuizQuickMatchPoolCounts() for preset in self.preset_keys()
+        }
+        if not counts:
+            return counts
+
+        rows = (
+            db.query(
+                CareerQuizGame.preset,
+                CareerQuizGame.status,
+                func.count(CareerQuizGame.id),
+            )
+            .filter(
+                CareerQuizGame.mode == "online_friend",
+                CareerQuizGame.is_public.is_(True),
+                CareerQuizGame.preset.in_(tuple(counts)),
+                CareerQuizGame.status.in_(("waiting_for_opponent", "active")),
+            )
+            .group_by(CareerQuizGame.preset, CareerQuizGame.status)
+            .all()
+        )
+
+        for preset, status, total in rows:
+            current = counts[preset]
+            total_count = int(total or 0)
+            if status == "waiting_for_opponent":
+                counts[preset] = CareerQuizQuickMatchPoolCounts(
+                    searching=total_count,
+                    in_progress=current.in_progress,
+                )
+            elif status == "active":
+                counts[preset] = CareerQuizQuickMatchPoolCounts(
+                    searching=current.searching,
+                    in_progress=total_count,
+                )
+
+        return counts
+
+    def find_existing_game(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> ExistingMatchmakingGame | None:
+        self._preset_config(request.preset)
+        game = (
+            db.query(CareerQuizGame)
+            .filter(
+                CareerQuizGame.mode == "online_friend",
+                CareerQuizGame.status.in_(("waiting_for_opponent", "active")),
+                CareerQuizGame.is_public.is_(True),
+                CareerQuizGame.preset == request.preset,
+                or_(
+                    CareerQuizGame.player1_guest_id == request.guest_id,
+                    CareerQuizGame.player2_guest_id == request.guest_id,
+                ),
+            )
+            .order_by(
+                CareerQuizGame.status.asc(),
+                CareerQuizGame.created_at.asc(),
+                CareerQuizGame.id.asc(),
+            )
+            .first()
+        )
+        if game is None:
+            return None
+
+        player = 1 if clean_guest_id(game.player1_guest_id) == request.guest_id else 2
+        status = (
+            MatchmakingStatus.MATCHED
+            if game.status == "active"
+            else MatchmakingStatus.SEARCHING
+        )
+        return ExistingMatchmakingGame(status=status, game=game, player=player)
+
+    def find_waiting_game(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> CareerQuizGame | None:
+        self._preset_config(request.preset)
+        query = db.query(CareerQuizGame).filter(
+            CareerQuizGame.mode == "online_friend",
+            CareerQuizGame.status == "waiting_for_opponent",
+            CareerQuizGame.is_public.is_(True),
+            CareerQuizGame.preset == request.preset,
+        )
+        if request.guest_id is not None:
+            query = query.filter(
+                or_(
+                    CareerQuizGame.player1_guest_id.is_(None),
+                    CareerQuizGame.player1_guest_id != request.guest_id,
+                )
+            )
+        return query.order_by(
+            CareerQuizGame.created_at.asc(),
+            CareerQuizGame.id.asc(),
+        ).first()
+
+    def create_waiting_game(
+        self,
+        db: Session,
+        request: MatchmakingRequest,
+    ) -> CareerQuizGame:
+        preset = self._preset_config(request.preset)
+        game = career_service.create_game(
+            db,
+            target_wins=preset.target_wins,
+            wrong_guess_visibility=preset.wrong_guess_visibility,
+            player1_name=request.player_name,
+            guest_id=request.guest_id,
+        )
+        game.is_public = True
+        game.preset = request.preset
+        game.updated_at = datetime.utcnow()
+        db.flush()
+        return game
+
+    def join_waiting_game(
+        self,
+        db: Session,
+        game: CareerQuizGame,
+        request: MatchmakingRequest,
+        *,
+        starting_player: int,
+    ) -> CareerQuizGame:
+        if (
+            game.mode != "online_friend"
+            or game.status != "waiting_for_opponent"
+            or not game.is_public
+            or game.preset != request.preset
+        ):
+            raise ConflictGameActionError("Matchmaking game is no longer available")
+        if (
+            request.guest_id is not None
+            and clean_guest_id(game.player1_guest_id) == request.guest_id
+        ):
+            raise ConflictGameActionError("Cannot match a game created by the same guest")
+        return career_service.join_game(
+            db,
+            game.join_code,
+            player_name=request.player_name,
+            guest_id=request.guest_id,
+            allow_public=True,
+        )
+
+    def cancel_waiting_game(
+        self,
+        db: Session,
+        request: MatchmakingCancelRequest,
+    ) -> CareerQuizGame:
+        self._preset_config(request.preset)
+        game = (
+            db.query(CareerQuizGame)
+            .filter(
+                CareerQuizGame.id == request.game_id,
+                CareerQuizGame.mode == "online_friend",
+                CareerQuizGame.status == "waiting_for_opponent",
+                CareerQuizGame.is_public.is_(True),
+                CareerQuizGame.preset == request.preset,
+            )
+            .first()
+        )
+        if game is None:
+            raise NotFoundGameActionError("Matchmaking search not found")
+        if clean_guest_id(game.player1_guest_id) != request.guest_id:
+            raise ConflictGameActionError("Cannot cancel another player's search")
+
+        db.delete(game)
+        db.flush()
+        return game
+
+    def _preset_config(self, preset: str) -> CareerQuizMatchmakingPreset:
+        try:
+            return self._presets[preset]
+        except KeyError as exc:
+            raise InvalidGameActionError("Unknown Career Quiz matchmaking preset") from exc
+
+    @staticmethod
+    def _validate_preset_config(
+        preset: str,
+        config: CareerQuizMatchmakingPreset,
+    ) -> None:
+        if config.target_wins not in career_service.VALID_TARGET_WINS:
+            raise InvalidGameActionError(
+                f"Invalid Career Quiz target_wins for preset '{preset}'"
+            )
+        if config.wrong_guess_visibility not in career_service.VALID_WRONG_GUESS_VISIBILITY:
+            raise InvalidGameActionError(
+                f"Invalid Career Quiz wrong_guess_visibility for preset '{preset}'"
+            )
+        if not isinstance(config.round_seconds, int) or config.round_seconds <= 0:
+            raise InvalidGameActionError(
+                f"Invalid Career Quiz round_seconds for preset '{preset}'"
             )
 
 

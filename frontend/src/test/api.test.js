@@ -23,7 +23,10 @@ import {
   submitHigherLowerAnswer,
   getHigherLowerLeaderboard,
   createCareerGame,
+  careerQuickMatch,
+  cancelCareerQuickMatch,
   fetchCareerSoloHint,
+  getCareerQuickMatchPools,
   joinCareerGame,
   offerCareerNoAnswer,
   respondCareerNoAnswer,
@@ -546,6 +549,62 @@ describe("Career Quiz API", () => {
       })
     );
     expect(result.state.id).toBe(8);
+  });
+
+  it("careerQuickMatch posts preset, name and guest_id", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(stateEnvelope({ id: 14, status: "waiting_for_opponent" }))
+    );
+
+    const result = await careerQuickMatch({ preset: "standard", player_name: "Ace" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/quick-match",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          preset: "standard",
+          player_name: "Ace",
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+    expect(result.state.id).toBe(14);
+  });
+
+  it("cancelCareerQuickMatch posts game_id, preset and guest_id", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 14, status: "cancelled" })));
+
+    await cancelCareerQuickMatch({ game_id: 14, preset: "standard" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/quick-match/cancel",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          game_id: 14,
+          preset: "standard",
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+  });
+
+  it("getCareerQuickMatchPools fetches public Career pool counts", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse({
+        pools: { standard: { searching: 1, in_progress: 2 } },
+        poll_interval_seconds: 5,
+      })
+    );
+
+    const result = await getCareerQuickMatchPools();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/career/quick-match/pools",
+      expect.objectContaining({ method: "GET" })
+    );
+    expect(result.pools.standard.in_progress).toBe(2);
   });
 
   it("submitCareerGuess sends player_id and round_number", async () => {
