@@ -5,6 +5,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Float,
     Index,
     Integer,
     String,
@@ -25,6 +26,12 @@ class GuessTheListGame(Base):
     is_race = Column(Boolean, nullable=False, default=False, server_default="0")
     is_public = Column(Boolean, nullable=False, default=False, server_default="0")
     preset = Column(String(128), nullable=True)
+    category_type = Column(
+        String(64),
+        nullable=False,
+        default="roster",
+        server_default="roster",
+    )
     target_wins = Column(Integer, nullable=False)
     turn_seconds = Column(Integer, nullable=True)
     turn_started_at = Column(DateTime, nullable=True)
@@ -83,11 +90,20 @@ class GuessTheListRound(Base):
     round_number = Column(Integer, nullable=False)
     status = Column(String, nullable=False, default="active")
 
-    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
-    season_id = Column(Integer, ForeignKey("seasons.id"), nullable=False)
-    team_code = Column(String, nullable=False)
-    team_name = Column(String, nullable=False)
-    season_year = Column(Integer, nullable=False)
+    category_type = Column(
+        String(64),
+        nullable=False,
+        default="roster",
+        server_default="roster",
+    )
+    metric = Column(String(32), nullable=True)
+    scope_label = Column(String, nullable=True)
+
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    season_id = Column(Integer, ForeignKey("seasons.id"), nullable=True)
+    team_code = Column(String, nullable=True)
+    team_name = Column(String, nullable=True)
+    season_year = Column(Integer, nullable=True)
 
     player1_correct = Column(Integer, nullable=False, default=0)
     player2_correct = Column(Integer, nullable=False, default=0)
@@ -116,7 +132,7 @@ class GuessTheListSlot(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     round_id = Column(Integer, ForeignKey("guess_the_list_rounds.id"), nullable=False)
     player_season_team_id = Column(
-        Integer, ForeignKey("player_season_teams.id"), nullable=False
+        Integer, ForeignKey("player_season_teams.id"), nullable=True
     )
     player_id = Column(Integer, ForeignKey("players.id"), nullable=False)
 
@@ -126,6 +142,9 @@ class GuessTheListSlot(Base):
     nationality = Column(String, nullable=True)
     height_cm = Column(Integer, nullable=True)
     player_name = Column(String, nullable=False)  # the answer
+    rank = Column(Integer, nullable=True)
+    stat_value = Column(Float, nullable=True)
+    stat_value_label = Column(String, nullable=True)
 
     guessed_by_player = Column(Integer, nullable=True)
     guessed_at = Column(DateTime, nullable=True)
