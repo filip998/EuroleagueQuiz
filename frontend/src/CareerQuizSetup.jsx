@@ -5,10 +5,11 @@ import {
   createCareerSoloRound,
   joinCareerGame,
 } from "./api";
-import { getNickname, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
+import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
 import GameSetupShell from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
+import NameField from "./NameField";
 import QuickMatchPanel from "./QuickMatchPanel";
 import {
   CAREER_QUICK_MATCH_PRESETS,
@@ -38,7 +39,7 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
   const [mode, setMode] = useState(initialMode === "online" ? "online" : "solo");
   const [onlineSub, setOnlineSub] = useState("quick");
   const [friendSub, setFriendSub] = useState("create");
-  const [playerName, setPlayerName] = useClerkPrefilledName(getNickname);
+  const [playerName, setPlayerName] = useClerkPrefilledName(getDisplayName);
   const [joinCode, setJoinCode] = useState("");
   const [targetWins, setTargetWins] = useState(3);
   const [wrongGuessVisibility, setWrongGuessVisibility] = useState("private");
@@ -176,29 +177,11 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
                     className="w-full px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm text-elq-text mb-1.5">Your Name</label>
-                  <input
-                    value={playerName}
-                    onChange={(e) => handlePlayerNameChange(e.target.value)}
-                    placeholder="Your name"
-                    maxLength={NICKNAME_MAX_LENGTH}
-                    className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
-                  />
-                </div>
+                <NameField value={playerName} onChange={handlePlayerNameChange} />
               </div>
             ) : (
               <div className="space-y-4 mb-8">
-                <div>
-                  <label className="block text-sm text-elq-text mb-1.5">Your Name</label>
-                  <input
-                    value={playerName}
-                    onChange={(e) => handlePlayerNameChange(e.target.value)}
-                    placeholder="Your name"
-                    maxLength={NICKNAME_MAX_LENGTH}
-                    className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
-                  />
-                </div>
+                <NameField value={playerName} onChange={handlePlayerNameChange} />
                 {isQuick ? (
                   <QuickMatchPanel
                     presets={CAREER_QUICK_MATCH_PRESETS}

@@ -254,8 +254,8 @@ test.describe("Higher or Lower Flow", () => {
     await page.goto("/");
     await page.getByText("HIGHER OR LOWER").click();
 
-    // Fill in required nickname
-    await page.getByPlaceholder("Your nickname").fill("E2ETest");
+    // Fill in the player name (now standardized across setups)
+    await page.getByPlaceholder("Your name").fill("E2ETest");
 
     // Start the game
     await page.getByText("Start Game").click();

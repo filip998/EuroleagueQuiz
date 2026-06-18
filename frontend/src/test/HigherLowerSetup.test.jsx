@@ -53,7 +53,7 @@ describe("HigherLowerSetup nickname persistence", () => {
     );
 
     // The field is prefilled with the Clerk display name, unedited.
-    const field = screen.getByPlaceholderText("Your nickname");
+    const field = screen.getByPlaceholderText("Your name");
     expect(field.value).toBe("clerk_user");
 
     // Start the game without touching the name.
@@ -76,7 +76,7 @@ describe("HigherLowerSetup nickname persistence", () => {
       <HigherLowerSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />
     );
 
-    const field = screen.getByPlaceholderText("Your nickname");
+    const field = screen.getByPlaceholderText("Your name");
     fireEvent.change(field, { target: { value: "Bob" } });
 
     // Editing persists immediately via onChange — independent of submit.

@@ -18,6 +18,7 @@ vi.mock("../api", () => ({
 
 vi.mock("../identity", () => ({
   getNickname: () => "Ace",
+  getDisplayName: () => "Ace",
   setNickname: vi.fn(),
   NICKNAME_MAX_LENGTH: 30,
 }));

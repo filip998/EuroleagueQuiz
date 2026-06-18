@@ -6,10 +6,11 @@ import {
   joinRosterRaceGame,
   quickMatchRosterRace,
 } from "./api";
-import { getNickname, setNickname, NICKNAME_MAX_LENGTH } from "./identity";
+import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
 import GameSetupShell from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
+import NameField from "./NameField";
 import QuickMatchPanel from "./QuickMatchPanel";
 import { resolveQuickMatchSeat } from "./quickMatchSeats";
 import {
@@ -72,7 +73,7 @@ export default function RosterGuessSetup({
   const [timerMode, setTimerMode] = useState("40s");
   const [seasonStart, setSeasonStart] = useState(2000);
   const [seasonEnd, setSeasonEnd] = useState(2025);
-  const [player1Name, setPlayer1Name] = useClerkPrefilledName(getNickname);
+  const [player1Name, setPlayer1Name] = useClerkPrefilledName(getDisplayName);
   const [player2Name, setPlayer2Name] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [raceJoinCode, setRaceJoinCode] = useState("");
@@ -235,6 +236,7 @@ export default function RosterGuessSetup({
             {isRaceQuick ? (
               <>
                 <NameField
+                  className="mb-6"
                   value={player1Name}
                   onChange={handlePlayer1NameChange}
                   label="Your Name"
@@ -258,6 +260,12 @@ export default function RosterGuessSetup({
               />
             ) : (
               <>
+                <NameField
+                  className="mb-6"
+                  value={player1Name}
+                  onChange={handlePlayer1NameChange}
+                  label="Your Name"
+                />
                 <SeasonRange
                   seasonStart={seasonStart}
                   seasonEnd={seasonEnd}
@@ -278,11 +286,6 @@ export default function RosterGuessSetup({
                     </option>
                   ))}
                 </select>
-                <NameField
-                  value={player1Name}
-                  onChange={handlePlayer1NameChange}
-                  label="Your Name"
-                />
               </>
             )}
           </>
@@ -306,23 +309,7 @@ export default function RosterGuessSetup({
               />
             ) : (
               <>
-                <SeasonRange
-                  seasonStart={seasonStart}
-                  seasonEnd={seasonEnd}
-                  setSeasonStart={setSeasonStart}
-                  setSeasonEnd={setSeasonEnd}
-                />
-
-                {showClassicMatchSettings && (
-                  <ClassicSettings
-                    targetWins={targetWins}
-                    setTargetWins={setTargetWins}
-                    timerMode={timerMode}
-                    setTimerMode={setTimerMode}
-                  />
-                )}
-
-                <div className="space-y-4 mb-8">
+                <div className="space-y-4 mb-6">
                   <NameField
                     value={player1Name}
                     onChange={handlePlayer1NameChange}
@@ -338,6 +325,22 @@ export default function RosterGuessSetup({
                     />
                   )}
                 </div>
+
+                <SeasonRange
+                  seasonStart={seasonStart}
+                  seasonEnd={seasonEnd}
+                  setSeasonStart={setSeasonStart}
+                  setSeasonEnd={setSeasonEnd}
+                />
+
+                {showClassicMatchSettings && (
+                  <ClassicSettings
+                    targetWins={targetWins}
+                    setTargetWins={setTargetWins}
+                    timerMode={timerMode}
+                    setTimerMode={setTimerMode}
+                  />
+                )}
               </>
             )}
           </>
@@ -475,21 +478,6 @@ function JoinFields({ code, onCodeChange, playerName, onPlayerNameChange }) {
         value={playerName}
         onChange={onPlayerNameChange}
         label="Your Name"
-      />
-    </div>
-  );
-}
-
-function NameField({ value, onChange, label, placeholder = "Your name" }) {
-  return (
-    <div>
-      <label className="block text-sm text-elq-text mb-1.5">{label}</label>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        maxLength={NICKNAME_MAX_LENGTH}
-        className="w-full px-4 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
       />
     </div>
   );
