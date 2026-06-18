@@ -12,7 +12,9 @@ from app.main import app
 from app.models import Player, PlayerSeasonTeam, Season, Team
 from app.models.tictactoe import QuizTicTacToeGame
 from app.routers import quiz as quiz_router
+from app.services import realtime as realtime_service
 from app.schemas.realtime import RealtimeServerMessageAdapter
+from app.schemas.realtime import RealtimeClientAction
 from app.services import matchmaking, tictactoe as ttt_service
 from app.services.realtime import DisconnectGraceTimerManager, OnlineGameRealtimeModule
 from app.services.realtime_adapters import TicTacToeRealtimeAdapter
@@ -985,6 +987,94 @@ def test_online_game_without_guest_id_still_works(client: TestClient):
         game = db.get(QuizTicTacToeGame, game_id)
         assert game.player1_guest_id is None
         assert game.player2_guest_id is None
+
+
+@pytest.mark.asyncio
+async def test_anonymous_online_play_stays_tokenless_across_rest_and_websocket(
+    client: TestClient,
+    monkeypatch,
+):
+    def fail_verifier():
+        raise AssertionError("Verifier should not run for tokenless websocket play")
+
+    def fail_auth_session_factory():
+        raise AssertionError("Auth DB should not open for tokenless websocket play")
+
+    monkeypatch.setattr(realtime_service, "get_clerk_jwt_verifier", fail_verifier)
+
+    create = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "online_friend",
+            "target_wins": 2,
+            "timer_mode": "unlimited",
+            "player1_name": "Anonymous Host",
+        },
+    )
+    assert create.status_code == 200
+    created = _action_payload(create)["game"]
+    assert "authorization" not in create.request.headers
+    assert "guest_id" not in created
+    assert "player1_guest_id" not in created
+
+    join = client.post(
+        "/quiz/tictactoe/games/join",
+        json={"join_code": created["join_code"], "player_name": "Anonymous Joiner"},
+    )
+    assert join.status_code == 200
+    joined = _action_payload(join)["game"]
+    assert "authorization" not in join.request.headers
+    assert joined["status"] == "active"
+    assert joined["round"] is not None
+    assert "guest_id" not in joined
+    assert "player1_guest_id" not in joined
+    assert "player2_guest_id" not in joined
+
+    game_id = joined["id"]
+    with client.session_local() as db:
+        game = db.get(QuizTicTacToeGame, game_id)
+        assert game.player1_guest_id is None
+        assert game.player2_guest_id is None
+
+    module = OnlineGameRealtimeModule(
+        TicTacToeRealtimeAdapter(),
+        session_factory=client.session_local,
+        auth_session_factory=fail_auth_session_factory,
+    )
+    player_one = FakeWebSocket()
+    player_two = FakeWebSocket()
+
+    await module._send_initial_state(player_one, game_id, 1)
+    await module._send_initial_state(player_two, game_id, 2)
+
+    assert module.connections.get_context(game_id, 1).user is None
+    assert module.connections.get_context(game_id, 2).user is None
+    RealtimeServerMessageAdapter.validate_python(player_one.sent[0])
+    RealtimeServerMessageAdapter.validate_python(player_two.sent[0])
+
+    acting_player = joined["current_player"]
+    acting_socket = player_one if acting_player == 1 else player_two
+    cell = _find_cell(joined, 0, 0)
+    player_id = _valid_player_for_cell(client, cell)
+
+    envelope = await module.handle_client_message(
+        acting_socket,
+        game_id,
+        acting_player,
+        {
+            "action": RealtimeClientAction.MOVE.value,
+            "row_index": 0,
+            "col_index": 0,
+            "player_id": player_id,
+        },
+    )
+
+    RealtimeServerMessageAdapter.validate_python(envelope)
+    assert envelope["type"] == "state"
+    assert envelope["payload"]["game"]["id"] == game_id
+    assert envelope["payload"]["result"] in {"correct", "round_won"}
+    assert player_one.sent[-1]["payload"]["game"]["id"] == game_id
+    assert player_two.sent[-1]["payload"]["game"]["id"] == game_id
 
 
 def test_online_game_oversized_guest_id_is_clamped_not_rejected(client: TestClient):
