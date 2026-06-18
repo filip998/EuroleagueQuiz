@@ -100,6 +100,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const roundLocked = revealCountdownRemaining > 0;
   const sharedWrongGuesses = solo ? [] : game?.current_round?.wrong_guesses || [];
   const isPublicQuickMatch = !solo && Boolean(game?.is_public) && Boolean(game?.preset);
+  const finishedWinnerName = finishedGameWinnerName(game);
   const timerEligible = isPublicQuickMatch && game?.status === "active" && !roundLocked;
   const showRoundTimer = (
     timerEligible
@@ -409,7 +410,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
           />
           <div className="text-5xl mb-3">🏆</div>
           <h1 className="font-display text-4xl text-elq-dark mb-3">
-            {(game.winner_player === 1 ? game.player1_name : game.player2_name) || "Player"} wins!
+            {finishedWinnerName ? `${finishedWinnerName} wins!` : "No winner"}
           </h1>
           <p className="text-elq-muted mb-6">{game.player1_score} - {game.player2_score}</p>
           <button onClick={onNewGame} className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl">
@@ -948,6 +949,12 @@ function Timeline({ timeline }) {
 
 function getCareerGameRoundNumber(game) {
   return game?.current_round?.round_number ?? game?.round_number ?? null;
+}
+
+function finishedGameWinnerName(game) {
+  if (game?.winner_player === 1) return game.player1_name || "Player 1";
+  if (game?.winner_player === 2) return game.player2_name || "Player 2";
+  return null;
 }
 
 function isCareerActionSyncConflict(error) {

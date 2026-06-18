@@ -226,6 +226,32 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(screen.queryByText("Nobody knows")).not.toBeInTheDocument();
   });
 
+  it("does not show Player 2 as the winner when an unattended public game has no winner", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({
+          status: "finished",
+          is_public: true,
+          preset: "standard",
+          winner_player: null,
+          current_round: null,
+          latest_completed_round: completedRound({
+            round_number: 1,
+            name: "Skipped Player",
+            status: "no_answer",
+            winner_player: null,
+          }),
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "No winner" })).toBeInTheDocument();
+    expect(screen.queryByText("B wins!")).not.toBeInTheDocument();
+  });
+
   it("renders shared wrong guesses for the active round", () => {
     render(
       <CareerQuizBoard
