@@ -741,7 +741,9 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next career" }));
 
     await waitFor(() => expect(createCareerSoloRound).toHaveBeenCalledWith([52]));
-    expect(screen.queryByText("Spain")).not.toBeInTheDocument();
+    // The hint reset runs in nextSoloRound's continuation after createCareerSoloRound
+    // resolves, so wait for the revealed hint to actually clear instead of racing it.
+    await waitFor(() => expect(screen.queryByText("Spain")).not.toBeInTheDocument());
     expect(screen.getByText("Hints used: 0")).toBeInTheDocument();
   });
 
