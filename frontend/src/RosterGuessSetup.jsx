@@ -183,9 +183,9 @@ export default function RosterGuessSetup({
     || (isClassicJoin && joinCode.trim().length !== 6)
     || (isRaceJoin && raceJoinCode.trim().length !== 6);
   const ctaLabel = isRaceJoin
-    ? "Join Race"
+    ? "Join Game"
     : isRaceFriend
-      ? "Create Race"
+      ? "Create Online Game"
       : isClassicJoin
         ? "Join Game"
         : isOnline
