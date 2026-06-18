@@ -418,3 +418,40 @@ describe("GameBoard header navigation", () => {
     expect(pill.querySelector(".bg-elq-player1")).toBeTruthy();
   });
 });
+
+describe("GameBoard solo / local never shows the online Resign control (issue #150)", () => {
+  // A stale `elq_game_<id>` seat (from an earlier online game whose numeric id was
+  // later reused by a brand-new solo/local game) can hand the board a truthy
+  // `onlineInfo`. The board must still refuse to go online based on the game mode.
+  const staleSeat = { isOnline: true, playerNumber: 1 };
+
+  it("renders only Give Up (no Resign) for a single_player game with a stale seat", () => {
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "single_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={staleSeat}
+      />
+    );
+
+    expect(screen.getByText("Give Up")).toBeInTheDocument();
+    expect(screen.queryByText("Resign")).not.toBeInTheDocument();
+    // The leak is behavioural too: the realtime transport must stay disabled.
+    expect(realtimeHolder.opts.enabled).toBe(false);
+  });
+
+  it("renders no Resign for a local_two_player game with a stale seat", () => {
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={staleSeat}
+      />
+    );
+
+    expect(screen.queryByText("Resign")).not.toBeInTheDocument();
+    expect(realtimeHolder.opts.enabled).toBe(false);
+  });
+});

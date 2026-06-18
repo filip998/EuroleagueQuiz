@@ -112,9 +112,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const [cancelling, setCancelling] = useState(false);
   const [resultDismissed, setResultDismissed] = useState(false);
 
-  const isOnline = onlineInfo?.isOnline;
-  const myPlayer = onlineInfo?.playerNumber;
   const isSolo = game?.mode === "single_player";
+  // A solo / local game must never be treated as online, even if `onlineInfo`
+  // carries a stale seat recovered for a reused game id (see onlineRecovery.js).
+  const isOnline = game?.mode === "online_friend" && Boolean(onlineInfo?.isOnline);
+  const myPlayer = onlineInfo?.playerNumber;
   const realtimeUnavailableMessage = "Realtime connection unavailable. Reconnecting...";
 
   function handleRealtimeState(message) {

@@ -41,13 +41,20 @@ export function clearOnlineInfo(gameId) {
   }
 }
 
+// Only an actually-online game (`mode === "online_friend"`) is ever recovered as
+// online. A solo (`single_player`) or local (`local_two_player`) game must never
+// be treated as online, even if a stale `elq_game_<id>` seat lingers from an
+// earlier online game whose numeric id was later reused (the tracked prod DB is
+// reseeded/redeployed, which restarts game ids). The seat key is NOT namespaced
+// per board, so a live online game of another type can legitimately share this
+// numeric id in the same tab — we therefore refuse to honor the seat here but do
+// not clear it (clearing could drop that other game's seat).
 export function recoverOnlineInfo(gameId, game) {
+  if (game?.mode !== "online_friend") return null;
   const stored = loadOnlineInfo(gameId);
   if (stored) return stored;
-  if (game?.mode === "online_friend") {
-    const seat = recallQuickMatchSeat(gameId);
-    if (seat) return { playerNumber: seat, isOnline: true };
-  }
+  const seat = recallQuickMatchSeat(gameId);
+  if (seat) return { playerNumber: seat, isOnline: true };
   return null;
 }
 
@@ -56,9 +63,10 @@ export function recoverOnlineInfo(gameId, game) {
 // key). Private friend games never fall back — a fresh tab joins via the URL —
 // so they can't be mis-seated from a stale namespaced entry.
 export function recoverPhotoOnlineInfo(gameId, game) {
+  if (game?.mode !== "online_friend") return null;
   const stored = loadOnlineInfo(gameId);
   if (stored) return stored;
-  if (game?.mode === "online_friend" && game?.is_public && game?.preset) {
+  if (game?.is_public && game?.preset) {
     const seat = recallQuickMatchSeat(photoSeatKey(gameId));
     if (seat) return { playerNumber: seat, isOnline: true };
   }
@@ -66,9 +74,10 @@ export function recoverPhotoOnlineInfo(gameId, game) {
 }
 
 export function recoverCareerOnlineInfo(gameId, game) {
+  if (game?.mode !== "online_friend") return null;
   const stored = loadOnlineInfo(gameId);
   if (stored) return stored;
-  if (game?.mode === "online_friend" && game?.is_public && game?.preset) {
+  if (game?.is_public && game?.preset) {
     const seat = recallQuickMatchSeat(careerSeatKey(gameId));
     if (seat) return { playerNumber: seat, isOnline: true };
   }
@@ -76,9 +85,10 @@ export function recoverCareerOnlineInfo(gameId, game) {
 }
 
 export function recoverRosterOnlineInfo(gameId, game) {
+  if (game?.mode !== "online_friend") return null;
   const stored = loadOnlineInfo(gameId);
   if (stored) return stored;
-  if (game?.mode === "online_friend" && game?.is_race && game?.is_public && game?.preset) {
+  if (game?.is_race && game?.is_public && game?.preset) {
     const seat = recallQuickMatchSeat(rosterRaceSeatKey(gameId));
     if (seat) return { playerNumber: seat, isOnline: true };
   }

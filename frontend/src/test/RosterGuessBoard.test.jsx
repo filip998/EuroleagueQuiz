@@ -11,8 +11,12 @@ vi.mock("../api", () => ({
   giveUpRosterRound: vi.fn(),
 }));
 
+const realtimeHolder = vi.hoisted(() => ({ opts: null }));
 vi.mock("../useOnlineGameRealtime", () => ({
-  useOnlineGameRealtime: () => ({ sendAction: vi.fn() }),
+  useOnlineGameRealtime: (opts) => {
+    realtimeHolder.opts = opts;
+    return { sendAction: vi.fn() };
+  },
 }));
 
 vi.mock("../ClubLogo", () => ({
@@ -23,6 +27,7 @@ import RosterGuessBoard from "../RosterGuessBoard";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  realtimeHolder.opts = null;
 });
 
 function activeSoloGame(overrides = {}) {
@@ -67,5 +72,43 @@ describe("RosterGuessBoard header navigation", () => {
 
     expect(onHome).toHaveBeenCalledTimes(1);
     expect(onNewGame).not.toHaveBeenCalled();
+  });
+});
+
+describe("RosterGuessBoard solo / local never goes online from a stale seat (issue #150)", () => {
+  // A stale `elq_game_<id>` seat (from an earlier online game whose numeric id was
+  // later reused by a brand-new solo/local game) can hand the board a truthy
+  // `onlineInfo`. Mode must win: a non-online game stays offline.
+  const staleSeat = { isOnline: true, playerNumber: 1 };
+
+  it("hides the online seat banner for a single_player game with a stale seat", () => {
+    render(
+      <RosterGuessBoard
+        initialState={activeSoloGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={staleSeat}
+      />
+    );
+
+    // The online-only "You are <name>" banner stays hidden; solo keeps Give Up.
+    expect(screen.queryByText(/You are/)).not.toBeInTheDocument();
+    expect(screen.getByText("Give Up")).toBeInTheDocument();
+    // The leak is behavioural too: the realtime transport must stay disabled.
+    expect(realtimeHolder.opts.enabled).toBe(false);
+  });
+
+  it("stays offline for a local_two_player game with a stale seat", () => {
+    render(
+      <RosterGuessBoard
+        initialState={activeSoloGame({ mode: "local_two_player", player2_name: "Two" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={staleSeat}
+      />
+    );
+
+    expect(screen.queryByText(/You are/)).not.toBeInTheDocument();
+    expect(realtimeHolder.opts.enabled).toBe(false);
   });
 });

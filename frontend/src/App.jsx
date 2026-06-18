@@ -17,7 +17,6 @@ import { getCareerGame, getGame, getPhotoGame, getRosterGame } from "./api";
 import { parseJoinCode } from "./inviteLink";
 import {
   saveOnlineInfo,
-  loadOnlineInfo,
   recoverCareerOnlineInfo,
   recoverOnlineInfo,
   recoverPhotoOnlineInfo,
@@ -262,7 +261,7 @@ function RosterGamePage() {
     getRosterGame(gameId)
       .then((data) => {
         setGame(data);
-        setOnlineInfo(recoverRosterOnlineInfo(gameId, data) || loadOnlineInfo(gameId));
+        setOnlineInfo(recoverRosterOnlineInfo(gameId, data));
       })
       .catch(() => navigate("/roster", { replace: true }))
       .finally(() => setLoading(false));
