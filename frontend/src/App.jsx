@@ -4,6 +4,7 @@ import GameSetup from "./GameSetup";
 import GameBoard from "./GameBoard";
 import RosterGuessSetup from "./RosterGuessSetup";
 import RosterGuessBoard from "./RosterGuessBoard";
+import RosterGuessRaceBoard from "./RosterGuessRaceBoard";
 import HigherLowerSetup from "./HigherLowerSetup";
 import HigherLowerBoard from "./HigherLowerBoard";
 import CareerQuizSetup from "./CareerQuizSetup";
@@ -14,7 +15,7 @@ import HomeQuickMatchCta from "./HomeQuickMatchCta";
 import { LogoFull } from "./Logo";
 import { getCareerGame, getGame, getPhotoGame, getRosterGame } from "./api";
 import { parseJoinCode } from "./inviteLink";
-import { saveOnlineInfo, loadOnlineInfo, recoverOnlineInfo, recoverPhotoOnlineInfo } from "./onlineRecovery";
+import { saveOnlineInfo, loadOnlineInfo, recoverOnlineInfo, recoverPhotoOnlineInfo, recoverRosterOnlineInfo } from "./onlineRecovery";
 
 // Lazy-loaded so the Clerk-backed profile page (the only thing that pulls in
 // `@clerk/clerk-react` via auth.jsx) is code-split out of the main bundle and,
@@ -85,23 +86,20 @@ function HomePage() {
             </div>
 
             {/* Roster Guess card */}
-            <Link
-              to="/roster"
-              className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] active:scale-[0.98]"
-            >
-              <div className="w-12 h-12 rounded-xl bg-elq-player2/10 flex items-center justify-center mb-4 group-hover:bg-elq-player2/20 transition-colors">
-                <svg className="w-6 h-6 text-elq-player2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
-                </svg>
-              </div>
-              <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">ROSTER GUESS</h2>
-              <p className="text-sm text-elq-muted leading-relaxed">
-                Guess the full roster of a EuroLeague team from a specific season using hints.
-              </p>
-              <div className="mt-4 text-xs font-semibold text-elq-orange opacity-0 group-hover:opacity-100 transition-opacity">
-                PLAY →
-              </div>
-            </Link>
+            <div className="group bg-white rounded-2xl border-2 border-elq-border shadow-sm hover:shadow-lg hover:border-elq-orange/40 transition-all duration-300 p-6 sm:p-8 text-left hover:scale-[1.02] flex flex-col">
+              <Link to="/roster" className="block text-left flex-1">
+                <div className="w-12 h-12 rounded-xl bg-elq-player2/10 flex items-center justify-center mb-4 group-hover:bg-elq-player2/20 transition-colors">
+                  <svg className="w-6 h-6 text-elq-player2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
+                  </svg>
+                </div>
+                <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">ROSTER GUESS</h2>
+                <p className="text-sm text-elq-muted leading-relaxed">
+                  Guess the full roster of a EuroLeague team from a specific season using hints.
+                </p>
+              </Link>
+              <HomeQuickMatchCta to="/roster?quick=1" />
+            </div>
 
             {/* Higher or Lower card */}
             <Link
@@ -228,6 +226,8 @@ function TicTacToeGamePage() {
 
 function RosterSetupPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const isQuickRace = new URLSearchParams(location.search).get("quick") === "1";
 
   function handleGameCreated(resp, online) {
     const gameData = resp.state || resp.game || resp;
@@ -236,7 +236,15 @@ function RosterSetupPage() {
     navigate(`/roster/${id}`);
   }
 
-  return <RosterGuessSetup onGameCreated={handleGameCreated} onBack={() => navigate("/")} />;
+  return (
+    <RosterGuessSetup
+      key={isQuickRace ? "race-quick" : "default"}
+      initialMode={isQuickRace ? "online" : "solo"}
+      initialOnlineGameType={isQuickRace ? "race" : "classic"}
+      onGameCreated={handleGameCreated}
+      onBack={() => navigate("/")}
+    />
+  );
 }
 
 function RosterGamePage() {
@@ -250,7 +258,7 @@ function RosterGamePage() {
     getRosterGame(gameId)
       .then((data) => {
         setGame(data);
-        setOnlineInfo(loadOnlineInfo(gameId));
+        setOnlineInfo(recoverRosterOnlineInfo(gameId, data) || loadOnlineInfo(gameId));
       })
       .catch(() => navigate("/roster", { replace: true }))
       .finally(() => setLoading(false));
@@ -260,12 +268,21 @@ function RosterGamePage() {
   if (!game) return null;
 
   return (
-    <RosterGuessBoard
-      initialState={game}
-      onNewGame={() => navigate("/roster")}
-      onHome={() => navigate("/")}
-      onlineInfo={onlineInfo}
-    />
+    game?.is_race ? (
+      <RosterGuessRaceBoard
+        initialState={game}
+        onNewGame={() => navigate("/roster")}
+        onHome={() => navigate("/")}
+        onlineInfo={onlineInfo}
+      />
+    ) : (
+      <RosterGuessBoard
+        initialState={game}
+        onNewGame={() => navigate("/roster")}
+        onHome={() => navigate("/")}
+        onlineInfo={onlineInfo}
+      />
+    )
   );
 }
 

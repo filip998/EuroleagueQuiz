@@ -15,14 +15,21 @@ vi.mock("../GameBoard", () => ({
   default: () => <div data-testid="game-board" />,
 }));
 vi.mock("../RosterGuessSetup", () => ({
-  default: ({ onBack }) => (
-    <div data-testid="roster-setup">
+  default: ({ onBack, initialMode, initialOnlineGameType }) => (
+    <div
+      data-testid="roster-setup"
+      data-initial-mode={initialMode || ""}
+      data-initial-online-game-type={initialOnlineGameType || ""}
+    >
       <button onClick={onBack}>Back</button>
     </div>
   ),
 }));
 vi.mock("../RosterGuessBoard", () => ({
   default: () => <div data-testid="roster-board" />,
+}));
+vi.mock("../RosterGuessRaceBoard", () => ({
+  default: () => <div data-testid="roster-race-board" />,
 }));
 vi.mock("../HigherLowerSetup", () => ({
   default: ({ onBack }) => (
@@ -100,6 +107,20 @@ describe("App", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     fireEvent.click(screen.getByText("ROSTER GUESS"));
     expect(screen.getByTestId("roster-setup")).toBeInTheDocument();
+  });
+
+  it("renders a Quick Match CTA on the Roster Guess card that opens Race setup", () => {
+    render(<MemoryRouter><App /></MemoryRouter>);
+    const cta = screen
+      .getAllByTestId("home-quick-match-cta")
+      .find((el) => el.getAttribute("href") === "/roster?quick=1");
+    expect(cta).toBeDefined();
+    expect(cta).toHaveTextContent("Quick Match");
+    fireEvent.click(cta);
+    const setup = screen.getByTestId("roster-setup");
+    expect(setup).toBeInTheDocument();
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-online-game-type", "race");
   });
 
   it("navigates to Higher or Lower setup when clicking the card", () => {

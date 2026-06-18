@@ -163,10 +163,43 @@ export function joinRosterGame(joinCode, playerName) {
   });
 }
 
-export function submitRosterGuess(gameId, playerId) {
-  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/guess`, {
-    player_id: playerId,
+export function createRosterRaceGame(payload) {
+  return actionRequest("POST", "/quiz/roster-guess/race/games", {
+    ...payload,
+    guest_id: getGuestId(),
   });
+}
+
+export function joinRosterRaceGame(joinCode, playerName) {
+  return actionRequest("POST", "/quiz/roster-guess/race/games/join", {
+    join_code: joinCode,
+    player_name: playerName,
+    guest_id: getGuestId(),
+  });
+}
+
+export function quickMatchRosterRace(payload) {
+  return actionRequest("POST", "/quiz/roster-guess/quick-match", {
+    ...payload,
+    guest_id: getGuestId(),
+  });
+}
+
+export function cancelRosterRaceQuickMatch(payload) {
+  return actionRequest("POST", "/quiz/roster-guess/quick-match/cancel", {
+    ...payload,
+    guest_id: getGuestId(),
+  });
+}
+
+export function getRosterRaceQuickMatchPools() {
+  return request("GET", "/quiz/roster-guess/quick-match/pools");
+}
+
+export function submitRosterGuess(gameId, playerId, roundNumber = null) {
+  const body = { player_id: playerId };
+  if (roundNumber != null) body.round_number = roundNumber;
+  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/guess`, body);
 }
 
 export function offerEndRound(gameId) {

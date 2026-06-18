@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -13,9 +22,14 @@ class RosterGuessGame(Base):
     mode = Column(String, nullable=False)  # single_player, local_two_player, online_friend
     status = Column(String, nullable=False, default="active")  # waiting_for_opponent, active, finished
     join_code = Column(String(6), nullable=True, unique=True, index=True)
+    is_race = Column(Boolean, nullable=False, default=False, server_default="0")
+    is_public = Column(Boolean, nullable=False, default=False, server_default="0")
+    preset = Column(String(128), nullable=True)
     target_wins = Column(Integer, nullable=False)
     turn_seconds = Column(Integer, nullable=True)
     turn_started_at = Column(DateTime, nullable=True)
+    race_round_seconds = Column(Integer, nullable=True)
+    race_reveal_seconds = Column(Integer, nullable=True)
 
     player1_name = Column(String, nullable=True)
     player2_name = Column(String, nullable=True)
@@ -49,6 +63,17 @@ class RosterGuessGame(Base):
         order_by="RosterGuessRound.round_number",
     )
 
+    __table_args__ = (
+        Index(
+            "ix_roster_guess_games_matchmaking_pool",
+            "is_race",
+            "is_public",
+            "status",
+            "preset",
+            "created_at",
+        ),
+    )
+
 
 class RosterGuessRound(Base):
     __tablename__ = "roster_guess_rounds"
@@ -69,6 +94,7 @@ class RosterGuessRound(Base):
     winner_player = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("game_id", "round_number", name="uq_roster_guess_round"),
