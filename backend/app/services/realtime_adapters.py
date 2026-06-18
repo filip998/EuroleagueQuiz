@@ -324,6 +324,7 @@ class GuessTheListRealtimeAdapter:
                 game = guess_the_list_service.create_race_game(
                     db,
                     target_wins=data.get("target_wins", 2),
+                    category_type=data.get("category_type"),
                     player1_name=data.get("player1_name"),
                     season_range_start=data.get("season_range_start"),
                     season_range_end=data.get("season_range_end"),
@@ -335,6 +336,7 @@ class GuessTheListRealtimeAdapter:
                     mode=data.get("mode", "single_player"),
                     target_wins=data.get("target_wins", 3),
                     timer_mode=data.get("timer_mode", "40s"),
+                    category_type=data.get("category_type"),
                     player1_name=data.get("player1_name"),
                     player2_name=data.get("player2_name"),
                     season_range_start=data.get("season_range_start"),

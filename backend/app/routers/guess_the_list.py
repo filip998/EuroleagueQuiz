@@ -110,6 +110,7 @@ def _cancelled_quick_match_state(result) -> dict:
         "is_race": True,
         "is_public": True,
         "preset": result.preset,
+        "category_type": game.category_type,
         "target_wins": game.target_wins,
         "turn_seconds": None,
         "turn_deadline_utc": None,

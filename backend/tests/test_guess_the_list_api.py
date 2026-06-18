@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, get_db
 from app.main import app
 from app.models import Player, PlayerSeasonTeam, Season, Team
-from app.models.guess_the_list import GuessTheListGame, GuessTheListRound
+from app.models.guess_the_list import GuessTheListGame, GuessTheListRound, GuessTheListSlot
 from app.schemas.realtime import RealtimeServerMessageAdapter
 from app.services import guess_the_list as guess_the_list_service
 from app.services.realtime import DisconnectGraceTimerManager, OnlineGameRealtimeModule, TurnTimerManager
@@ -116,8 +116,200 @@ def test_create_guess_the_list_game_returns_state_envelope(client: TestClient):
     game = _create_guess_the_list_game(client)
 
     assert game["mode"] == "single_player"
+    assert game["category_type"] == "roster"
     assert game["round"]["status"] == "active"
+    assert game["round"]["category_type"] == "roster"
+    assert game["round"]["metric"] is None
+    assert game["round"]["scope_label"] == "Alpha Club 2024"
     assert len(game["round"]["slots"]) >= 5
+    assert [slot["jersey_number"] for slot in game["round"]["slots"]] == [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+    ]
+    assert all(
+        slot["player_name"] is None
+        and slot["rank"] is None
+        and slot["stat_value"] is None
+        and slot["stat_value_label"] is None
+        for slot in game["round"]["slots"]
+    )
+
+
+class SyntheticSingleSeasonGenerator:
+    def build_round(self, db, game, round_number):
+        roster_rows = (
+            db.query(PlayerSeasonTeam, Player)
+            .join(Player, Player.id == PlayerSeasonTeam.player_id)
+            .order_by(Player.id.asc())
+            .all()
+        )
+        stat_rows = list(zip(roster_rows, [30, 25, 20, 15, 10, 10]))
+        ranked_rows = guess_the_list_service.ranked_items_with_boundary_ties(
+            stat_rows,
+            limit=5,
+            stat_value=lambda row: row[1],
+        )
+        slots = []
+        for ranked_row in ranked_rows:
+            (player_season_team, player), _ = ranked_row.item
+            full_name = f"{player.first_name or ''} {player.last_name or ''}".strip()
+            slots.append(
+                guess_the_list_service.RoundSlotSpec(
+                    player_season_team_id=player_season_team.id,
+                    player_id=player.id,
+                    jersey_number=player_season_team.jersey_number,
+                    position=player.position,
+                    nationality=player.nationality,
+                    height_cm=player.height_cm,
+                    player_name=full_name,
+                    rank=ranked_row.rank,
+                    stat_value=ranked_row.stat_value,
+                    stat_value_label=f"{ranked_row.stat_value:g} PTS",
+                )
+            )
+
+        return guess_the_list_service.RoundSpec(
+            category_type=guess_the_list_service.CATEGORY_SINGLE_SEASON,
+            metric="points",
+            scope_label="Synthetic 2024 scoring leaders",
+            team_id=None,
+            season_id=None,
+            team_code=None,
+            team_name=None,
+            season_year=2024,
+            slots=tuple(slots),
+        )
+
+
+def test_ranked_items_with_boundary_ties_includes_cutoff_ties():
+    ranked = guess_the_list_service.ranked_items_with_boundary_ties(
+        [30, 25, 20, 15, 10, 10, 5],
+        limit=5,
+        stat_value=lambda value: value,
+    )
+
+    assert [item.stat_value for item in ranked] == [30, 25, 20, 15, 10, 10]
+    assert [item.rank for item in ranked] == [1, 2, 3, 4, 5, 5]
+    assert guess_the_list_service.ranked_items_with_boundary_ties(
+        [30, 25],
+        limit=0,
+        stat_value=lambda value: value,
+    ) == []
+
+
+def test_synthetic_generator_dispatch_ties_and_answer_hiding(client: TestClient):
+    with client.session_local() as db:
+        now = datetime.utcnow()
+        game = GuessTheListGame(
+            mode="single_player",
+            status="active",
+            join_code=None,
+            is_race=False,
+            is_public=False,
+            preset=None,
+            category_type=guess_the_list_service.CATEGORY_SINGLE_SEASON,
+            target_wins=2,
+            turn_seconds=None,
+            turn_started_at=None,
+            race_round_seconds=None,
+            race_reveal_seconds=None,
+            player1_name="Player One",
+            player2_name=None,
+            player1_guest_id=None,
+            player2_guest_id=None,
+            player1_score=0,
+            player2_score=0,
+            current_player=1,
+            round_number=0,
+            winner_player=None,
+            season_range_start=2024,
+            season_range_end=2024,
+            pending_end_from=None,
+            pending_end_to=None,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(game)
+        db.flush()
+
+        round_obj = guess_the_list_service._create_next_round(
+            db,
+            game,
+            registry={
+                guess_the_list_service.CATEGORY_SINGLE_SEASON: (
+                    SyntheticSingleSeasonGenerator()
+                )
+            },
+        )
+        db.flush()
+
+        active_state = guess_the_list_service.serialize_game_state(db, game)
+        active_round = active_state["round"]
+        assert active_state["category_type"] == guess_the_list_service.CATEGORY_SINGLE_SEASON
+        assert active_round["category_type"] == guess_the_list_service.CATEGORY_SINGLE_SEASON
+        assert active_round["metric"] == "points"
+        assert active_round["scope_label"] == "Synthetic 2024 scoring leaders"
+        assert active_round["total_slots"] == 6
+        assert all(
+            slot["player_name"] is None
+            and slot["rank"] is None
+            and slot["stat_value"] is None
+            and slot["stat_value_label"] is None
+            for slot in active_round["slots"]
+        )
+
+        claimed_slot = (
+            db.query(GuessTheListSlot)
+            .filter(GuessTheListSlot.round_id == round_obj.id)
+            .filter(GuessTheListSlot.rank == 1)
+            .one()
+        )
+        claimed_slot.guessed_by_player = 1
+        claimed_slot.guessed_at = datetime.utcnow()
+        db.flush()
+
+        claimed_state = guess_the_list_service.serialize_game_state(db, game)
+        claimed_payload = next(
+            slot
+            for slot in claimed_state["round"]["slots"]
+            if slot["id"] == claimed_slot.id
+        )
+        assert claimed_payload["player_name"] == "Player1 Roster"
+        assert claimed_payload["rank"] == 1
+        assert claimed_payload["stat_value"] == 30.0
+        assert claimed_payload["stat_value_label"] == "30 PTS"
+        assert all(
+            slot["rank"] is None
+            and slot["stat_value"] is None
+            and slot["player_name"] is None
+            for slot in claimed_state["round"]["slots"]
+            if slot["id"] != claimed_slot.id
+        )
+
+        round_obj.status = "completed"
+        round_obj.completed_at = datetime.utcnow()
+        db.flush()
+
+        completed_round = guess_the_list_service.serialize_completed_round(
+            db,
+            game.id,
+            round_obj.round_number,
+        )
+        assert completed_round is not None
+        assert [slot["rank"] for slot in completed_round["slots"]] == [1, 2, 3, 4, 5, 5]
+        assert [slot["stat_value"] for slot in completed_round["slots"]] == [
+            30.0,
+            25.0,
+            20.0,
+            15.0,
+            10.0,
+            10.0,
+        ]
+        assert all(slot["player_name"] for slot in completed_round["slots"])
 
 
 def test_legacy_roster_guess_http_routes_alias_guess_the_list(client: TestClient):

@@ -1,9 +1,21 @@
+import hashlib
 import random
 import string
 import threading
 import weakref
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from decimal import Decimal
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Mapping,
+    Optional,
+    Protocol,
+    Sequence,
+    TypeVar,
+)
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -32,6 +44,12 @@ RACE_REVEAL_SECONDS = 12
 MIN_ROSTER_SIZE = 5
 MAX_ROSTER_RETRIES = 10
 
+CATEGORY_ROSTER = "roster"
+CATEGORY_ALL_TIME = "all_time"
+CATEGORY_SINGLE_SEASON = "single_season"
+DEFAULT_CATEGORY_TYPE = CATEGORY_ROSTER
+LEADERBOARD_METRICS = {"points", "rebounds", "assists", "pir"}
+
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -45,6 +63,90 @@ GuessTheListConflictError = ConflictGameActionError
 GUEST_ID_MAX_LENGTH = 64
 _race_locks_guard = threading.Lock()
 _race_locks: weakref.WeakValueDictionary[int, Any] = weakref.WeakValueDictionary()
+T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class RoundSlotSpec:
+    player_id: int
+    player_name: str
+    player_season_team_id: int | None = None
+    jersey_number: str | None = None
+    position: str | None = None
+    nationality: str | None = None
+    height_cm: int | None = None
+    rank: int | None = None
+    stat_value: float | None = None
+    stat_value_label: str | None = None
+
+
+@dataclass(frozen=True)
+class RoundSpec:
+    category_type: str
+    metric: str | None
+    scope_label: str | None
+    team_id: int | None
+    season_id: int | None
+    team_code: str | None
+    team_name: str | None
+    season_year: int | None
+    slots: Sequence[RoundSlotSpec]
+
+
+class GuessTheListRoundGenerator(Protocol):
+    def build_round(
+        self,
+        db: Session,
+        game: GuessTheListGame,
+        round_number: int,
+    ) -> RoundSpec:
+        ...
+
+
+@dataclass(frozen=True)
+class RankedBoundaryItem(Generic[T]):
+    item: T
+    rank: int
+    stat_value: float
+
+
+def ranked_items_with_boundary_ties(
+    rows: Sequence[T],
+    *,
+    limit: int,
+    stat_value: Callable[[T], int | float | Decimal],
+) -> list[RankedBoundaryItem[T]]:
+    """Competition-rank rows and include every tie at the cutoff boundary.
+
+    ``rows`` must already be sorted from best to worst. If multiple players tie
+    at rank ``limit``, every tied player is returned and shares that rank, so a
+    generated round can contain more than ``limit`` slots.
+    """
+
+    if limit <= 0:
+        return []
+
+    ranked: list[RankedBoundaryItem[T]] = []
+    previous_value: Decimal | None = None
+    current_rank = 0
+
+    for index, row in enumerate(rows, start=1):
+        raw_value = stat_value(row)
+        numeric_value = Decimal(str(raw_value))
+        if previous_value is None or numeric_value != previous_value:
+            current_rank = index
+            previous_value = numeric_value
+        if current_rank > limit:
+            break
+        ranked.append(
+            RankedBoundaryItem(
+                item=row,
+                rank=current_rank,
+                stat_value=float(numeric_value),
+            )
+        )
+
+    return ranked
 
 
 def _clean_guest_id(guest_id: Optional[str]) -> Optional[str]:
@@ -53,6 +155,11 @@ def _clean_guest_id(guest_id: Optional[str]) -> Optional[str]:
         return None
     cleaned = guest_id.strip()[:GUEST_ID_MAX_LENGTH]
     return cleaned or None
+
+
+def _clean_category_type(category_type: str | None) -> str:
+    cleaned = (category_type or DEFAULT_CATEGORY_TYPE).strip().lower()
+    return cleaned or DEFAULT_CATEGORY_TYPE
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +208,135 @@ def _generate_join_code(db: Session) -> str:
     raise GuessTheListError("Unable to generate a unique join code")
 
 
+class RosterGenerator:
+    def build_round(
+        self,
+        db: Session,
+        game: GuessTheListGame,
+        round_number: int,
+    ) -> RoundSpec:
+        """Pick a random team+season and return the current roster answer set."""
+
+        eligible_pairs = (
+            db.query(PlayerSeasonTeam.team_id, PlayerSeasonTeam.season_id)
+            .join(Season, Season.id == PlayerSeasonTeam.season_id)
+            .filter(
+                Season.year >= game.season_range_start,
+                Season.year <= game.season_range_end,
+            )
+            .group_by(PlayerSeasonTeam.team_id, PlayerSeasonTeam.season_id)
+            .having(func.count(PlayerSeasonTeam.id) >= MIN_ROSTER_SIZE)
+            .all()
+        )
+
+        if not eligible_pairs:
+            raise GuessTheListError(
+                "No team+season combination with enough players in the selected range"
+            )
+
+        random.shuffle(eligible_pairs)
+
+        roster_rows = None
+        chosen_team_id = None
+        chosen_season_id = None
+
+        for team_id, season_id in eligible_pairs[:MAX_ROSTER_RETRIES]:
+            rows = (
+                db.query(
+                    PlayerSeasonTeam.id.label("pst_id"),
+                    PlayerSeasonTeam.player_id,
+                    PlayerSeasonTeam.jersey_number,
+                    Player.first_name,
+                    Player.last_name,
+                    Player.position,
+                    Player.nationality,
+                    Player.height_cm,
+                )
+                .join(Player, Player.id == PlayerSeasonTeam.player_id)
+                .filter(
+                    PlayerSeasonTeam.team_id == team_id,
+                    PlayerSeasonTeam.season_id == season_id,
+                )
+                .all()
+            )
+            if len(rows) >= MIN_ROSTER_SIZE:
+                roster_rows = rows
+                chosen_team_id = team_id
+                chosen_season_id = season_id
+                break
+
+        if roster_rows is None:
+            raise GuessTheListError("Could not find a valid roster after retries")
+
+        team = db.query(Team).filter(Team.id == chosen_team_id).first()
+        season = db.query(Season).filter(Season.id == chosen_season_id).first()
+
+        team_code = team.euroleague_code if team else "UNK"
+        season_year = season.year if season else 0
+
+        team_season = (
+            db.query(TeamSeason)
+            .filter(
+                TeamSeason.team_id == chosen_team_id,
+                TeamSeason.season_id == chosen_season_id,
+            )
+            .first()
+        )
+        team_name = (
+            (
+                team_season.team_name_that_season
+                if team_season and team_season.team_name_that_season
+                else None
+            )
+            or (team.name if team else "Unknown")
+        )
+
+        slots = []
+        for row in roster_rows:
+            full_name = f"{row.first_name or ''} {row.last_name or ''}".strip()
+            slots.append(
+                RoundSlotSpec(
+                    player_season_team_id=row.pst_id,
+                    player_id=row.player_id,
+                    jersey_number=row.jersey_number,
+                    position=row.position,
+                    nationality=row.nationality,
+                    height_cm=row.height_cm,
+                    player_name=full_name or "Unknown",
+                )
+            )
+
+        return RoundSpec(
+            category_type=CATEGORY_ROSTER,
+            metric=None,
+            scope_label=f"{team_name} {season_year}",
+            team_id=chosen_team_id,
+            season_id=chosen_season_id,
+            team_code=team_code,
+            team_name=team_name,
+            season_year=season_year,
+            slots=tuple(slots),
+        )
+
+
+ROUND_GENERATOR_REGISTRY: dict[str, GuessTheListRoundGenerator] = {
+    CATEGORY_ROSTER: RosterGenerator(),
+}
+
+
+def _generator_for_category(
+    category_type: str | None,
+    *,
+    registry: Mapping[str, GuessTheListRoundGenerator] | None = None,
+) -> GuessTheListRoundGenerator:
+    category = _clean_category_type(category_type)
+    generators = ROUND_GENERATOR_REGISTRY if registry is None else registry
+    generator = generators.get(category)
+    if generator is None:
+        raise GuessTheListError(f"Unsupported Guess the List category_type: {category}")
+    return generator
+
+
 # ---------------------------------------------------------------------------
 # Game lifecycle
 # ---------------------------------------------------------------------------
@@ -112,6 +348,7 @@ def create_game(
     mode: str,
     target_wins: int,
     timer_mode: str,
+    category_type: str | None = None,
     player1_name: Optional[str] = None,
     player2_name: Optional[str] = None,
     season_range_start: int,
@@ -128,6 +365,8 @@ def create_game(
         raise GuessTheListError("timer_mode must be one of: 15s, 40s, unlimited")
     if season_range_start > season_range_end:
         raise GuessTheListError("season_range_start must be <= season_range_end")
+    cleaned_category_type = _clean_category_type(category_type)
+    _generator_for_category(cleaned_category_type)
 
     is_online = mode == "online_friend"
     join_code = _generate_join_code(db) if is_online else None
@@ -139,6 +378,7 @@ def create_game(
         is_race=False,
         is_public=False,
         preset=None,
+        category_type=cleaned_category_type,
         target_wins=target_wins,
         turn_seconds=TIMER_MODE_TO_SECONDS[timer_mode],
         race_round_seconds=None,
@@ -213,6 +453,7 @@ def create_race_game(
     db: Session,
     *,
     target_wins: int,
+    category_type: str | None = None,
     player1_name: Optional[str] = None,
     season_range_start: int,
     season_range_end: int,
@@ -230,6 +471,8 @@ def create_race_game(
         raise GuessTheListError("race_round_seconds must be positive")
     if race_reveal_seconds < 0:
         raise GuessTheListError("race_reveal_seconds must be non-negative")
+    cleaned_category_type = _clean_category_type(category_type)
+    _generator_for_category(cleaned_category_type)
 
     game = GuessTheListGame(
         mode="online_friend",
@@ -238,6 +481,7 @@ def create_race_game(
         is_race=True,
         is_public=is_public,
         preset=preset,
+        category_type=cleaned_category_type,
         target_wins=target_wins,
         turn_seconds=None,
         race_round_seconds=race_round_seconds,
@@ -327,100 +571,31 @@ def _create_next_round(
     game: GuessTheListGame,
     *,
     starts_at: datetime | None = None,
+    registry: Mapping[str, GuessTheListRoundGenerator] | None = None,
 ) -> GuessTheListRound:
-    """Pick a random team+season, build the roster, and create the round."""
-
-    # Gather all eligible (team_id, season_id) pairs in the configured range
-    eligible_pairs = (
-        db.query(PlayerSeasonTeam.team_id, PlayerSeasonTeam.season_id)
-        .join(Season, Season.id == PlayerSeasonTeam.season_id)
-        .filter(
-            Season.year >= game.season_range_start,
-            Season.year <= game.season_range_end,
-        )
-        .group_by(PlayerSeasonTeam.team_id, PlayerSeasonTeam.season_id)
-        .having(func.count(PlayerSeasonTeam.id) >= MIN_ROSTER_SIZE)
-        .all()
-    )
-
-    if not eligible_pairs:
-        raise GuessTheListError(
-            "No team+season combination with enough players in the selected range"
-        )
-
-    random.shuffle(eligible_pairs)
-
-    roster_rows = None
-    chosen_team_id = None
-    chosen_season_id = None
-
-    for team_id, season_id in eligible_pairs[:MAX_ROSTER_RETRIES]:
-        rows = (
-            db.query(
-                PlayerSeasonTeam.id.label("pst_id"),
-                PlayerSeasonTeam.player_id,
-                PlayerSeasonTeam.jersey_number,
-                Player.first_name,
-                Player.last_name,
-                Player.position,
-                Player.nationality,
-                Player.height_cm,
-            )
-            .join(Player, Player.id == PlayerSeasonTeam.player_id)
-            .filter(
-                PlayerSeasonTeam.team_id == team_id,
-                PlayerSeasonTeam.season_id == season_id,
-            )
-            .all()
-        )
-        if len(rows) >= MIN_ROSTER_SIZE:
-            roster_rows = rows
-            chosen_team_id = team_id
-            chosen_season_id = season_id
-            break
-
-    if roster_rows is None:
-        raise GuessTheListError("Could not find a valid roster after retries")
-
-    # Look up display info
-    team = db.query(Team).filter(Team.id == chosen_team_id).first()
-    season = db.query(Season).filter(Season.id == chosen_season_id).first()
-
-    team_code = team.euroleague_code if team else "UNK"
-    season_year = season.year if season else 0
-
-    # Prefer TeamSeason.team_name_that_season, fall back to Team.name
-    team_season = (
-        db.query(TeamSeason)
-        .filter(
-            TeamSeason.team_id == chosen_team_id,
-            TeamSeason.season_id == chosen_season_id,
-        )
-        .first()
-    )
-    team_name = (
-        (team_season.team_name_that_season if team_season and team_season.team_name_that_season else None)
-        or (team.name if team else "Unknown")
-    )
-
-    # Determine next round number
+    """Build the configured answer set and create the next round."""
     next_round_number = (
         db.query(func.max(GuessTheListRound.round_number))
         .filter(GuessTheListRound.game_id == game.id)
         .scalar()
         or 0
     ) + 1
+    generator = _generator_for_category(game.category_type, registry=registry)
+    round_spec = generator.build_round(db, game, next_round_number)
 
     created_at = starts_at or datetime.utcnow()
     round_obj = GuessTheListRound(
         game_id=game.id,
         round_number=next_round_number,
         status="active",
-        team_id=chosen_team_id,
-        season_id=chosen_season_id,
-        team_code=team_code,
-        team_name=team_name,
-        season_year=season_year,
+        category_type=_clean_category_type(round_spec.category_type),
+        metric=round_spec.metric,
+        scope_label=round_spec.scope_label,
+        team_id=round_spec.team_id,
+        season_id=round_spec.season_id,
+        team_code=round_spec.team_code,
+        team_name=round_spec.team_name,
+        season_year=round_spec.season_year,
         player1_correct=0,
         player2_correct=0,
         winner_player=None,
@@ -430,19 +605,20 @@ def _create_next_round(
     db.add(round_obj)
     db.flush()
 
-    # Create slots (one per player)
-    for row in roster_rows:
-        full_name = f"{row.first_name or ''} {row.last_name or ''}".strip()
+    for slot_spec in round_spec.slots:
         db.add(
             GuessTheListSlot(
                 round_id=round_obj.id,
-                player_season_team_id=row.pst_id,
-                player_id=row.player_id,
-                jersey_number=row.jersey_number,
-                position=row.position,
-                nationality=row.nationality,
-                height_cm=row.height_cm,
-                player_name=full_name or "Unknown",
+                player_season_team_id=slot_spec.player_season_team_id,
+                player_id=slot_spec.player_id,
+                jersey_number=slot_spec.jersey_number,
+                position=slot_spec.position,
+                nationality=slot_spec.nationality,
+                height_cm=slot_spec.height_cm,
+                player_name=slot_spec.player_name,
+                rank=slot_spec.rank,
+                stat_value=slot_spec.stat_value,
+                stat_value_label=slot_spec.stat_value_label,
                 guessed_by_player=None,
                 guessed_at=None,
             )
@@ -1224,6 +1400,7 @@ def serialize_game_state(db: Session, game: GuessTheListGame) -> dict:
         "is_race": game.is_race,
         "is_public": game.is_public,
         "preset": game.preset,
+        "category_type": _clean_category_type(game.category_type),
         "target_wins": game.target_wins,
         "turn_seconds": game.turn_seconds,
         "turn_deadline_utc": turn_deadline,
@@ -1251,12 +1428,15 @@ def serialize_game_state(db: Session, game: GuessTheListGame) -> dict:
 
 
 def _serialize_round(round_obj: GuessTheListRound) -> dict:
-    slots = round_obj.slots
+    slots = list(round_obj.slots)
     guessed_count = sum(1 for s in slots if s.guessed_by_player is not None)
     round_over = round_obj.status in ("completed", "given_up")
 
     return {
         "round_number": round_obj.round_number,
+        "category_type": _clean_category_type(round_obj.category_type),
+        "metric": round_obj.metric,
+        "scope_label": round_obj.scope_label,
         "team_code": round_obj.team_code,
         "team_name": round_obj.team_name,
         "season_year": round_obj.season_year,
@@ -1269,7 +1449,7 @@ def _serialize_round(round_obj: GuessTheListRound) -> dict:
         "status": round_obj.status,
         "slots": [
             _serialize_slot(slot, round_over)
-            for slot in slots
+            for slot in _slots_for_serialization(round_obj, slots, round_over)
         ],
     }
 
@@ -1305,6 +1485,20 @@ def _latest_completed_round_payload(
 from app.services.tictactoe import NATIONALITY_TO_COUNTRY_CODE
 
 
+def _slots_for_serialization(
+    round_obj: GuessTheListRound,
+    slots: Sequence[GuessTheListSlot],
+    round_over: bool,
+) -> list[GuessTheListSlot]:
+    if round_over or _clean_category_type(round_obj.category_type) == CATEGORY_ROSTER:
+        return list(slots)
+    return sorted(slots, key=lambda slot: _hidden_slot_order_key(round_obj.id, slot.id))
+
+
+def _hidden_slot_order_key(round_id: int, slot_id: int) -> str:
+    return hashlib.sha256(f"{round_id}:{slot_id}".encode("ascii")).hexdigest()
+
+
 def _serialize_slot(slot, round_over: bool) -> dict:
     show_answer = slot.guessed_by_player is not None or round_over
     data = {
@@ -1316,6 +1510,13 @@ def _serialize_slot(slot, round_over: bool) -> dict:
         "guessed_by_player": slot.guessed_by_player,
         "guessed_at": _utc_isoformat(slot.guessed_at),
         "player_name": slot.player_name if show_answer else None,
+        "rank": slot.rank if show_answer else None,
+        "stat_value": (
+            float(slot.stat_value)
+            if show_answer and slot.stat_value is not None
+            else None
+        ),
+        "stat_value_label": slot.stat_value_label if show_answer else None,
     }
     # Include country code for flag display
     if slot.nationality:
