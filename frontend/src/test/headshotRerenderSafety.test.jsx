@@ -7,7 +7,7 @@ import { optimizeHeadshot, headshotSrcSet, handleHeadshotError } from "../imageU
  * Regression guard for handleHeadshotError's re-render-safety contract.
  *
  * The boards that render optimized headshots (PhotoQuizBoard, CareerQuizBoard,
- * RosterGuessRaceBoard) re-render on a 250ms `nowMs` timer while a round/reveal
+ * GuessTheListRaceBoard) re-render on a 250ms `nowMs` timer while a round/reveal
  * is active. handleHeadshotError falls back by imperatively setting
  * `img.src = originalUrl`. This test proves that an unrelated state-driven
  * re-render does NOT revert that imperative DOM mutation: because the optimized

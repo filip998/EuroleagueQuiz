@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { autocompletePlayer, autocompleteRosterPlayer } from "./api";
+import { autocompletePlayer, autocompleteGuessTheListPlayer } from "./api";
 import { useListKeyboardNav } from "./useListKeyboardNav";
 
 export default function PlayerSearch({
@@ -7,7 +7,7 @@ export default function PlayerSearch({
   colTeamCode,
   onSelect,
   onCancel,
-  rosterMode,
+  guessTheListMode,
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -26,8 +26,8 @@ export default function PlayerSearch({
       }
       setLoading(true);
       try {
-        const data = rosterMode
-          ? await autocompleteRosterPlayer(query)
+        const data = guessTheListMode
+          ? await autocompleteGuessTheListPlayer(query)
           : await autocompletePlayer(query, null, null);
         setResults(data.players || []);
       } catch {
@@ -37,7 +37,7 @@ export default function PlayerSearch({
       }
     }, 250);
     return () => clearTimeout(timer);
-  }, [query, rowTeamCode, colTeamCode, rosterMode]);
+  }, [query, rowTeamCode, colTeamCode, guessTheListMode]);
 
   const { activeIndex, activeItemRef, handleKeyDown: handleNavKeyDown } =
     useListKeyboardNav(results, onSelect, !loading);
@@ -86,7 +86,7 @@ export default function PlayerSearch({
             </button>
           </div>
           <p className="text-xs text-elq-muted mb-4">
-            {rosterMode
+            {guessTheListMode
               ? "Search for a player you think was on this roster"
               : <>Find a player who played for both{" "}
                   <span className="font-semibold text-elq-text">{rowTeamCode}</span>{" "}

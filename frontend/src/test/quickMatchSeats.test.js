@@ -54,6 +54,13 @@ describe("quick match seats", () => {
     expect(resolveQuickMatchSeat(42, "waiting_for_opponent")).toBe(2);
   });
 
+  it("migrates a fallback key before inferring from active status", () => {
+    rememberQuickMatchSeat("legacy:42", 1);
+
+    expect(resolveQuickMatchSeat("canonical:42", "active", ["legacy:42"])).toBe(1);
+    expect(recallQuickMatchSeat("canonical:42")).toBe(1);
+  });
+
   it("ignores invalid seat values", () => {
     expect(rememberQuickMatchSeat(5, 3)).toBeNull();
     expect(recallQuickMatchSeat(5)).toBeNull();

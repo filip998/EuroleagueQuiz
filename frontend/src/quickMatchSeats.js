@@ -99,10 +99,22 @@ export function forgetQuickMatchSeat(gameId) {
   writeSeats(seats);
 }
 
+function recallFirstSeat(gameIds) {
+  for (const fallbackGameId of gameIds) {
+    const recalled = recallQuickMatchSeat(fallbackGameId);
+    if (recalled != null) return recalled;
+  }
+  return null;
+}
+
 // Resolve the seat for a freshly returned quick-match game: prefer a recorded
-// seat, otherwise infer from status, and record the result first-write-wins.
-export function resolveQuickMatchSeat(gameId, status) {
-  const recalled = recallQuickMatchSeat(gameId);
+// seat, then any legacy/fallback key, otherwise infer from status, and record the
+// result under the canonical key first-write-wins.
+export function resolveQuickMatchSeat(gameId, status, fallbackGameIds = []) {
+  const fallbackIds = Array.isArray(fallbackGameIds)
+    ? fallbackGameIds
+    : [fallbackGameIds];
+  const recalled = recallQuickMatchSeat(gameId) ?? recallFirstSeat(fallbackIds);
   const seat = recalled ?? (status === "active" ? 2 : 1);
   return rememberQuickMatchSeat(gameId, seat) ?? seat;
 }

@@ -62,8 +62,8 @@ class TestQuizEndpoints:
         data = r.json()
         assert "players" in data
 
-    def test_roster_autocomplete(self, client):
-        r = client.get("/quiz/roster-guess/players/autocomplete?q=doncic&limit=5")
+    def test_guess_the_list_autocomplete(self, client):
+        r = client.get("/quiz/guess-the-list/players/autocomplete?q=doncic&limit=5")
         assert r.status_code == 200
         data = r.json()
         assert "players" in data

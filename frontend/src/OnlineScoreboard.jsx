@@ -1,7 +1,7 @@
 /**
  * OnlineScoreboard
  * Shared, consistent in-game scoreboard/header for online two-player matches,
- * used by every online board (TicTacToe, Career Quiz, Photo Quiz, Roster Race)
+ * used by every online board (TicTacToe, Career Quiz, Photo Quiz, Guess the List Race)
  * so player names, scores, round/target, timer, and the colored "You are X"
  * self-indicator look and behave the same across games.
  *

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 class GameKind(StrEnum):
     TICTACTOE = "tictactoe"
-    ROSTER_GUESS = "roster_guess"
+    GUESS_THE_LIST = "guess_the_list"
     CAREER_QUIZ = "career_quiz"
     PHOTO_QUIZ = "photo_quiz"
 

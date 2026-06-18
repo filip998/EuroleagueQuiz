@@ -3,7 +3,7 @@ import { NICKNAME_MAX_LENGTH } from "./identity";
 
 // The one shared player-name input used by every game setup screen, so the
 // label, placeholder, sizing, length cap, and (optional) required-ness stay
-// identical across TicTacToe, Higher or Lower, Career, Photo, and Roster Guess.
+// identical across TicTacToe, Higher or Lower, Career, Photo, and Guess the List.
 //
 // It is always optional: anonymous play keeps working, and the field is
 // prefilled from `getDisplayName()` (saved nickname or a stable guest name) so

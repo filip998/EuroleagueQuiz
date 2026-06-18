@@ -15,7 +15,7 @@ from app.routers import (
     photo_quiz,
     players,
     quiz,
-    roster_guess,
+    guess_the_list,
     seasons,
     teams,
 )
@@ -85,7 +85,17 @@ app.include_router(players.router, prefix="/players", tags=["Players"])
 app.include_router(games.router, prefix="/games", tags=["Games"])
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(quiz.router, prefix="/quiz", tags=["Quiz"])
-app.include_router(roster_guess.router, prefix="/quiz", tags=["Roster Guess"])
+app.include_router(
+    guess_the_list.router,
+    prefix="/quiz/guess-the-list",
+    tags=["Guess the List"],
+)
+app.include_router(
+    guess_the_list.router,
+    prefix="/quiz/roster-guess",
+    tags=["Guess the List Legacy"],
+    include_in_schema=False,
+)
 app.include_router(higher_lower.router, prefix="/quiz", tags=["Higher or Lower"])
 app.include_router(career_quiz.router, prefix="/quiz", tags=["Career Quiz"])
 app.include_router(photo_quiz.router, prefix="/quiz", tags=["Photo Quiz"])

@@ -10,16 +10,17 @@ import {
   fetchTicTacToeQuickMatchPools,
   autocompletePlayer,
   connectTicTacToeRealtime,
-  createRosterGame,
-  createRosterRaceGame,
-  joinRosterGame,
-  joinRosterRaceGame,
-  quickMatchRosterRace,
-  cancelRosterRaceQuickMatch,
-  getRosterRaceQuickMatchPools,
-  submitRosterGuess,
-  autocompleteRosterPlayer,
-  resignRosterRaceGame,
+  createGuessTheListGame,
+  createGuessTheListRaceGame,
+  joinGuessTheListGame,
+  joinGuessTheListRaceGame,
+  quickMatchGuessTheListRace,
+  cancelGuessTheListRaceQuickMatch,
+  getGuessTheListRaceQuickMatchPools,
+  submitGuessTheList,
+  autocompleteGuessTheListPlayer,
+  connectGuessTheListRealtime,
+  resignGuessTheListRaceGame,
   createHigherLowerGame,
   submitHigherLowerAnswer,
   getHigherLowerLeaderboard,
@@ -291,14 +292,14 @@ describe("TicTacToe Quick Match API", () => {
   });
 });
 
-describe("Roster Guess API", () => {
-  it("createRosterGame sends POST", async () => {
+describe("Guess the List API", () => {
+  it("createGuessTheListGame sends POST", async () => {
     const payload = { mode: "single_player", season_start: 2020, season_end: 2024 };
     mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 })));
-    const result = await createRosterGame(payload);
+    const result = await createGuessTheListGame(payload);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/quiz/roster-guess/games",
+      "http://localhost:8000/quiz/guess-the-list/games",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ ...payload, guest_id: "test-guest-id" }),
@@ -307,12 +308,12 @@ describe("Roster Guess API", () => {
     expect(result.state.id).toBe(10);
   });
 
-  it("joinRosterGame sends join_code, player_name and guest_id", async () => {
+  it("joinGuessTheListGame sends join_code, player_name and guest_id", async () => {
     mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 11 })));
-    const result = await joinRosterGame("XYZ789", "Guesser");
+    const result = await joinGuessTheListGame("XYZ789", "Guesser");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/quiz/roster-guess/games/join",
+      "http://localhost:8000/quiz/guess-the-list/games/join",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -325,12 +326,12 @@ describe("Roster Guess API", () => {
     expect(result.state.id).toBe(11);
   });
 
-  it("submitRosterGuess sends player_id", async () => {
+  it("submitGuessTheList sends player_id", async () => {
     mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 }, "correct")));
-    const result = await submitRosterGuess(10, 456);
+    const result = await submitGuessTheList(10, 456);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/quiz/roster-guess/games/10/guess",
+      "http://localhost:8000/quiz/guess-the-list/games/10/guess",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ player_id: 456 }),
@@ -339,13 +340,13 @@ describe("Roster Guess API", () => {
     expect(result.result).toBe("correct");
   });
 
-  it("submitRosterGuess includes round_number when provided for Race claims", async () => {
+  it("submitGuessTheList includes round_number when provided for Race claims", async () => {
     mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 }, "correct")));
 
-    await submitRosterGuess(10, 456, 3);
+    await submitGuessTheList(10, 456, 3);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/quiz/roster-guess/games/10/guess",
+      "http://localhost:8000/quiz/guess-the-list/games/10/guess",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ player_id: 456, round_number: 3 }),
@@ -353,7 +354,7 @@ describe("Roster Guess API", () => {
     );
   });
 
-  it("createRosterRaceGame sends Race settings and guest_id", async () => {
+  it("createGuessTheListRaceGame sends Race settings and guest_id", async () => {
     const payload = {
       target_wins: 2,
       player1_name: "Ace",
@@ -362,10 +363,10 @@ describe("Roster Guess API", () => {
     };
     mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 12 })));
 
-    const result = await createRosterRaceGame(payload);
+    const result = await createGuessTheListRaceGame(payload);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/quiz/roster-guess/race/games",
+      "http://localhost:8000/quiz/guess-the-list/race/games",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ ...payload, guest_id: "test-guest-id" }),
@@ -374,13 +375,13 @@ describe("Roster Guess API", () => {
     expect(result.state.id).toBe(12);
   });
 
-  it("joinRosterRaceGame sends join_code, player_name and guest_id", async () => {
+  it("joinGuessTheListRaceGame sends join_code, player_name and guest_id", async () => {
     mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 13 })));
 
-    await joinRosterRaceGame("RACE42", "Runner");
+    await joinGuessTheListRaceGame("RACE42", "Runner");
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/quiz/roster-guess/race/games/join",
+      "http://localhost:8000/quiz/guess-the-list/race/games/join",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -392,15 +393,15 @@ describe("Roster Guess API", () => {
     );
   });
 
-  it("quickMatchRosterRace posts preset, name and guest_id", async () => {
+  it("quickMatchGuessTheListRace posts preset, name and guest_id", async () => {
     mockFetch.mockReturnValue(
       mockJsonResponse(stateEnvelope({ id: 14, status: "waiting_for_opponent" }))
     );
 
-    const result = await quickMatchRosterRace({ preset: "modern-standard", player_name: "Ace" });
+    const result = await quickMatchGuessTheListRace({ preset: "modern-standard", player_name: "Ace" });
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/quiz/roster-guess/quick-match",
+      "http://localhost:8000/quiz/guess-the-list/quick-match",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -413,13 +414,13 @@ describe("Roster Guess API", () => {
     expect(result.state.id).toBe(14);
   });
 
-  it("cancelRosterRaceQuickMatch posts game_id, preset and guest_id", async () => {
+  it("cancelGuessTheListRaceQuickMatch posts game_id, preset and guest_id", async () => {
     mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 14, status: "cancelled" })));
 
-    await cancelRosterRaceQuickMatch({ game_id: 14, preset: "modern-standard" });
+    await cancelGuessTheListRaceQuickMatch({ game_id: 14, preset: "modern-standard" });
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/quiz/roster-guess/quick-match/cancel",
+      "http://localhost:8000/quiz/guess-the-list/quick-match/cancel",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -431,7 +432,7 @@ describe("Roster Guess API", () => {
     );
   });
 
-  it("getRosterRaceQuickMatchPools fetches public Race pool counts", async () => {
+  it("getGuessTheListRaceQuickMatchPools fetches public Race pool counts", async () => {
     mockFetch.mockReturnValue(
       mockJsonResponse({
         pools: { "modern-standard": { searching: 1, in_progress: 2 } },
@@ -439,23 +440,47 @@ describe("Roster Guess API", () => {
       })
     );
 
-    const result = await getRosterRaceQuickMatchPools();
+    const result = await getGuessTheListRaceQuickMatchPools();
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/quiz/roster-guess/quick-match/pools",
+      "http://localhost:8000/quiz/guess-the-list/quick-match/pools",
       expect.objectContaining({ method: "GET" })
     );
     expect(result.pools["modern-standard"].in_progress).toBe(2);
   });
 
-  it("autocompleteRosterPlayer sends query", async () => {
+  it("autocompleteGuessTheListPlayer sends query", async () => {
     mockFetch.mockReturnValue(mockJsonResponse({ players: [] }));
-    await autocompleteRosterPlayer("doncic", 5);
+    await autocompleteGuessTheListPlayer("doncic", 5);
 
     const calledUrl = mockFetch.mock.calls[0][0];
-    expect(calledUrl).toContain("/quiz/roster-guess/players/autocomplete");
+    expect(calledUrl).toContain("/quiz/guess-the-list/players/autocomplete");
     expect(calledUrl).toContain("q=doncic");
     expect(calledUrl).toContain("limit=5");
+  });
+
+  it("connectGuessTheListRealtime opens the canonical websocket path", () => {
+    class FakeWebSocket {
+      static OPEN = 1;
+      constructor(url) {
+        FakeWebSocket.lastUrl = url;
+        this.readyState = FakeWebSocket.OPEN;
+      }
+      send() {}
+      close() {}
+    }
+
+    const connection = connectGuessTheListRealtime({
+      gameId: 15,
+      playerNumber: 2,
+      onMessage: vi.fn(),
+      WebSocketImpl: FakeWebSocket,
+    });
+
+    expect(connection.isOpen()).toBe(true);
+    expect(FakeWebSocket.lastUrl).toBe(
+      "ws://localhost:8000/quiz/guess-the-list/ws/15?player=2"
+    );
   });
 });
 
@@ -950,17 +975,17 @@ describe("Online resign endpoints", () => {
     expect(result.result).toBe("resigned");
   });
 
-  it("resignRosterRaceGame POSTs the give-up endpoint with the player query", async () => {
+  it("resignGuessTheListRaceGame POSTs the give-up endpoint with the player query", async () => {
     mockFetch.mockReturnValue(
       mockJsonResponse(
         stateEnvelope({ id: 30, status: "finished", winner_player: 2 }, "resigned")
       )
     );
 
-    const result = await resignRosterRaceGame(30, 1);
+    const result = await resignGuessTheListRaceGame(30, 1);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      "http://localhost:8000/quiz/roster-guess/games/30/give-up?player=1",
+      "http://localhost:8000/quiz/guess-the-list/games/30/give-up?player=1",
       expect.objectContaining({ method: "POST" })
     );
     expect(result.result).toBe("resigned");

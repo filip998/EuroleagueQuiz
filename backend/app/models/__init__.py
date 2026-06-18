@@ -10,10 +10,10 @@ from app.models.tictactoe import (
     QuizTicTacToeAxis,
     QuizTicTacToeStatMilestonePlayer,
 )
-from app.models.roster_guess import (
-    RosterGuessGame,
-    RosterGuessRound,
-    RosterGuessSlot,
+from app.models.guess_the_list import (
+    GuessTheListGame,
+    GuessTheListRound,
+    GuessTheListSlot,
 )
 from app.models.higher_lower import (
     HigherLowerGame,
@@ -47,9 +47,9 @@ __all__ = [
     "QuizTicTacToeCell",
     "QuizTicTacToeAxis",
     "QuizTicTacToeStatMilestonePlayer",
-    "RosterGuessGame",
-    "RosterGuessRound",
-    "RosterGuessSlot",
+    "GuessTheListGame",
+    "GuessTheListRound",
+    "GuessTheListSlot",
     "HigherLowerGame",
     "HigherLowerScore",
     "CareerDataRevision",

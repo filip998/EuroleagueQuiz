@@ -2,11 +2,11 @@ import pytest
 
 from app.game_actions import ConflictGameActionError, InvalidGameActionError
 from app.models.career import CareerQuizGame
-from app.models.roster_guess import RosterGuessGame
+from app.models.guess_the_list import GuessTheListGame
 from app.models.tictactoe import QuizTicTacToeGame
 from app.schemas.realtime import RealtimeClientAction
-from app.services.roster_guess import (
-    handle_time_expired as handle_roster_time_expired,
+from app.services.guess_the_list import (
+    handle_time_expired as handle_guess_the_list_time_expired,
     offer_end,
     respond_end,
     submit_guess,
@@ -19,7 +19,7 @@ from app.services.tictactoe import (
 )
 from app.services.realtime_adapters import (
     CareerQuizRealtimeAdapter,
-    RosterGuessRealtimeAdapter,
+    GuessTheListRealtimeAdapter,
     TicTacToeRealtimeAdapter,
 )
 
@@ -41,7 +41,7 @@ def _tictactoe_game(**overrides):
     return QuizTicTacToeGame(**attrs)
 
 
-def _roster_game(**overrides):
+def _guess_the_list_game(**overrides):
     attrs = {
         "mode": "online_friend",
         "status": "active",
@@ -50,7 +50,7 @@ def _roster_game(**overrides):
         "pending_end_to": None,
     }
     attrs.update(overrides)
-    return RosterGuessGame(**attrs)
+    return GuessTheListGame(**attrs)
 
 
 def _career_game(**overrides):
@@ -92,21 +92,21 @@ def test_tictactoe_online_draw_response_requires_realtime_identity():
         )
 
 
-def test_roster_online_guess_requires_realtime_identity():
+def test_guess_the_list_online_guess_requires_realtime_identity():
     with pytest.raises(ConflictGameActionError, match="realtime player identity"):
-        submit_guess(None, game=_roster_game(), player_id=1)
+        submit_guess(None, game=_guess_the_list_game(), player_id=1)
 
 
-def test_roster_online_end_offer_requires_realtime_identity():
+def test_guess_the_list_online_end_offer_requires_realtime_identity():
     with pytest.raises(ConflictGameActionError, match="realtime player identity"):
-        offer_end(None, _roster_game())
+        offer_end(None, _guess_the_list_game())
 
 
-def test_roster_online_end_response_requires_realtime_identity():
+def test_guess_the_list_online_end_response_requires_realtime_identity():
     with pytest.raises(ConflictGameActionError, match="realtime player identity"):
         respond_end(
             None,
-            _roster_game(current_player=2, pending_end_from=1, pending_end_to=2),
+            _guess_the_list_game(current_player=2, pending_end_from=1, pending_end_to=2),
             accept=False,
         )
 
@@ -131,15 +131,15 @@ def test_tictactoe_pending_draw_timeout_auto_declines_and_switches_turn():
     assert game.current_player == 1
 
 
-def test_roster_pending_end_timeout_auto_declines_and_switches_turn():
-    game = _roster_game(
+def test_guess_the_list_pending_end_timeout_auto_declines_and_switches_turn():
+    game = _guess_the_list_game(
         current_player=2,
         round_number=1,
         pending_end_from=1,
         pending_end_to=2,
     )
 
-    handle_roster_time_expired(
+    handle_guess_the_list_time_expired(
         FlushOnlySession(),
         game,
         expected_player=2,
@@ -170,11 +170,11 @@ def test_tictactoe_realtime_move_validates_required_fields(field, data):
         )
 
 
-def test_roster_realtime_guess_validates_required_fields():
+def test_guess_the_list_realtime_guess_validates_required_fields():
     with pytest.raises(InvalidGameActionError, match="player_id"):
-        RosterGuessRealtimeAdapter().handle_client_action(
+        GuessTheListRealtimeAdapter().handle_client_action(
             FlushOnlySession(),
-            _roster_game(),
+            _guess_the_list_game(),
             action=RealtimeClientAction.GUESS.value,
             data={"action": "guess"},
             player=1,
@@ -227,11 +227,11 @@ def test_tictactoe_realtime_draw_response_validates_accept(data):
 
 
 @pytest.mark.parametrize("data", [{}, {"accept": "false"}, {"accept": {}}])
-def test_roster_realtime_end_response_validates_accept(data):
+def test_guess_the_list_realtime_end_response_validates_accept(data):
     with pytest.raises(InvalidGameActionError, match="accept"):
-        RosterGuessRealtimeAdapter().handle_client_action(
+        GuessTheListRealtimeAdapter().handle_client_action(
             FlushOnlySession(),
-            _roster_game(current_player=2, pending_end_from=1, pending_end_to=2),
+            _guess_the_list_game(current_player=2, pending_end_from=1, pending_end_to=2),
             action=RealtimeClientAction.RESPOND_END.value,
             data=data,
             player=2,

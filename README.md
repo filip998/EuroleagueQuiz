@@ -27,7 +27,7 @@ Then open `http://localhost:5173` to play.
 ## Games
 
 - **TicTacToe** — Claim cells on a 3×3 board by naming players who match both the row and column clue. Clues go beyond teams: shared teammates, nationality, season, position (Guard/Forward/Center), EuroLeague champions, and stat milestones (e.g. 15+ PPG). Solo, local 1v1, and online modes. Opening `/tictactoe` lands on online **Quick Match** — a near-one-click, lichess-style pool grid — with Solo, Local 1v1, and Play-a-Friend one tap away.
-- **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo, local/online Classic, plus online-only Race with public Quick Match and private Play-a-Friend.
+- **Guess the List** — Guess the full roster of a EuroLeague team from a specific season. Solo, local/online Classic, plus online-only Race with public Quick Match and private Play-a-Friend.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice, 2-player online friend races, and public Quick Match races.
 - **Photo Quiz** — Guess the player from a headshot. Solo practice, 2-player online friend races, and public Quick Match races, drawn from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
@@ -204,11 +204,11 @@ with a 10-game minimum, plus 30+ points in one game and 1,000+ EuroLeague career
 points summed from `player_season_stats`. The 3,000-point legend tier is defined
 for future use but not shipped as an axis because its pool is below the guard.
 
-Online TicTacToe, Roster Guess, Career Quiz, and Photo Quiz share an **Online Game Realtime Module**. The backend
+Online TicTacToe, Guess the List, Career Quiz, and Photo Quiz share an **Online Game Realtime Module**. The backend
 Module in `backend/app/services/realtime.py` owns WebSocket connection cleanup,
 broadcast envelopes, server-side turn timers for timer-enabled games, disconnect-grace timers,
 timer expiry, targeted broadcasts, and schema-compliant error/result messages. Game-specific
-Adapters in `backend/app/services/realtime_adapters.py` map TicTacToe, Roster Guess, Career
+Adapters in `backend/app/services/realtime_adapters.py` map TicTacToe, Guess the List, Career
 Quiz, and Photo Quiz rules into that shared Interface. TicTacToe online disconnects use a configurable
 `ELQ_ONLINE_DISCONNECT_GRACE_SECONDS` window before broadcasting a terminal `opponent_left`
 forfeit; explicit online resign broadcasts a terminal `resigned` result immediately.
@@ -250,12 +250,12 @@ Stale actions are rejected with `round_stale` or a conflict so the frontend can 
 without applying old input to the current round. Career Quiz and Photo Quiz multiplayer use WebSocket
 push as their primary sync path, while plain `GET /quiz/{career|photo}/games/{id}` remains the
 refresh and fallback-sync Interface.
-Roster Guess Race also requires the client-visible `round_number` on claims and uses
+Guess the List Race also requires the client-visible `round_number` on claims and uses
 `latest_completed_round.next_round_starts_at` for its 12-second full-roster reveal lock
 between simultaneous 120-second claim rounds. Race friend games use
-`POST /quiz/roster-guess/race/games`, `/race/games/join`,
-`POST /quiz/roster-guess/games/{id}/guess`, `GET /quiz/roster-guess/games/{id}`,
-and `WS /quiz/roster-guess/ws/{id}`; public quick-match games hide join codes and
+`POST /quiz/guess-the-list/race/games`, `/race/games/join`,
+`POST /quiz/guess-the-list/games/{id}/guess`, `GET /quiz/guess-the-list/games/{id}`,
+and `WS /quiz/guess-the-list/ws/{id}`; public quick-match games hide join codes and
 can only be joined through the matchmaking path.
 
 The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
@@ -266,20 +266,20 @@ TicTacToe Quick Match setup screens can poll
 `searching` and `in_progress` presence counts derived from public pool rows.
 Career Quiz and Photo Quiz expose the same presence shape at
 `GET /quiz/career/quick-match/pools` and `GET /quiz/photo/quick-match/pools`,
-counting only public searches and active public matches. Roster Guess Race
-does the same under `GET /quiz/roster-guess/quick-match/pools`; public Race entries
-are created with `POST /quiz/roster-guess/quick-match`, cancelled with
-`POST /quiz/roster-guess/quick-match/cancel`, and use presets
+counting only public searches and active public matches. Guess the List Race
+does the same under `GET /quiz/guess-the-list/quick-match/pools`; public Race entries
+are created with `POST /quiz/guess-the-list/quick-match`, cancelled with
+`POST /quiz/guess-the-list/quick-match/cancel`, and use presets
 `full|modern|nostalgia|recent` × `quick|standard|long`.
 
-Mutating TicTacToe, Roster Guess, Career Quiz, and Photo Quiz HTTP endpoints now use the same realtime
+Mutating TicTacToe, Guess the List, Career Quiz, and Photo Quiz HTTP endpoints now use the same realtime
 message envelopes as WebSocket broadcasts: successful actions return
 `{ "type": "state", "payload": { "game": ..., "result": ..., "completed_round": ..., "terminal": ... } }`
 and Game action errors return `{ "type": "error", "payload": { "code": ..., "message": ... } }`
 with the corresponding HTTP status. Read-only `GET /games/{id}` endpoints still
 return plain game state for polling and refresh hydration.
 
-Online `create`/`join` requests for TicTacToe, Roster Guess, Career Quiz, and Photo Quiz accept an
+Online `create`/`join` requests for TicTacToe, Guess the List, Career Quiz, and Photo Quiz accept an
 optional `guest_id`. The backend treats it as an opaque, untrusted token: services clamp it
 to 64 characters (`None` when blank) and persist it on the player slot
 (`player1_guest_id` / `player2_guest_id`) without ever serializing it into shared game
@@ -321,7 +321,7 @@ Every game's pre-game screen is built from three shared building blocks in `fron
   the code prefilled in Online → Join, so the invitee only adds a name and joins. The
   link helpers live in `frontend/src/inviteLink.js` (`buildInviteUrl` / `parseJoinCode`).
 
-`GameSetup.jsx` (TicTacToe), `RosterGuessSetup.jsx`, `CareerQuizSetup.jsx`,
+`GameSetup.jsx` (TicTacToe), `GuessTheListSetup.jsx`, `CareerQuizSetup.jsx`,
 `PhotoQuizSetup.jsx`, and `HigherLowerSetup.jsx` compose these, mapping the canonical UI
 keys (`solo` / `local` / `online`, sub `create` / `join`) onto their own backend modes.
 
@@ -361,9 +361,9 @@ presets array plus a pools hook built from `useQuickMatchPoolsFrom(enabled, fetc
 `QuickMatchSearchingLobby`; and (4) a `HomeQuickMatchCta` on its home card. No new
 shared-component code is required.
 
-### Roster Guess Race Quick Match
+### Guess the List Race Quick Match
 
-Roster Guess keeps Solo, Local 1v1, and Online as its top-level setup choices. Inside
+Guess the List keeps Solo, Local 1v1, and Online as its top-level setup choices. Inside
 Online, players choose **Classic** (the existing turn-based Create/Join flow) or **Race**.
 Race is online-only: both players see the same team-season roster and claim players
 simultaneously, with each roster member awarded to the first player to name them. The
@@ -371,7 +371,7 @@ round ends when the 120-second timer expires or the full roster is claimed; high
 count wins the round, ties award no point, and non-terminal rounds reveal the full roster
 for 12 seconds before the next one unlocks.
 
-Race reuses the shared Quick Match components: `/roster?quick=1` opens Online → Race →
+Race reuses the shared Quick Match components: `/list?quick=1` opens Online → Race →
 Quick Match, the home card has a Quick Match CTA, and the board uses
 `QuickMatchSearchingLobby` for public pool searches. Race also supports private
 Play-a-Friend Create/Join inside the Race tab; Classic online remains unchanged.

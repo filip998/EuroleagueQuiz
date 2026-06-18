@@ -87,7 +87,7 @@ test.describe("Home Page", () => {
     await page.goto("/");
 
     await expect(page.getByText("TICTACTOE")).toBeVisible();
-    await expect(page.getByText("ROSTER GUESS")).toBeVisible();
+    await expect(page.getByText("GUESS THE LIST")).toBeVisible();
     await expect(page.getByText("HIGHER OR LOWER")).toBeVisible();
     await expect(page.getByText("Choose your game")).toBeVisible();
   });
@@ -140,12 +140,25 @@ test.describe("Home Page", () => {
     await expect(page.getByRole("button", { name: "Join Game" })).toBeVisible();
   });
 
-  test("navigates to Roster Guess setup", async ({ page }) => {
+  test("navigates to Guess the List setup", async ({ page }) => {
     await page.goto("/");
-    await page.getByText("ROSTER GUESS").click();
+    await page.getByText("GUESS THE LIST").click();
 
     await expect(page.getByText("Game Mode")).toBeVisible();
     await expect(page.getByText("Start Game")).toBeVisible();
+  });
+
+  test("redirects legacy roster quick links to Guess the List Race Quick Match", async ({ page }) => {
+    await page.goto("/roster?quick=1");
+
+    await expect(page).toHaveURL(/\/list\?quick=1$/);
+    await expect(page.getByText("Game Mode")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Race" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    await expect(page.getByText("Pick a pool")).toBeVisible();
+    await expect(page.getByTestId("quick-pick-modern-standard")).toBeVisible();
   });
 
   test("navigates to Higher or Lower setup", async ({ page }) => {

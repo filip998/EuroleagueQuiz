@@ -13,7 +13,7 @@ import {
   recoverOnlineInfo,
   recoverPhotoOnlineInfo,
   recoverCareerOnlineInfo,
-  recoverRosterOnlineInfo,
+  recoverGuessTheListOnlineInfo,
   clearOnlineInfo,
 } from "../onlineRecovery";
 
@@ -187,7 +187,7 @@ describe("recoverCareerOnlineInfo", () => {
   });
 });
 
-describe("recoverRosterOnlineInfo", () => {
+describe("recoverGuessTheListOnlineInfo", () => {
   const publicRaceQuickMatch = {
     mode: "online_friend",
     is_race: true,
@@ -197,32 +197,44 @@ describe("recoverRosterOnlineInfo", () => {
 
   it("prefers the per-tab sessionStorage seat", () => {
     saveOnlineInfo(7, { playerNumber: 1, isOnline: true });
-    expect(recoverRosterOnlineInfo(7, publicRaceQuickMatch)).toEqual({
+    expect(recoverGuessTheListOnlineInfo(7, publicRaceQuickMatch)).toEqual({
       playerNumber: 1,
       isOnline: true,
     });
     expect(recallMock).not.toHaveBeenCalled();
   });
 
-  it("falls back to the roster-race-namespaced seat map for public race Quick Match games", () => {
+  it("falls back to the Guess the List race seat map for public race Quick Match games", () => {
     recallMock.mockReturnValue(2);
-    expect(recoverRosterOnlineInfo(7, publicRaceQuickMatch)).toEqual({
+    expect(recoverGuessTheListOnlineInfo(7, publicRaceQuickMatch)).toEqual({
       playerNumber: 2,
       isOnline: true,
     });
-    expect(recallMock).toHaveBeenCalledWith("roster-race:7");
+    expect(recallMock).toHaveBeenCalledWith("guess-the-list-race:7");
+  });
+
+  it("falls back to the legacy roster-race seat map for in-flight deploy recovery", () => {
+    recallMock
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(2);
+    expect(recoverGuessTheListOnlineInfo(7, publicRaceQuickMatch)).toEqual({
+      playerNumber: 2,
+      isOnline: true,
+    });
+    expect(recallMock).toHaveBeenNthCalledWith(1, "guess-the-list-race:7");
+    expect(recallMock).toHaveBeenNthCalledWith(2, "roster-race:7");
   });
 
   it("does not consult the race seat map for a private classic online game", () => {
     recallMock.mockReturnValue(2);
-    expect(recoverRosterOnlineInfo(7, { mode: "online_friend" })).toBeNull();
+    expect(recoverGuessTheListOnlineInfo(7, { mode: "online_friend" })).toBeNull();
     expect(recallMock).not.toHaveBeenCalled();
   });
 
   it("does not fall back for non-online_friend games", () => {
     recallMock.mockReturnValue(2);
     expect(
-      recoverRosterOnlineInfo(7, {
+      recoverGuessTheListOnlineInfo(7, {
         mode: "single_player",
         is_race: true,
         is_public: true,
@@ -242,7 +254,7 @@ describe("solo / local games never recover a stale online seat (issue #150)", ()
     ["recoverOnlineInfo", recoverOnlineInfo],
     ["recoverPhotoOnlineInfo", recoverPhotoOnlineInfo],
     ["recoverCareerOnlineInfo", recoverCareerOnlineInfo],
-    ["recoverRosterOnlineInfo", recoverRosterOnlineInfo],
+    ["recoverGuessTheListOnlineInfo", recoverGuessTheListOnlineInfo],
   ];
   const nonOnlineModes = ["single_player", "local_two_player"];
 

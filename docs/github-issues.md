@@ -47,7 +47,7 @@ The orchestrator relies on these — keep them exact:
 Apply, at minimum:
 
 - **Type:** `bug`, `enhancement`, `documentation`, or `type:refactor`.
-- **Game scope — at least one:** `game:tic-tac-toe`, `game:roster-guess`,
+- **Game scope — at least one:** `game:tic-tac-toe`, `game:guess-the-list`,
   `game:higher-lower`, `game:career-quiz`, `game:photo-quiz`, or `game:general`
   (cross-cutting / shared / infra). Use `game:general` for shared/infra work;
   add one or more specific `game:*` labels when particular games are directly

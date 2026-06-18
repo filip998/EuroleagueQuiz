@@ -9,7 +9,10 @@
 import { recallQuickMatchSeat } from "./quickMatchSeats";
 import { careerSeatKey } from "./careerQuickMatch";
 import { photoSeatKey } from "./photoQuickMatch";
-import { rosterRaceSeatKey } from "./rosterRaceQuickMatch";
+import {
+  guessTheListRaceSeatKey,
+  legacyGuessTheListRaceSeatKey,
+} from "./guessTheListRaceQuickMatch";
 
 export function saveOnlineInfo(gameId, online) {
   if (!online) return;
@@ -84,12 +87,14 @@ export function recoverCareerOnlineInfo(gameId, game) {
   return null;
 }
 
-export function recoverRosterOnlineInfo(gameId, game) {
+export function recoverGuessTheListOnlineInfo(gameId, game) {
   if (game?.mode !== "online_friend") return null;
   const stored = loadOnlineInfo(gameId);
   if (stored) return stored;
   if (game?.is_race && game?.is_public && game?.preset) {
-    const seat = recallQuickMatchSeat(rosterRaceSeatKey(gameId));
+    const seat =
+      recallQuickMatchSeat(guessTheListRaceSeatKey(gameId))
+      ?? recallQuickMatchSeat(legacyGuessTheListRaceSeatKey(gameId));
     if (seat) return { playerNumber: seat, isOnline: true };
   }
   return null;
