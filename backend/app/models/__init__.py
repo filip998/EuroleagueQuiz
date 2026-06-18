@@ -8,6 +8,7 @@ from app.models.tictactoe import (
     QuizTicTacToeRound,
     QuizTicTacToeCell,
     QuizTicTacToeAxis,
+    QuizTicTacToeStatMilestonePlayer,
 )
 from app.models.roster_guess import (
     RosterGuessGame,
@@ -45,6 +46,7 @@ __all__ = [
     "QuizTicTacToeRound",
     "QuizTicTacToeCell",
     "QuizTicTacToeAxis",
+    "QuizTicTacToeStatMilestonePlayer",
     "RosterGuessGame",
     "RosterGuessRound",
     "RosterGuessSlot",

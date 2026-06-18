@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
+from app.services.tictactoe_stat_milestones import build_stat_milestone_eligibility
 from ingestion.aggregate_stats import aggregate_season_stats
 from ingestion.fetch_boxscores import fetch_boxscores
 from ingestion.fetch_rosters import fetch_rosters
@@ -29,7 +30,15 @@ def main():
     parser.add_argument("--end-season", type=int, default=2025)
     parser.add_argument(
         "--step",
-        choices=["all", "seasons", "rosters", "boxscores", "aggregate", "wikipedia-images"],
+        choices=[
+            "all",
+            "seasons",
+            "rosters",
+            "boxscores",
+            "aggregate",
+            "stat-milestones",
+            "wikipedia-images",
+        ],
         default="all",
     )
     parser.add_argument(
@@ -123,6 +132,10 @@ def main():
             session.close()
         return
 
+    if args.step == "stat-milestones":
+        refresh_stat_milestone_eligibility(SessionFactory)
+        return
+
     for year in range(args.start_season, args.end_season + 1):
         logger.info(f"Processing season {year}-{year + 1}")
         session = SessionFactory()
@@ -142,6 +155,26 @@ def main():
             logger.exception(f"Error processing season {year}")
         finally:
             session.close()
+
+    if args.step in ("all", "aggregate") and not args.skip_boxscores:
+        refresh_stat_milestone_eligibility(SessionFactory)
+
+
+def refresh_stat_milestone_eligibility(SessionFactory) -> None:
+    session = SessionFactory()
+    try:
+        counts = build_stat_milestone_eligibility(session)
+        session.commit()
+        logger.info(
+            "TicTacToe stat milestone eligibility refreshed: %s",
+            ", ".join(f"{key}={count}" for key, count in sorted(counts.items())),
+        )
+    except Exception:
+        session.rollback()
+        logger.exception("Error refreshing TicTacToe stat milestone eligibility")
+        raise
+    finally:
+        session.close()
 
 
 if __name__ == "__main__":
