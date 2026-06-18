@@ -7,6 +7,7 @@ on:
 
 env:
   AZURE_WEBAPP_NAME: euroleague-quiz-backend-app
+  AZURE_RESOURCE_GROUP: euroleague-quiz-rg
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "20"
 
@@ -59,6 +60,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test-backend, test-frontend]
     environment: production
+    env:
+      AZURE_CREDENTIALS_CONFIGURED: ${{ secrets.AZURE_CREDENTIALS != '' }}
     defaults:
       run:
         working-directory: backend
@@ -86,6 +89,47 @@ jobs:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: ${{ github.workspace }}/backend.zip
+
+      - name: Azure login
+        if: env.AZURE_CREDENTIALS_CONFIGURED == 'true'
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Enable Always On
+        if: env.AZURE_CREDENTIALS_CONFIGURED == 'true'
+        run: |
+          ALWAYS_ON=$(az webapp config show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --query alwaysOn \
+            --output tsv)
+
+          if [ "$ALWAYS_ON" != "true" ]; then
+            az webapp config set \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$AZURE_WEBAPP_NAME" \
+              --always-on true \
+              --output none
+          fi
+
+          ALWAYS_ON=$(az webapp config show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --query alwaysOn \
+            --output tsv)
+
+          if [ "$ALWAYS_ON" != "true" ]; then
+            echo "Expected Always On to be true, got '$ALWAYS_ON'"
+            exit 1
+          fi
+
+          echo "Always On is enabled for $AZURE_WEBAPP_NAME."
+
+      - name: Always On management credentials missing
+        if: env.AZURE_CREDENTIALS_CONFIGURED != 'true'
+        run: |
+          echo "::notice title=Always On not reasserted::Add the AZURE_CREDENTIALS Actions secret so the deploy workflow can run az webapp config set --always-on true. The publish profile only deploys code and cannot update App Service configuration."
 
   deploy-frontend:
     name: Deploy Frontend to Static Web Apps

@@ -54,6 +54,17 @@ az webapp create --name euroleague-quiz-backend-app --resource-group euroleague-
 az webapp config set --name euroleague-quiz-backend-app --resource-group euroleague-quiz-rg --web-sockets-enabled true
 ```
 
+### Enable Always On
+
+```bash
+az webapp config set --name euroleague-quiz-backend-app --resource-group euroleague-quiz-rg --always-on true
+```
+
+Always On is supported by the Basic B1 App Service plan and does not change the
+pricing tier. Keep it enabled so the backend stays warm after idle periods; the
+deploy workflow reasserts this setting on each production backend deploy when
+the `AZURE_CREDENTIALS` GitHub Actions secret is configured.
+
 ### Set the Startup Command
 
 ```bash
@@ -132,8 +143,13 @@ Now configure GitHub secrets. In your GitHub repo → **Settings** → **Secrets
 | Secret | How to get it |
 |--------|---------------|
 | `AZURE_WEBAPP_PUBLISH_PROFILE` | Azure Portal → your Web App → **Download publish profile** (download XML, paste entire file contents) |
+| `AZURE_CREDENTIALS` | Azure management-plane credentials for `az webapp config set` in deploys. Create a service principal scoped to the resource group, for example: `az ad sp create-for-rbac --name github-euroleague-quiz-deploy --role Contributor --scopes /subscriptions/<SUB_ID>/resourceGroups/euroleague-quiz-rg --json-auth`, then paste the JSON output. |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | Azure Portal → your Static Web App → **Manage deployment token** |
 | `VITE_CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → **API keys** → publishable key for this environment; leave unset to ship an anonymous-only frontend |
+
+`AZURE_WEBAPP_PUBLISH_PROFILE` is still used for zip deployment. It cannot update
+App Service site configuration, so `AZURE_CREDENTIALS` is required for the
+workflow step that keeps Always On enabled.
 
 ## Step 3: Update Configuration
 
