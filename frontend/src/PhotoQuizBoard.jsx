@@ -19,6 +19,8 @@ import BoardHeaderNav from "./BoardHeaderNav";
 import OnlineScoreboard from "./OnlineScoreboard";
 import WaitingLobby from "./WaitingLobby";
 import ResignControl from "./ResignControl";
+import GameResult from "./GameResult";
+import { winnerDisplayName } from "./winnerName";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import { buildInviteUrl } from "./inviteLink";
 import { clearOnlineInfo } from "./onlineRecovery";
@@ -427,33 +429,29 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
   }
 
   if (game?.status === "finished") {
+    const finishedWinnerName = winnerDisplayName(game);
     return (
-      <Shell onHome={onHome}>
-        <div className="text-center">
-          <CompletedRoundReveal
-            round={completedRound}
-            countdownRemaining={revealCountdownRemaining}
-          />
-          {lastResult === "opponent_left" && (
-            <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
-              Your opponent left the game.
-            </p>
-          )}
-          {lastResult === "resigned" && (
-            <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
-              {game.winner_player === playerNumber ? "Your opponent resigned." : "You resigned."}
-            </p>
-          )}
-          <div className="text-5xl mb-3">🏆</div>
-          <h1 className="font-display text-4xl text-elq-dark mb-3">
-            {(game.winner_player === 1 ? game.player1_name : game.player2_name) || "Player"} wins!
-          </h1>
-          <p className="text-elq-muted mb-6">{game.player1_score} - {game.player2_score}</p>
-          <button onClick={onNewGame} className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl">
-            Play Again
-          </button>
-        </div>
-      </Shell>
+      <GameResult
+        title={finishedWinnerName ? `${finishedWinnerName} WINS!` : "No winner"}
+        subtitle={`${game.player1_score} - ${game.player2_score}`}
+        onPlayAgain={onNewGame}
+        onHome={onHome}
+      >
+        <CompletedRoundReveal
+          round={completedRound}
+          countdownRemaining={revealCountdownRemaining}
+        />
+        {lastResult === "opponent_left" && (
+          <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+            Your opponent left the game.
+          </p>
+        )}
+        {lastResult === "resigned" && (
+          <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+            {game.winner_player === playerNumber ? "Your opponent resigned." : "You resigned."}
+          </p>
+        )}
+      </GameResult>
     );
   }
 

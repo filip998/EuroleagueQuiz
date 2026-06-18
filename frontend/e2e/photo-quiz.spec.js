@@ -238,8 +238,8 @@ test.describe.serial("Photo Quiz Flow", () => {
       await playCorrectPhotoGuess(playerA, gameId, { expectedRound: 3 });
 
       await waitForFinishedPhotoState(gameId);
-      await expect(playerA.getByText("Photo Alice wins!")).toBeVisible({ timeout: 15000 });
-      await expect(playerB.getByText("Photo Alice wins!")).toBeVisible({ timeout: 15000 });
+      await expect(playerA.getByText("Photo Alice WINS!")).toBeVisible({ timeout: 15000 });
+      await expect(playerB.getByText("Photo Alice WINS!")).toBeVisible({ timeout: 15000 });
       await expect(playerA.getByText("3 - 0")).toBeVisible();
     } finally {
       await contextA.close();
@@ -290,8 +290,8 @@ test.describe.serial("Photo Quiz Flow", () => {
       await playCorrectPhotoGuess(playerA, gameId, { expectedRound: 1 });
       await waitForFinishedPhotoState(gameId);
 
-      await expect(playerA.getByText("Quick Photo Alice wins!")).toBeVisible({ timeout: 15000 });
-      await expect(playerB.getByText("Quick Photo Alice wins!")).toBeVisible({ timeout: 15000 });
+      await expect(playerA.getByText("Quick Photo Alice WINS!")).toBeVisible({ timeout: 15000 });
+      await expect(playerB.getByText("Quick Photo Alice WINS!")).toBeVisible({ timeout: 15000 });
       await expect(playerA.getByText("1 - 0")).toBeVisible();
     } finally {
       await cleanupQuickMatchPage(playerA);

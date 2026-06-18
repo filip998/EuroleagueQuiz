@@ -75,6 +75,46 @@ describe("RosterGuessBoard header navigation", () => {
   });
 });
 
+describe("RosterGuessBoard end-of-game result", () => {
+  it("does not credit Player 2 when a finished online game has no winner", () => {
+    render(
+      <RosterGuessBoard
+        initialState={{
+          id: 2,
+          mode: "online_friend",
+          status: "finished",
+          player1_name: "Alice",
+          player2_name: "Bob",
+          player1_score: 1,
+          player2_score: 1,
+          current_player: 1,
+          round_number: 2,
+          target_wins: 2,
+          turn_seconds: null,
+          winner_player: null,
+          round: {
+            status: "completed",
+            team_code: "MAD",
+            team_name: "Real Madrid",
+            season_year: 2020,
+            guessed_count: 1,
+            total_slots: 1,
+            slots: [{ id: 1, position: "Guard", guessed_by_player: 1 }],
+          },
+        }}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    // A null winner must not fall through to the Player 2 name; the shared
+    // winnerDisplayName helper renders a neutral "No winner" headline.
+    expect(screen.getByRole("heading", { name: "No winner" })).toBeInTheDocument();
+    expect(screen.queryByText("Bob WINS!")).not.toBeInTheDocument();
+  });
+});
+
 describe("RosterGuessBoard solo / local never goes online from a stale seat (issue #150)", () => {
   // A stale `elq_game_<id>` seat (from an earlier online game whose numeric id was
   // later reused by a brand-new solo/local game) can hand the board a truthy

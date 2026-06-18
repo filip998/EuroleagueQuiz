@@ -20,6 +20,8 @@ import BoardHeaderNav from "./BoardHeaderNav";
 import OnlineScoreboard from "./OnlineScoreboard";
 import WaitingLobby from "./WaitingLobby";
 import ResignControl from "./ResignControl";
+import GameResult from "./GameResult";
+import { winnerDisplayName } from "./winnerName";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import { buildInviteUrl } from "./inviteLink";
 import { clearOnlineInfo } from "./onlineRecovery";
@@ -108,7 +110,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const roundLocked = revealCountdownRemaining > 0;
   const sharedWrongGuesses = solo ? [] : game?.current_round?.wrong_guesses || [];
   const isPublicQuickMatch = !solo && Boolean(game?.is_public) && Boolean(game?.preset);
-  const finishedWinnerName = finishedGameWinnerName(game);
+  const finishedWinnerName = winnerDisplayName(game);
   const timerEligible = isPublicQuickMatch && game?.status === "active" && !roundLocked;
   const showRoundTimer = (
     timerEligible
@@ -438,32 +440,27 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   if (game?.status === "finished") {
     return (
-      <Shell onHome={onHome}>
-        <div className="text-center">
-          <CompletedRoundReveal
-            round={completedRound}
-            countdownRemaining={revealCountdownRemaining}
-          />
-          {lastResult === "opponent_left" && (
-            <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
-              Your opponent left the game.
-            </p>
-          )}
-          {lastResult === "resigned" && (
-            <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
-              {game.winner_player === playerNumber ? "Your opponent resigned." : "You resigned."}
-            </p>
-          )}
-          <div className="text-5xl mb-3">🏆</div>
-          <h1 className="font-display text-4xl text-elq-dark mb-3">
-            {finishedWinnerName ? `${finishedWinnerName} wins!` : "No winner"}
-          </h1>
-          <p className="text-elq-muted mb-6">{game.player1_score} - {game.player2_score}</p>
-          <button onClick={onNewGame} className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl">
-            Play Again
-          </button>
-        </div>
-      </Shell>
+      <GameResult
+        title={finishedWinnerName ? `${finishedWinnerName} WINS!` : "No winner"}
+        subtitle={`${game.player1_score} - ${game.player2_score}`}
+        onPlayAgain={onNewGame}
+        onHome={onHome}
+      >
+        <CompletedRoundReveal
+          round={completedRound}
+          countdownRemaining={revealCountdownRemaining}
+        />
+        {lastResult === "opponent_left" && (
+          <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+            Your opponent left the game.
+          </p>
+        )}
+        {lastResult === "resigned" && (
+          <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+            {game.winner_player === playerNumber ? "Your opponent resigned." : "You resigned."}
+          </p>
+        )}
+      </GameResult>
     );
   }
 
@@ -914,12 +911,6 @@ function Timeline({ timeline }) {
 
 function getCareerGameRoundNumber(game) {
   return game?.current_round?.round_number ?? game?.round_number ?? null;
-}
-
-function finishedGameWinnerName(game) {
-  if (game?.winner_player === 1) return game.player1_name || "Player 1";
-  if (game?.winner_player === 2) return game.player2_name || "Player 2";
-  return null;
 }
 
 function isCareerActionSyncConflict(error) {
