@@ -17,7 +17,7 @@ from typing import (
     TypeVar,
 )
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
 from app.game_actions import (
@@ -660,6 +660,11 @@ def _single_season_rows_from_player_season_stats(
     team_game_counts: Mapping[int, int],
 ) -> list[SingleSeasonCandidate]:
     metric_total = func.coalesce(metric_config.season_column, 0)
+    appearance_games = _single_season_appearance_games_subquery(db, season_id)
+    games_played = func.coalesce(
+        appearance_games.c.appearance_games,
+        PlayerSeasonStats.games_played,
+    )
     rows = (
         db.query(
             PlayerSeasonTeam.id.label("player_season_team_id"),
@@ -671,7 +676,7 @@ def _single_season_rows_from_player_season_stats(
             Player.position,
             Player.nationality,
             Player.height_cm,
-            PlayerSeasonStats.games_played.label("games_played"),
+            games_played.label("games_played"),
             metric_total.label("total_value"),
         )
         .select_from(PlayerSeasonStats)
@@ -680,8 +685,15 @@ def _single_season_rows_from_player_season_stats(
             PlayerSeasonStats.player_season_team_id == PlayerSeasonTeam.id,
         )
         .join(Player, Player.id == PlayerSeasonTeam.player_id)
+        .outerjoin(
+            appearance_games,
+            and_(
+                appearance_games.c.player_id == PlayerSeasonTeam.player_id,
+                appearance_games.c.team_id == PlayerSeasonTeam.team_id,
+            ),
+        )
         .filter(PlayerSeasonTeam.season_id == season_id)
-        .filter(PlayerSeasonStats.games_played > 0)
+        .filter(games_played > 0)
         .all()
     )
     return _qualified_unique_single_season_rows(rows, team_game_counts)
@@ -694,8 +706,14 @@ def _single_season_rows_from_game_player_stats(
     metric_config: SingleSeasonMetricConfig,
     team_game_counts: Mapping[int, int],
 ) -> list[SingleSeasonCandidate]:
-    metric_total = func.coalesce(func.sum(metric_config.game_column), 0)
-    games_played = func.count(func.distinct(GamePlayerStats.game_id))
+    appearance_condition = _game_player_stats_counts_as_appearance()
+    metric_total = func.coalesce(
+        func.sum(case((appearance_condition, metric_config.game_column), else_=0)),
+        0,
+    )
+    games_played = func.count(
+        func.distinct(case((appearance_condition, GamePlayerStats.game_id)))
+    )
     rows = (
         db.query(
             PlayerSeasonTeam.id.label("player_season_team_id"),
@@ -737,6 +755,27 @@ def _single_season_rows_from_game_player_stats(
         .all()
     )
     return _qualified_unique_single_season_rows(rows, team_game_counts)
+
+
+def _single_season_appearance_games_subquery(db: Session, season_id: int):
+    appearance_condition = _game_player_stats_counts_as_appearance()
+    return (
+        db.query(
+            GamePlayerStats.player_id.label("player_id"),
+            GamePlayerStats.team_id.label("team_id"),
+            func.count(
+                func.distinct(case((appearance_condition, GamePlayerStats.game_id)))
+            ).label("appearance_games"),
+        )
+        .join(Game, Game.id == GamePlayerStats.game_id)
+        .filter(Game.season_id == season_id)
+        .group_by(GamePlayerStats.player_id, GamePlayerStats.team_id)
+        .subquery()
+    )
+
+
+def _game_player_stats_counts_as_appearance():
+    return func.upper(func.coalesce(GamePlayerStats.minutes, "")) != "DNP"
 
 
 def _qualified_unique_single_season_rows(

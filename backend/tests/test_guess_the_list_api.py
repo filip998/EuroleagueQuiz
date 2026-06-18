@@ -720,6 +720,59 @@ def _seed_single_season_leaders_fixture(session):
             )
         )
 
+    dnp_post_player = Player(
+        euroleague_code="SSL24DNP",
+        first_name="PostDnp",
+        last_name="Dnp",
+        nationality="CountryA",
+        position="Guard",
+        height_cm=199,
+    )
+    session.add(dnp_post_player)
+    session.flush()
+    dnp_post_stint = PlayerSeasonTeam(
+        player_id=dnp_post_player.id,
+        team_id=home.id,
+        season_id=seasons[2024].id,
+        jersey_number="99",
+    )
+    session.add(dnp_post_stint)
+    session.flush()
+    session.add(
+        PlayerSeasonStats(
+            player_season_team_id=dnp_post_stint.id,
+            games_played=2,
+            points=90,
+            total_rebounds=0,
+            assists=0,
+            pir=0,
+        )
+    )
+    session.add_all(
+        [
+            GamePlayerStats(
+                game_id=games[2024][0].id,
+                player_id=dnp_post_player.id,
+                team_id=home.id,
+                minutes="10:00",
+                points=90,
+                total_rebounds=0,
+                assists=0,
+                pir=0,
+            ),
+            GamePlayerStats(
+                game_id=games[2024][1].id,
+                player_id=dnp_post_player.id,
+                team_id=home.id,
+                minutes="DNP",
+                points=0,
+                total_rebounds=0,
+                assists=0,
+                pir=0,
+            ),
+        ]
+    )
+
     pre_2007_rows = [
         ("Pre01", "Alpha", 4, 20),
         ("Pre02", "Bravo", 4, 19),
@@ -769,6 +822,49 @@ def _seed_single_season_leaders_fixture(session):
                     pir=0,
                 )
             )
+
+    dnp_pre_player = Player(
+        euroleague_code="SSL06DNP",
+        first_name="PreDnp",
+        last_name="Dnp",
+        nationality="CountryB",
+        position="Forward",
+        height_cm=209,
+    )
+    session.add(dnp_pre_player)
+    session.flush()
+    session.add(
+        PlayerSeasonTeam(
+            player_id=dnp_pre_player.id,
+            team_id=home.id,
+            season_id=seasons[2006].id,
+            jersey_number="99",
+        )
+    )
+    session.add_all(
+        [
+            GamePlayerStats(
+                game_id=games[2006][0].id,
+                player_id=dnp_pre_player.id,
+                team_id=home.id,
+                minutes="10:00",
+                points=90,
+                total_rebounds=0,
+                assists=0,
+                pir=0,
+            ),
+            GamePlayerStats(
+                game_id=games[2006][1].id,
+                player_id=dnp_pre_player.id,
+                team_id=home.id,
+                minutes="DNP",
+                points=0,
+                total_rebounds=0,
+                assists=0,
+                pir=0,
+            ),
+        ]
+    )
 
     session.commit()
 
@@ -838,7 +934,9 @@ def test_single_season_leaders_uses_player_season_stats_qualifier_and_ties(
         ("Post10 Juliet", 10, 11.0, "11.0 ppg"),
         ("Post11 Kilo", 10, 11.0, "11.0 ppg"),
     ]
-    assert "PostLow Fewgames" not in [slot.player_name for slot in spec.slots]
+    names = [slot.player_name for slot in spec.slots]
+    assert "PostLow Fewgames" not in names
+    assert "PostDnp Dnp" not in names
 
 
 def test_single_season_leaders_uses_boxscore_aggregates_for_pre_2007(
@@ -859,8 +957,10 @@ def test_single_season_leaders_uses_boxscore_aggregates_for_pre_2007(
     assert spec.slots[0].player_name == "Pre01 Alpha"
     assert spec.slots[0].stat_value_label == "20.0 ppg"
     assert [slot.rank for slot in spec.slots][-2:] == [10, 10]
-    assert "Pre11 Kilo" in [slot.player_name for slot in spec.slots]
-    assert "PreLow Fewgames" not in [slot.player_name for slot in spec.slots]
+    names = [slot.player_name for slot in spec.slots]
+    assert "Pre11 Kilo" in names
+    assert "PreLow Fewgames" not in names
+    assert "PreDnp Dnp" not in names
 
 
 def test_single_season_leaders_category_is_registered_and_hides_active_answers(
