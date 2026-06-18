@@ -82,6 +82,8 @@ function ScoreboardCenter({ timer, statusText }) {
       </div>
       {timer && timer.seconds != null && (
         <div
+          role="timer"
+          aria-label={`${timer.seconds} seconds left`}
           className={`font-mono text-2xl font-bold tabular-nums sm:text-3xl ${
             timer.critical ? "animate-timer-critical" : "text-elq-dark"
           }`}

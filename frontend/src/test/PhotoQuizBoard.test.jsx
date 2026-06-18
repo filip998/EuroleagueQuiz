@@ -866,7 +866,7 @@ describe("PhotoQuizBoard Quick Match", () => {
     expect(onNewGame).not.toHaveBeenCalled();
   });
 
-  it("counts down a per-round timer and shows the auto-skip affordance at expiry", async () => {
+  it("counts the scoreboard timer down and shows the auto-skip affordance at expiry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-15T16:00:00Z"));
     getPhotoGame.mockResolvedValue(publicQuickMatchGame());
@@ -880,21 +880,25 @@ describe("PhotoQuizBoard Quick Match", () => {
       />
     );
 
-    const timer = screen.getByTestId("photo-round-timer");
-    expect(timer).toHaveTextContent("10s left");
+    const timer = screen.getByRole("timer");
+    expect(timer).toHaveTextContent("10");
+    expect(timer).toHaveAttribute("aria-label", "10 seconds left");
+    expect(screen.queryByTestId("photo-round-timer")).not.toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(screen.getByTestId("photo-round-timer")).toHaveTextContent("5s left");
+    expect(screen.getByRole("timer")).toHaveTextContent("5");
+    expect(screen.queryByTestId("photo-round-timer")).not.toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(11000);
     });
+    expect(screen.getByRole("timer")).toHaveTextContent("0");
     expect(screen.getByTestId("photo-round-timer")).toHaveTextContent("Time's up");
   });
 
-  it("shows the per-round timer and the mutual no-answer offer for public Quick Match games", () => {
+  it("shows the scoreboard countdown and the mutual no-answer offer for public Quick Match games", () => {
     render(
       <PhotoQuizBoard
         initialState={publicQuickMatchGame()}
@@ -903,7 +907,8 @@ describe("PhotoQuizBoard Quick Match", () => {
         onNewGame={vi.fn()}
       />
     );
-    expect(screen.getByTestId("photo-round-timer")).toBeInTheDocument();
+    expect(screen.getByRole("timer")).toHaveTextContent("10");
+    expect(screen.queryByTestId("photo-round-timer")).not.toBeInTheDocument();
     expect(screen.getByText("Nobody knows")).toBeInTheDocument();
 
     cleanup();
@@ -916,6 +921,7 @@ describe("PhotoQuizBoard Quick Match", () => {
         onNewGame={vi.fn()}
       />
     );
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
     expect(screen.queryByTestId("photo-round-timer")).not.toBeInTheDocument();
     expect(screen.getByText("Nobody knows")).toBeInTheDocument();
   });
