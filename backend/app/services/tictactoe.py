@@ -1,12 +1,18 @@
+import logging
 import math
 import random
 import string
-from collections import Counter
+from collections import Counter, defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from threading import RLock
+from types import MappingProxyType
 from typing import Callable, Optional
+from weakref import WeakKeyDictionary
 
 from sqlalchemy import distinct, func, or_
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session
 
 from app.game_actions import (
@@ -40,6 +46,12 @@ TicTacToeConflictError = ConflictGameActionError
 TicTacToeNotImplementedError = UnsupportedGameActionError
 
 GUEST_ID_MAX_LENGTH = 64
+AxisKey = tuple[str, str]
+CellKey = tuple[AxisKey, AxisKey]
+_EMPTY_PLAYER_SET: frozenset[int] = frozenset()
+_BOARD_CACHE_LOCK = RLock()
+_BOARD_DATA_BY_ENGINE: WeakKeyDictionary[Engine, "_BoardData"] = WeakKeyDictionary()
+logger = logging.getLogger(__name__)
 
 
 def _clean_guest_id(guest_id: Optional[str]) -> Optional[str]:
@@ -70,6 +82,21 @@ class AxisDefinition:
     max_per_board: int | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _BoardData:
+    candidates_by_type: Mapping[str, tuple[Mapping[str, object], ...]]
+    axis_player_sets: Mapping[AxisKey, frozenset[int]]
+    season_team_player_sets: Mapping[tuple[str, str], frozenset[int]]
+    season_played_with_player_sets: Mapping[tuple[str, str], frozenset[int]]
+    valid_cells: frozenset[CellKey]
+    reference_date: date
+    engine_pool_id: int
+
+    @property
+    def candidate_count(self) -> int:
+        return sum(len(candidates) for candidates in self.candidates_by_type.values())
+
+
 MIN_NATIONALITY_PLAYERS = 5
 PLAYED_WITH_TOP_N = 100  # raw PIR query limit (filtered down after scoring)
 PLAYED_WITH_CANDIDATE_LIMIT = 80
@@ -81,6 +108,10 @@ RECENCY_FLOOR = 0.10
 TEAM_DIVERSITY_BONUS = 0.10  # 10% score bonus per additional team played for
 
 
+def _board_reference_date() -> date:
+    return datetime.now(timezone.utc).date()
+
+
 def _get_team_candidates(db: Session) -> list[dict]:
     """Get candidate teams ranked by recency-weighted player count.
 
@@ -90,7 +121,7 @@ def _get_team_candidates(db: Session) -> list[dict]:
     historically large but long-inactive teams (Olimpija, Cibona…).
     Display label uses Team.short_name (falling back to Team.name).
     """
-    current_year = date.today().year
+    current_year = _board_reference_date().year
 
     # Raw aggregates per team
     rows = (
@@ -191,7 +222,7 @@ def _get_played_with_candidates(db: Session) -> list[dict]:
     This favours active players who moved between clubs (= richer
     teammate pools) over retired one-club legends.
     """
-    current_year = date.today().year
+    current_year = _board_reference_date().year
 
     rows = (
         db.query(
@@ -243,7 +274,7 @@ def _get_season_candidates(db: Session) -> list[dict]:
     current season is most likely to appear and older seasons decay by
     SEASON_RECENCY_DECAY per year.
     """
-    current_year = date.today().year
+    current_year = _board_reference_date().year
     min_year = current_year - SEASON_LOOKBACK_YEARS
 
     rows = (
@@ -542,6 +573,440 @@ AXIS_WEIGHTS = {
     axis_type: definition.weight
     for axis_type, definition in AXIS_REGISTRY.items()
 }
+
+
+def _axis_key(axis: Mapping[str, object]) -> AxisKey:
+    return (str(axis["axis_type"]), str(axis["value"]))
+
+
+def _cell_key(row_axis: Mapping[str, object], col_axis: Mapping[str, object]) -> CellKey:
+    row_key = _axis_key(row_axis)
+    col_key = _axis_key(col_axis)
+    return (row_key, col_key) if row_key <= col_key else (col_key, row_key)
+
+
+def _freeze_candidates_by_type(
+    candidates_by_type: Mapping[str, list[dict]],
+) -> Mapping[str, tuple[Mapping[str, object], ...]]:
+    return MappingProxyType({
+        axis_type: tuple(MappingProxyType(dict(candidate)) for candidate in candidates)
+        for axis_type, candidates in candidates_by_type.items()
+    })
+
+
+def _freeze_player_set_map(
+    values: Mapping[AxisKey | tuple[str, str], set[int]],
+) -> Mapping[AxisKey | tuple[str, str], frozenset[int]]:
+    return MappingProxyType({
+        key: frozenset(player_ids)
+        for key, player_ids in values.items()
+    })
+
+
+def _all_candidate_axes(
+    candidates_by_type: Mapping[str, tuple[Mapping[str, object], ...]],
+) -> tuple[Mapping[str, object], ...]:
+    return tuple(
+        axis
+        for candidates in candidates_by_type.values()
+        for axis in candidates
+    )
+
+
+def _axes_for_type(
+    candidates_by_type: Mapping[str, tuple[Mapping[str, object], ...]],
+    axis_type: str,
+) -> tuple[Mapping[str, object], ...]:
+    return tuple(candidates_by_type.get(axis_type, ()))
+
+
+def _build_team_axis_player_sets(
+    db: Session,
+    axes: tuple[Mapping[str, object], ...],
+) -> dict[AxisKey, set[int]]:
+    result = {_axis_key(axis): set() for axis in axes}
+    team_ids = {int(axis["value"]) for axis in axes}
+    if not team_ids:
+        return result
+    rows = (
+        db.query(PlayerSeasonTeam.team_id, PlayerSeasonTeam.player_id)
+        .filter(PlayerSeasonTeam.team_id.in_(team_ids))
+        .distinct()
+        .all()
+    )
+    for row in rows:
+        result.setdefault(("team", str(row.team_id)), set()).add(row.player_id)
+    return result
+
+
+def _build_nationality_axis_player_sets(
+    db: Session,
+    axes: tuple[Mapping[str, object], ...],
+) -> dict[AxisKey, set[int]]:
+    result = {_axis_key(axis): set() for axis in axes}
+    nationalities = {str(axis["value"]) for axis in axes}
+    if not nationalities:
+        return result
+    rows = (
+        db.query(Player.nationality, Player.id)
+        .filter(Player.nationality.in_(nationalities))
+        .all()
+    )
+    for row in rows:
+        result.setdefault(("nationality", str(row.nationality)), set()).add(row.id)
+    return result
+
+
+def _build_season_axis_player_sets(
+    db: Session,
+    axes: tuple[Mapping[str, object], ...],
+) -> dict[AxisKey, set[int]]:
+    result = {_axis_key(axis): set() for axis in axes}
+    season_ids = {int(axis["value"]) for axis in axes}
+    if not season_ids:
+        return result
+    rows = (
+        db.query(PlayerSeasonTeam.season_id, PlayerSeasonTeam.player_id)
+        .filter(PlayerSeasonTeam.season_id.in_(season_ids))
+        .distinct()
+        .all()
+    )
+    for row in rows:
+        result.setdefault(("season", str(row.season_id)), set()).add(row.player_id)
+    return result
+
+
+def _build_position_axis_player_sets(
+    db: Session,
+    axes: tuple[Mapping[str, object], ...],
+) -> dict[AxisKey, set[int]]:
+    result = {_axis_key(axis): set() for axis in axes}
+    positions = {str(axis["value"]) for axis in axes}
+    if not positions:
+        return result
+    rows = (
+        db.query(Player.position, Player.id)
+        .filter(Player.position.in_(positions))
+        .all()
+    )
+    for row in rows:
+        result.setdefault(("position", str(row.position)), set()).add(row.id)
+    return result
+
+
+def _build_played_with_axis_player_sets(
+    db: Session,
+    axes: tuple[Mapping[str, object], ...],
+) -> dict[AxisKey, set[int]]:
+    result = {_axis_key(axis): set() for axis in axes}
+    star_ids = {int(axis["value"]) for axis in axes}
+    if not star_ids:
+        return result
+
+    star_stints = (
+        db.query(
+            PlayerSeasonTeam.player_id,
+            PlayerSeasonTeam.team_id,
+            PlayerSeasonTeam.season_id,
+            PlayerSeasonTeam.registration_start,
+            PlayerSeasonTeam.registration_end,
+        )
+        .filter(PlayerSeasonTeam.player_id.in_(star_ids))
+        .all()
+    )
+    if not star_stints:
+        return result
+
+    star_by_team_season = defaultdict(list)
+    for stint in star_stints:
+        star_by_team_season[(stint.team_id, stint.season_id)].append(stint)
+
+    rows = (
+        db.query(
+            PlayerSeasonTeam.player_id,
+            PlayerSeasonTeam.team_id,
+            PlayerSeasonTeam.season_id,
+            PlayerSeasonTeam.registration_start,
+            PlayerSeasonTeam.registration_end,
+        )
+        .filter(PlayerSeasonTeam.team_id.in_({stint.team_id for stint in star_stints}))
+        .filter(PlayerSeasonTeam.season_id.in_({stint.season_id for stint in star_stints}))
+        .all()
+    )
+    for row in rows:
+        for star_stint in star_by_team_season.get((row.team_id, row.season_id), []):
+            if row.player_id == star_stint.player_id:
+                continue
+            if _stints_overlap(
+                row.registration_start,
+                row.registration_end,
+                star_stint.registration_start,
+                star_stint.registration_end,
+            ):
+                result.setdefault(
+                    ("played_with", str(star_stint.player_id)),
+                    set(),
+                ).add(row.player_id)
+    return result
+
+
+def _build_axis_player_sets(
+    db: Session,
+    candidates_by_type: Mapping[str, tuple[Mapping[str, object], ...]],
+) -> Mapping[AxisKey, frozenset[int]]:
+    result: dict[AxisKey, set[int]] = {
+        _axis_key(axis): set()
+        for axis in _all_candidate_axes(candidates_by_type)
+    }
+    result.update(_build_team_axis_player_sets(db, _axes_for_type(candidates_by_type, "team")))
+    result.update(
+        _build_nationality_axis_player_sets(
+            db, _axes_for_type(candidates_by_type, "nationality")
+        )
+    )
+    result.update(
+        _build_played_with_axis_player_sets(
+            db, _axes_for_type(candidates_by_type, "played_with")
+        )
+    )
+    result.update(
+        _build_season_axis_player_sets(db, _axes_for_type(candidates_by_type, "season"))
+    )
+    result.update(
+        _build_position_axis_player_sets(
+            db, _axes_for_type(candidates_by_type, "position")
+        )
+    )
+
+    handled_axis_types = {"team", "nationality", "played_with", "season", "position"}
+    for axis in _all_candidate_axes(candidates_by_type):
+        if str(axis["axis_type"]) not in handled_axis_types:
+            result[_axis_key(axis)] = set(_get_player_set_for_axis(db, dict(axis)))
+
+    return _freeze_player_set_map(result)
+
+
+def _build_season_team_player_sets(
+    db: Session,
+    candidates_by_type: Mapping[str, tuple[Mapping[str, object], ...]],
+) -> Mapping[tuple[str, str], frozenset[int]]:
+    team_ids = {int(axis["value"]) for axis in _axes_for_type(candidates_by_type, "team")}
+    season_ids = {
+        int(axis["value"])
+        for axis in _axes_for_type(candidates_by_type, "season")
+    }
+    result: dict[tuple[str, str], set[int]] = {}
+    if not team_ids or not season_ids:
+        return _freeze_player_set_map(result)
+
+    rows = (
+        db.query(
+            PlayerSeasonTeam.team_id,
+            PlayerSeasonTeam.season_id,
+            PlayerSeasonTeam.player_id,
+        )
+        .filter(PlayerSeasonTeam.team_id.in_(team_ids))
+        .filter(PlayerSeasonTeam.season_id.in_(season_ids))
+        .distinct()
+        .all()
+    )
+    for row in rows:
+        result.setdefault((str(row.team_id), str(row.season_id)), set()).add(
+            row.player_id
+        )
+    return _freeze_player_set_map(result)
+
+
+def _build_season_played_with_player_sets(
+    db: Session,
+    candidates_by_type: Mapping[str, tuple[Mapping[str, object], ...]],
+) -> Mapping[tuple[str, str], frozenset[int]]:
+    star_ids = {
+        int(axis["value"])
+        for axis in _axes_for_type(candidates_by_type, "played_with")
+    }
+    season_ids = {
+        int(axis["value"])
+        for axis in _axes_for_type(candidates_by_type, "season")
+    }
+    result: dict[tuple[str, str], set[int]] = {}
+    if not star_ids or not season_ids:
+        return _freeze_player_set_map(result)
+
+    star_stints = (
+        db.query(
+            PlayerSeasonTeam.player_id,
+            PlayerSeasonTeam.team_id,
+            PlayerSeasonTeam.season_id,
+            PlayerSeasonTeam.registration_start,
+            PlayerSeasonTeam.registration_end,
+        )
+        .filter(PlayerSeasonTeam.player_id.in_(star_ids))
+        .filter(PlayerSeasonTeam.season_id.in_(season_ids))
+        .all()
+    )
+    if not star_stints:
+        return _freeze_player_set_map(result)
+
+    star_by_team_season = defaultdict(list)
+    for stint in star_stints:
+        star_by_team_season[(stint.team_id, stint.season_id)].append(stint)
+
+    rows = (
+        db.query(
+            PlayerSeasonTeam.player_id,
+            PlayerSeasonTeam.team_id,
+            PlayerSeasonTeam.season_id,
+            PlayerSeasonTeam.registration_start,
+            PlayerSeasonTeam.registration_end,
+        )
+        .filter(PlayerSeasonTeam.team_id.in_({stint.team_id for stint in star_stints}))
+        .filter(PlayerSeasonTeam.season_id.in_(season_ids))
+        .all()
+    )
+    for row in rows:
+        for star_stint in star_by_team_season.get((row.team_id, row.season_id), []):
+            if row.player_id == star_stint.player_id:
+                continue
+            if _stints_overlap(
+                row.registration_start,
+                row.registration_end,
+                star_stint.registration_start,
+                star_stint.registration_end,
+            ):
+                result.setdefault(
+                    (str(star_stint.player_id), str(star_stint.season_id)),
+                    set(),
+                ).add(row.player_id)
+    return _freeze_player_set_map(result)
+
+
+def _get_board_data_cell_player_set(
+    board_data: _BoardData,
+    row_axis: Mapping[str, object],
+    col_axis: Mapping[str, object],
+) -> frozenset[int]:
+    season_axis = row_axis if row_axis["axis_type"] == "season" else (
+        col_axis if col_axis["axis_type"] == "season" else None
+    )
+    other_axis = col_axis if season_axis is row_axis else row_axis
+
+    if season_axis and other_axis["axis_type"] != "season":
+        if other_axis["axis_type"] == "team":
+            return board_data.season_team_player_sets.get(
+                (str(other_axis["value"]), str(season_axis["value"])),
+                _EMPTY_PLAYER_SET,
+            )
+        if other_axis["axis_type"] == "played_with":
+            return board_data.season_played_with_player_sets.get(
+                (str(other_axis["value"]), str(season_axis["value"])),
+                _EMPTY_PLAYER_SET,
+            )
+        return board_data.axis_player_sets.get(
+            _axis_key(season_axis),
+            _EMPTY_PLAYER_SET,
+        ) & board_data.axis_player_sets.get(_axis_key(other_axis), _EMPTY_PLAYER_SET)
+
+    return board_data.axis_player_sets.get(
+        _axis_key(row_axis),
+        _EMPTY_PLAYER_SET,
+    ) & board_data.axis_player_sets.get(_axis_key(col_axis), _EMPTY_PLAYER_SET)
+
+
+def _board_data_has_valid_cell(
+    board_data: _BoardData,
+    row_axis: Mapping[str, object],
+    col_axis: Mapping[str, object],
+) -> bool:
+    return _cell_key(row_axis, col_axis) in board_data.valid_cells
+
+
+def _build_valid_cell_keys(
+    board_data: _BoardData,
+) -> frozenset[CellKey]:
+    # Bounded by the finite candidate-pair space at build time; no hot-path growth.
+    axes = _all_candidate_axes(board_data.candidates_by_type)
+    valid_cells: set[CellKey] = set()
+    for index, row_axis in enumerate(axes):
+        for col_axis in axes[index:]:
+            if _get_board_data_cell_player_set(board_data, row_axis, col_axis):
+                valid_cells.add(_cell_key(row_axis, col_axis))
+    return frozenset(valid_cells)
+
+
+def _build_board_data(db: Session, *, engine_pool_id: int) -> _BoardData:
+    raw_candidates_by_type = {
+        axis_type: definition.candidate_provider(db)
+        for axis_type, definition in AXIS_REGISTRY.items()
+    }
+    candidates_by_type = _freeze_candidates_by_type(raw_candidates_by_type)
+    board_data = _BoardData(
+        candidates_by_type=candidates_by_type,
+        axis_player_sets=_build_axis_player_sets(db, candidates_by_type),
+        season_team_player_sets=_build_season_team_player_sets(db, candidates_by_type),
+        season_played_with_player_sets=_build_season_played_with_player_sets(
+            db, candidates_by_type
+        ),
+        valid_cells=frozenset(),
+        reference_date=_board_reference_date(),
+        engine_pool_id=engine_pool_id,
+    )
+    return _BoardData(
+        candidates_by_type=board_data.candidates_by_type,
+        axis_player_sets=board_data.axis_player_sets,
+        season_team_player_sets=board_data.season_team_player_sets,
+        season_played_with_player_sets=board_data.season_played_with_player_sets,
+        valid_cells=_build_valid_cell_keys(board_data),
+        reference_date=board_data.reference_date,
+        engine_pool_id=board_data.engine_pool_id,
+    )
+
+
+def _board_cache_engine_for_session(db: Session) -> Engine:
+    bind = db.get_bind()
+    if isinstance(bind, Connection):
+        return bind.engine
+    if isinstance(bind, Engine):
+        return bind
+    engine = getattr(bind, "engine", None)
+    if isinstance(engine, Engine):
+        return engine
+    raise RuntimeError("TicTacToe board cache requires a session bound to an Engine")
+
+
+def _board_data_is_current(board_data: _BoardData, engine: Engine) -> bool:
+    return (
+        board_data.reference_date == _board_reference_date()
+        and board_data.engine_pool_id == id(engine.pool)
+    )
+
+
+def _get_board_data(db: Session) -> _BoardData:
+    engine = _board_cache_engine_for_session(db)
+    with _BOARD_CACHE_LOCK:
+        board_data = _BOARD_DATA_BY_ENGINE.get(engine)
+        if board_data is not None and _board_data_is_current(board_data, engine):
+            return board_data
+        board_data = _build_board_data(db, engine_pool_id=id(engine.pool))
+        _BOARD_DATA_BY_ENGINE[engine] = board_data
+        logger.info(
+            "Built TicTacToe board cache with %s candidates and %s valid cell pairs",
+            board_data.candidate_count,
+            len(board_data.valid_cells),
+        )
+        return board_data
+
+
+def warm_board_cache(db: Session) -> _BoardData:
+    return _get_board_data(db)
+
+
+def reset_board_cache(db: Session | None = None) -> None:
+    with _BOARD_CACHE_LOCK:
+        if db is None:
+            _BOARD_DATA_BY_ENGINE.clear()
+            return
+        _BOARD_DATA_BY_ENGINE.pop(_board_cache_engine_for_session(db), None)
 
 
 def _player_matches_cell(
@@ -1497,36 +1962,18 @@ def _axis_type_can_be_added(
     )
 
 
-def _select_board_axes(db: Session) -> list[dict]:
-    """Select 6 axes (3 rows + 3 cols) using weighted axis type selection.
-
-    Returns list of 6 axis dicts: [row0, row1, row2, col0, col1, col2].
-    Each dict has: axis_type, value, display_label.
-    """
-    registry = AXIS_REGISTRY
-    with timed_phase("board.reference_data"):
-        candidates_by_type = {
-            axis_type: definition.candidate_provider(db)
-            for axis_type, definition in registry.items()
-        }
-    team_candidates = candidates_by_type.get("team", [])
-    if len(team_candidates) < 6:
-        raise TicTacToeConflictError(
-            "Not enough teams with player history to generate a TicTacToe board"
-        )
-
-    player_set_cache: dict[tuple[str, str], set[int]] = {}
+def _make_uncached_cell_has_answers(db: Session) -> Callable[[dict, dict], bool]:
+    player_set_cache: dict[AxisKey, set[int]] = {}
     season_team_cache: dict[tuple[str, str], set[int]] = {}
     season_played_with_cache: dict[tuple[str, str], set[int]] = {}
 
     def _player_set_for(axis: dict) -> set[int]:
-        key = (axis["axis_type"], axis["value"])
+        key = _axis_key(axis)
         if key not in player_set_cache:
             player_set_cache[key] = _get_player_set_for_axis(db, axis)
         return player_set_cache[key]
 
-    def _cell_player_set(ra: dict, ca: dict) -> set[int]:
-        """Compute the true valid-player set, including precise season constraints."""
+    def _cell_has_answers(ra: dict, ca: dict) -> bool:
         season_axis = None
         other_axis = None
         if ra["axis_type"] == "season" and ca["axis_type"] != "season":
@@ -1541,7 +1988,7 @@ def _select_board_axes(db: Session) -> list[dict]:
                     season_team_cache[key] = _get_player_set_for_season_team(
                         db, team_axis=other_axis, season_axis=season_axis
                     )
-                return season_team_cache[key]
+                return bool(season_team_cache[key])
             if other_axis["axis_type"] == "played_with":
                 key = (other_axis["value"], season_axis["value"])
                 if key not in season_played_with_cache:
@@ -1552,10 +1999,27 @@ def _select_board_axes(db: Session) -> list[dict]:
                             season_axis=season_axis,
                         )
                     )
-                return season_played_with_cache[key]
-            return _player_set_for(season_axis) & _player_set_for(other_axis)
+                return bool(season_played_with_cache[key])
+            return bool(_player_set_for(season_axis) & _player_set_for(other_axis))
 
-        return _player_set_for(ra) & _player_set_for(ca)
+        return bool(_player_set_for(ra) & _player_set_for(ca))
+
+    return _cell_has_answers
+
+
+def _select_board_axes_from_candidates(
+    candidates_by_type: Mapping[str, tuple[Mapping[str, object], ...] | list[dict]],
+    cell_has_answers: Callable[[dict, dict], bool],
+    *,
+    registry: dict[str, AxisDefinition] | None = None,
+) -> list[dict]:
+    """Shared board selection loop. Keep RNG calls/order identical to the legacy path."""
+    registry = registry or AXIS_REGISTRY
+    team_candidates = candidates_by_type.get("team", [])
+    if len(team_candidates) < 6:
+        raise TicTacToeConflictError(
+            "Not enough teams with player history to generate a TicTacToe board"
+        )
 
     axis_types = [
         axis_type
@@ -1568,7 +2032,7 @@ def _select_board_axes(db: Session) -> list[dict]:
         if not _axis_type_can_be_added(axes, axis_type, registry=registry):
             return []
         return [
-            candidate
+            dict(candidate)
             for candidate in candidates_by_type.get(axis_type, [])
             if (candidate["axis_type"], candidate["value"]) not in used_values
         ]
@@ -1607,19 +2071,52 @@ def _select_board_axes(db: Session) -> list[dict]:
                 valid = True
                 for ra in row_axes:
                     for ca in col_axes:
-                        if not _cell_player_set(ra, ca):
+                        if not cell_has_answers(ra, ca):
                             valid = False
                             break
                     if not valid:
                         break
 
                 if valid:
-                    return axes
+                    return [dict(axis) for axis in axes]
     finally:
         set_timing_metric("board.axis_selection.attempts", attempts)
 
     raise TicTacToeConflictError(
         "Unable to generate a valid 3x3 board with axis intersections"
+    )
+
+
+def _select_board_axes_uncached(db: Session) -> list[dict]:
+    registry = AXIS_REGISTRY
+    with timed_phase("board.reference_data"):
+        candidates_by_type = {
+            axis_type: definition.candidate_provider(db)
+            for axis_type, definition in registry.items()
+        }
+    return _select_board_axes_from_candidates(
+        candidates_by_type,
+        _make_uncached_cell_has_answers(db),
+        registry=registry,
+    )
+
+
+def _select_board_axes(db: Session) -> list[dict]:
+    """Select 6 axes (3 rows + 3 cols) using cached reference data.
+
+    Returns list of 6 axis dicts: [row0, row1, row2, col0, col1, col2].
+    Each dict has: axis_type, value, display_label. Returned dicts are copies,
+    so callers cannot mutate process-shared cached candidates.
+    """
+    registry = AXIS_REGISTRY
+    with timed_phase("board.reference_data"):
+        board_data = _get_board_data(db)
+    return _select_board_axes_from_candidates(
+        board_data.candidates_by_type,
+        lambda row_axis, col_axis: _board_data_has_valid_cell(
+            board_data, row_axis, col_axis
+        ),
+        registry=registry,
     )
 
 

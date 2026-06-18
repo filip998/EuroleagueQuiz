@@ -119,6 +119,11 @@ serialization. Setting the TicTacToe router logger to DEBUG records the same
 structured logs locally without exposing `Server-Timing` headers to clients; it
 is off by default.
 
+TicTacToe board generation caches static reference data per backend process and
+warms the cache on API startup. Warm board generation is in-memory selection plus
+precomputed cell-validity lookups; after a content database refresh, restart the
+backend process or call `reset_board_cache()` before serving new boards.
+
 Run the dependency-light board-generation benchmark from `backend/`:
 
 ```bash

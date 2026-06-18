@@ -38,6 +38,36 @@ worker.
 | Board #5 | 199.334 ms |
 | Unrelated read (`count(players.id)=3718`) | 1.777 ms |
 
+## Board-generation cache result
+
+Issue: #182
+Captured: 2026-06-18 on the same local macOS development hardware
+Database: tracked content DB (`backend/data/euroleague.db`)
+
+The benchmark now reports one cold cache build separately, then explicitly warms
+the per-process board-reference cache before measuring warm board-generation
+repetitions.
+
+| Measurement | Duration |
+| --- | ---: |
+| Cold board-generation cache build | 230.940 ms |
+| Warm board generation min | 0.670 ms |
+| Warm board generation mean | 1.175 ms |
+| Warm board generation max | 2.733 ms |
+| Warm mean speedup vs. #181 baseline | 25.0x |
+
+Warm runs: `0.675, 0.670, 0.878, 2.733, 0.917 ms`.
+
+| Concurrent task | Duration |
+| --- | ---: |
+| Wall time | 3.812 ms |
+| Board #1 | 0.436 ms |
+| Board #2 | 1.449 ms |
+| Board #3 | 0.455 ms |
+| Board #4 | 0.572 ms |
+| Board #5 | 0.278 ms |
+| Unrelated read (`count(players.id)=3718`) | 3.211 ms |
+
 ## Representative create and move timings
 
 Measured against a temporary copy of `backend/data/euroleague.db` with
