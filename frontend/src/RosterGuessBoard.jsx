@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useListKeyboardNav } from "./useListKeyboardNav";
 import { getRosterGame, submitRosterGuess, offerEndRound, respondEndRound, connectRosterGuessRealtime, autocompleteRosterPlayer, giveUpRosterRound } from "./api";
+import { optimizeHeadshot, handleHeadshotError, HEADSHOT_WIDTHS } from "./imageUrl";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import BoardHeaderNav from "./BoardHeaderNav";
@@ -294,10 +295,10 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
                   <div className="flex-shrink-0 w-10 h-10 rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center">
                     {showPlayer && slot.image_url ? (
                       <img
-                        src={slot.image_url}
+                        src={optimizeHeadshot(slot.image_url, { width: HEADSHOT_WIDTHS.avatar })}
                         alt={slot.player_name}
                         className="w-full h-full object-cover object-top"
-                        onError={(e) => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }}
+                        onError={(e) => handleHeadshotError(e, slot.image_url, (ev) => { ev.currentTarget.style.display = "none"; ev.currentTarget.nextSibling.style.display = "flex"; })}
                       />
                     ) : null}
                     <svg

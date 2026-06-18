@@ -880,6 +880,36 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(screen.queryByRole("img", { name: "No Photo Answer" })).not.toBeInTheDocument();
   });
 
+  it("rewrites a EuroLeague CDN answer image to a width-bounded webp", async () => {
+    vi.useFakeTimers();
+    const cdn = "https://media-cdn.incrowdsports.com/answer-xyz.png";
+    getCareerGame.mockResolvedValue(
+      activeCareerGame({
+        latest_completed_round: completedRound({
+          round_number: 1,
+          name: "CDN Answer",
+          image_url: cdn,
+        }),
+      })
+    );
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+
+    const image = screen.getByRole("img", { name: "CDN Answer" });
+    expect(image).toHaveAttribute("src", `${cdn}?width=256&format=webp`);
+  });
+
   it("does not replay an initial latest completed round on refresh", () => {
     render(
       <CareerQuizBoard

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { getGame, submitMove, offerDraw, respondDraw, giveUpGame, cancelQuickMatchTicTacToe, connectTicTacToeRealtime } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
+import { optimizeHeadshot, handleHeadshotError, HEADSHOT_WIDTHS } from "./imageUrl";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import PlayerSearch from "./PlayerSearch";
 import BoardHeaderNav from "./BoardHeaderNav";
@@ -46,10 +47,10 @@ function AxisLabel({ axis }) {
       )}
       {isPlayedWith && axis.image_url && (
         <img
-          src={axis.image_url}
+          src={optimizeHeadshot(axis.image_url, { width: HEADSHOT_WIDTHS.avatar })}
           alt={axis.display_label}
           className="w-9 h-9 rounded-full object-cover object-top border border-amber-300"
-          onError={(e) => { e.target.style.display = "none"; }}
+          onError={(e) => handleHeadshotError(e, axis.image_url, (ev) => { ev.currentTarget.style.display = "none"; })}
         />
       )}
       {countryCode && (
@@ -573,10 +574,10 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                       <div className="animate-cell-claim flex flex-col items-center gap-0.5">
                         {cell.claimed_player_image_url && !inTransition && (
                           <img
-                            src={cell.claimed_player_image_url}
+                            src={optimizeHeadshot(cell.claimed_player_image_url, { width: HEADSHOT_WIDTHS.cell })}
                             alt={cell.claimed_player_name || ""}
                             className="w-6 h-6 rounded-full object-cover object-top border border-slate-200"
-                            onError={(e) => { e.target.style.display = "none"; }}
+                            onError={(e) => handleHeadshotError(e, cell.claimed_player_image_url, (ev) => { ev.currentTarget.style.display = "none"; })}
                           />
                         )}
                         <div

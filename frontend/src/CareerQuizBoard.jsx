@@ -16,6 +16,7 @@ import {
 } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
+import { optimizeHeadshot, handleHeadshotError, HEADSHOT_WIDTHS } from "./imageUrl";
 import BoardHeaderNav from "./BoardHeaderNav";
 import OnlineScoreboard from "./OnlineScoreboard";
 import WaitingLobby from "./WaitingLobby";
@@ -881,10 +882,10 @@ function AnswerPlayerImage({ player }) {
   if (!player?.image_url) return null;
   return (
     <img
-      src={player.image_url}
+      src={optimizeHeadshot(player.image_url, { width: HEADSHOT_WIDTHS.answer })}
       alt={player.name || ""}
       className="w-20 h-20 rounded-full object-cover object-top border border-elq-border shrink-0"
-      onError={(e) => { e.target.style.display = "none"; }}
+      onError={(e) => handleHeadshotError(e, player.image_url, (ev) => { ev.currentTarget.style.display = "none"; })}
     />
   );
 }
