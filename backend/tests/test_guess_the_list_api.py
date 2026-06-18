@@ -773,6 +773,53 @@ def _seed_single_season_leaders_fixture(session):
         ]
     )
 
+    dnp_total_player = Player(
+        euroleague_code="SSL24DNPTOTAL",
+        first_name="PostDnpTotal",
+        last_name="DnpTotal",
+        nationality="CountryA",
+        position="Guard",
+        height_cm=200,
+    )
+    session.add(dnp_total_player)
+    session.flush()
+    dnp_total_stint = PlayerSeasonTeam(
+        player_id=dnp_total_player.id,
+        team_id=home.id,
+        season_id=seasons[2024].id,
+        jersey_number="98",
+    )
+    session.add(dnp_total_stint)
+    session.flush()
+    session.add(
+        PlayerSeasonStats(
+            player_season_team_id=dnp_total_stint.id,
+            games_played=4,
+            points=100,
+            total_rebounds=0,
+            assists=0,
+            pir=0,
+        )
+    )
+    for game, minutes, points in zip(
+        games[2024],
+        ("10:00", "11:00", "DNP", "DNP"),
+        (10, 10, 40, 40),
+        strict=True,
+    ):
+        session.add(
+            GamePlayerStats(
+                game_id=game.id,
+                player_id=dnp_total_player.id,
+                team_id=home.id,
+                minutes=minutes,
+                points=points,
+                total_rebounds=0,
+                assists=0,
+                pir=0,
+            )
+        )
+
     pre_2007_rows = [
         ("Pre01", "Alpha", 4, 20),
         ("Pre02", "Bravo", 4, 19),
@@ -937,6 +984,7 @@ def test_single_season_leaders_uses_player_season_stats_qualifier_and_ties(
     names = [slot.player_name for slot in spec.slots]
     assert "PostLow Fewgames" not in names
     assert "PostDnp Dnp" not in names
+    assert "PostDnpTotal DnpTotal" not in names
 
 
 def test_single_season_leaders_uses_boxscore_aggregates_for_pre_2007(

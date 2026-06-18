@@ -659,10 +659,18 @@ def _single_season_rows_from_player_season_stats(
     metric_config: SingleSeasonMetricConfig,
     team_game_counts: Mapping[int, int],
 ) -> list[SingleSeasonCandidate]:
-    metric_total = func.coalesce(metric_config.season_column, 0)
-    appearance_games = _single_season_appearance_games_subquery(db, season_id)
+    appearance_totals = _single_season_appearance_totals_subquery(
+        db,
+        season_id,
+        metric_config,
+    )
+    metric_total = func.coalesce(
+        appearance_totals.c.total_value,
+        metric_config.season_column,
+        0,
+    )
     games_played = func.coalesce(
-        appearance_games.c.appearance_games,
+        appearance_totals.c.appearance_games,
         PlayerSeasonStats.games_played,
     )
     rows = (
@@ -686,10 +694,10 @@ def _single_season_rows_from_player_season_stats(
         )
         .join(Player, Player.id == PlayerSeasonTeam.player_id)
         .outerjoin(
-            appearance_games,
+            appearance_totals,
             and_(
-                appearance_games.c.player_id == PlayerSeasonTeam.player_id,
-                appearance_games.c.team_id == PlayerSeasonTeam.team_id,
+                appearance_totals.c.player_id == PlayerSeasonTeam.player_id,
+                appearance_totals.c.team_id == PlayerSeasonTeam.team_id,
             ),
         )
         .filter(PlayerSeasonTeam.season_id == season_id)
@@ -757,7 +765,11 @@ def _single_season_rows_from_game_player_stats(
     return _qualified_unique_single_season_rows(rows, team_game_counts)
 
 
-def _single_season_appearance_games_subquery(db: Session, season_id: int):
+def _single_season_appearance_totals_subquery(
+    db: Session,
+    season_id: int,
+    metric_config: SingleSeasonMetricConfig,
+):
     appearance_condition = _game_player_stats_counts_as_appearance()
     return (
         db.query(
@@ -766,6 +778,10 @@ def _single_season_appearance_games_subquery(db: Session, season_id: int):
             func.count(
                 func.distinct(case((appearance_condition, GamePlayerStats.game_id)))
             ).label("appearance_games"),
+            func.coalesce(
+                func.sum(case((appearance_condition, metric_config.game_column), else_=0)),
+                0,
+            ).label("total_value"),
         )
         .join(Game, Game.id == GamePlayerStats.game_id)
         .filter(Game.season_id == season_id)
