@@ -1,7 +1,12 @@
+import logging
+import sys
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.database import get_db
 from app.routers import (
     auth,
     career_quiz,
@@ -14,11 +19,55 @@ from app.routers import (
     seasons,
     teams,
 )
+from app.services import tictactoe as tictactoe_service
+
+logger = logging.getLogger(__name__)
+
+
+def _should_skip_tictactoe_board_cache_warm_for_tests(app: FastAPI) -> bool:
+    return (
+        "pytest" in sys.modules
+        and not getattr(
+            app.state,
+            "enable_tictactoe_board_cache_warm_in_tests",
+            False,
+        )
+    )
+
+
+def _warm_tictactoe_board_cache(app: FastAPI) -> None:
+    if _should_skip_tictactoe_board_cache_warm_for_tests(app):
+        logger.debug("Skipping TicTacToe board cache warm under pytest")
+        return
+
+    db_provider = app.dependency_overrides.get(get_db, get_db)
+    db_context = db_provider()
+    try:
+        db = next(db_context)
+    except Exception:
+        logger.exception("Failed to open database session for TicTacToe board cache warm")
+        return
+    try:
+        tictactoe_service.warm_board_cache(db)
+    except Exception:
+        logger.exception("Failed to warm TicTacToe board cache")
+    finally:
+        close = getattr(db_context, "close", None)
+        if close is not None:
+            close()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _warm_tictactoe_board_cache(app)
+    yield
+
 
 app = FastAPI(
     title="EuroLeague Quiz API",
     description="API for EuroLeague Basketball data — powering quiz and knowledge games",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

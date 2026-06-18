@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app import main as app_main
 from app.database import Base, get_db
 from app.main import app
 from app.models import Player, PlayerSeasonStats, PlayerSeasonTeam, Season, Team
@@ -21,6 +22,13 @@ from app.services import matchmaking, tictactoe as ttt_service
 from app.services.realtime import DisconnectGraceTimerManager, OnlineGameRealtimeModule
 from app.services.realtime_adapters import TicTacToeRealtimeAdapter
 from tests.realtime_helpers import FakeWebSocket, SleepController, drain_tasks
+
+
+@pytest.fixture(autouse=True)
+def _reset_board_cache():
+    ttt_service.reset_board_cache()
+    yield
+    ttt_service.reset_board_cache()
 
 
 @pytest.fixture(autouse=True)
@@ -91,6 +99,14 @@ def _action_payload(response) -> dict:
     payload = response.json()
     assert payload["type"] == "state"
     return payload["payload"]
+
+
+def _live_player_set_for_cell(db, player_ids: list[int], row_axis: dict, col_axis: dict) -> set[int]:
+    return {
+        player_id
+        for player_id in player_ids
+        if ttt_service._player_matches_cell(db, player_id, row_axis, col_axis)
+    }
 
 
 @pytest.fixture()
@@ -392,6 +408,285 @@ def test_tictactoe_axis_weights_preserve_existing_values_and_add_position():
     assert ttt_service.AXIS_WEIGHTS["played_with"] == 0.20
     assert ttt_service.AXIS_WEIGHTS["season"] == 0.10
     assert ttt_service.AXIS_WEIGHTS["position"] == 0.05
+
+
+def test_tictactoe_cached_board_selection_matches_uncached_rng(ttt_axis_session):
+    db, _ = ttt_axis_session
+
+    for seed in range(20):
+        random.seed(seed)
+        uncached = ttt_service._select_board_axes_uncached(db)
+        ttt_service.reset_board_cache(db)
+        random.seed(seed)
+        cached = ttt_service._select_board_axes(db)
+        assert cached == uncached
+
+
+def test_tictactoe_board_cache_warm_does_not_advance_rng(ttt_axis_session):
+    db, _ = ttt_axis_session
+    random.seed(8675309)
+    before = random.getstate()
+
+    ttt_service.warm_board_cache(db)
+
+    assert random.getstate() == before
+
+
+def test_tictactoe_cached_validity_is_exhaustive_and_live_equivalent(
+    ttt_axis_session,
+):
+    db, data = ttt_axis_session
+    board_data = ttt_service.warm_board_cache(db)
+    axes = [
+        dict(axis)
+        for candidates in board_data.candidates_by_type.values()
+        for axis in candidates
+    ]
+    player_ids = [player.id for player in data["players"].values()]
+    seen_type_pairs = set()
+    saw_duplicate_axis = False
+
+    for row_index, row_axis in enumerate(axes):
+        for col_axis in axes[row_index:]:
+            cached_players = set(
+                ttt_service._get_board_data_cell_player_set(
+                    board_data, row_axis, col_axis
+                )
+            )
+            live_players = _live_player_set_for_cell(
+                db, player_ids, row_axis, col_axis
+            )
+            cached_valid = ttt_service._board_data_has_valid_cell(
+                board_data, row_axis, col_axis
+            )
+            symmetric_valid = ttt_service._board_data_has_valid_cell(
+                board_data, col_axis, row_axis
+            )
+
+            assert cached_players == live_players
+            assert cached_valid == bool(live_players)
+            assert symmetric_valid == cached_valid
+            if cached_valid:
+                assert any(
+                    ttt_service._player_matches_cell(
+                        db, player_id, row_axis, col_axis
+                    )
+                    for player_id in cached_players
+                )
+
+            type_pair = tuple(sorted((row_axis["axis_type"], col_axis["axis_type"])))
+            seen_type_pairs.add(type_pair)
+            if ttt_service._axis_key(row_axis) == ttt_service._axis_key(col_axis):
+                saw_duplicate_axis = True
+
+    expected_type_pairs = {
+        ("team", "team"),
+        ("nationality", "team"),
+        ("season", "team"),
+        ("nationality", "season"),
+        ("played_with", "season"),
+        ("season", "season"),
+    }
+    assert expected_type_pairs <= seen_type_pairs
+    assert saw_duplicate_axis
+
+    current_axis = next(
+        axis for axis in axes
+        if axis["axis_type"] == "season"
+        and axis["value"] == str(data["current_season"].id)
+    )
+    played_with_axis = next(axis for axis in axes if axis["axis_type"] == "played_with")
+    current_teammates = ttt_service._get_board_data_cell_player_set(
+        board_data, current_axis, played_with_axis
+    )
+    assert data["players"]["guard"].id in current_teammates
+    assert data["players"]["non_overlap"].id not in current_teammates
+
+
+def test_tictactoe_board_cache_key_normalizes_engine_and_connection_binds(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "cache_key.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    assert engine.pool.__class__.__name__ == "QueuePool"
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    try:
+        with SessionLocal() as db:
+            board_data = ttt_service.warm_board_cache(db)
+            assert ttt_service._board_cache_engine_for_session(db) is engine
+            assert board_data.engine_pool_id == id(engine.pool)
+
+        with engine.connect() as connection:
+            ConnectionSession = sessionmaker(
+                autocommit=False,
+                autoflush=False,
+                bind=connection,
+            )
+            with ConnectionSession() as db:
+                assert ttt_service._board_cache_engine_for_session(db) is engine
+                assert ttt_service.warm_board_cache(db) is board_data
+    finally:
+        engine.dispose()
+
+
+def test_tictactoe_board_cache_rebuilds_after_engine_dispose(tmp_path: Path):
+    db_path = tmp_path / "disposed_engine.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    try:
+        with SessionLocal() as db:
+            before_dispose = ttt_service.warm_board_cache(db)
+        old_pool_id = before_dispose.engine_pool_id
+
+        engine.dispose()
+        assert id(engine.pool) != old_pool_id
+
+        with SessionLocal() as db:
+            after_dispose = ttt_service.warm_board_cache(db)
+        assert after_dispose is not before_dispose
+        assert after_dispose.engine_pool_id == id(engine.pool)
+    finally:
+        engine.dispose()
+
+
+def test_tictactoe_board_generation_cannot_mutate_cached_candidates(
+    ttt_axis_session,
+):
+    db, _ = ttt_axis_session
+    board_data = ttt_service.warm_board_cache(db)
+
+    axes = ttt_service._select_board_axes(db)
+    axes[0]["display_label"] = "Poisoned"
+    cached_axis = next(
+        axis
+        for axis in board_data.candidates_by_type[axes[0]["axis_type"]]
+        if axis["value"] == axes[0]["value"]
+    )
+
+    assert cached_axis["display_label"] != "Poisoned"
+    with pytest.raises(TypeError):
+        cached_axis["display_label"] = "Still Poisoned"
+
+
+def test_tictactoe_startup_warm_skips_by_default_under_pytest(monkeypatch):
+    calls = []
+
+    def fail_if_called(db):
+        calls.append(db)
+        raise AssertionError("startup warm should be skipped under pytest")
+
+    previous_override = app.dependency_overrides.pop(get_db, None)
+    monkeypatch.setattr(
+        app.state,
+        "enable_tictactoe_board_cache_warm_in_tests",
+        False,
+        raising=False,
+    )
+    monkeypatch.setattr(app_main.tictactoe_service, "warm_board_cache", fail_if_called)
+    try:
+        app_main._warm_tictactoe_board_cache(app)
+    finally:
+        if previous_override is not None:
+            app.dependency_overrides[get_db] = previous_override
+
+    assert calls == []
+
+
+def test_tictactoe_startup_warm_uses_get_db_override(
+    tmp_path: Path,
+    monkeypatch,
+):
+    db_path = tmp_path / "startup_warm.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+    calls = []
+
+    def override_get_db():
+        db = SessionLocal()
+        calls.append("opened")
+        try:
+            yield db
+        finally:
+            calls.append("closed")
+            db.close()
+
+    previous_override = app.dependency_overrides.get(get_db)
+    app.dependency_overrides[get_db] = override_get_db
+    monkeypatch.setattr(
+        app.state,
+        "enable_tictactoe_board_cache_warm_in_tests",
+        True,
+        raising=False,
+    )
+    try:
+        app_main._warm_tictactoe_board_cache(app)
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = previous_override
+        engine.dispose()
+
+    assert calls == ["opened", "closed"]
+
+
+def test_tictactoe_startup_warm_logs_failures(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+):
+    db_path = tmp_path / "startup_warm_failure.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    def fail_warm(db):
+        raise RuntimeError("warm failed")
+
+    previous_override = app.dependency_overrides.get(get_db)
+    app.dependency_overrides[get_db] = override_get_db
+    monkeypatch.setattr(app_main.tictactoe_service, "warm_board_cache", fail_warm)
+    monkeypatch.setattr(
+        app.state,
+        "enable_tictactoe_board_cache_warm_in_tests",
+        True,
+        raising=False,
+    )
+    try:
+        with caplog.at_level(logging.ERROR, logger="app.main"):
+            app_main._warm_tictactoe_board_cache(app)
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = previous_override
+        engine.dispose()
+
+    assert "Failed to warm TicTacToe board cache" in caplog.text
 
 
 def test_tictactoe_existing_axis_builders_and_matchers(ttt_axis_session):

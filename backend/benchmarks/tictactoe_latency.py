@@ -42,6 +42,7 @@ async def run_benchmark(
 
     engine, session_factory = _session_factory(database_url)
     try:
+        _warm_board_cache(session_factory)
         warm_runs = [
             _time_board_generation(session_factory)["duration_ms"]
             for _ in range(repeats)
@@ -72,6 +73,11 @@ def _cold_board_generation_ms(database_url: str) -> float:
         return _time_board_generation(session_factory)["duration_ms"]
     finally:
         engine.dispose()
+
+
+def _warm_board_cache(session_factory: Callable) -> None:
+    with session_factory() as db:
+        ttt_service.warm_board_cache(db)
 
 
 async def _run_concurrent_generation(
