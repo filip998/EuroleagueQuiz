@@ -1014,8 +1014,27 @@ describe("PhotoQuizBoard online resign", () => {
 
     expect(screen.queryByText("Resign")).not.toBeInTheDocument();
   });
-});
 
+  it("hides the resign control during the inter-round reveal lock", () => {
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame({
+          latest_completed_round: completedRound({
+            round_number: 1,
+            name: "Locked Player",
+            next_round_starts_at: new Date(Date.now() + 10_000).toISOString(),
+          }),
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByPlaceholderText("Type a player name...")).toBeDisabled();
+    expect(screen.queryByText("Resign")).not.toBeInTheDocument();
+  });
+});
 function activePhotoGame(overrides = {}) {
   return {
     id: 7,

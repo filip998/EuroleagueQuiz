@@ -588,7 +588,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
             )}
           </div>
         </div>
-        {isOnline && game?.status === "active" && (
+        {isOnline && game?.status === "active" && !roundLocked && (
           <ResignControl onResign={handleResign} disabled={resigning} />
         )}
       </div>

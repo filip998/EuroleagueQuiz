@@ -568,7 +568,7 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
             )}
           </div>
         </div>
-        {isOnline && game?.status === "active" && (
+        {isOnline && game?.status === "active" && !roundLocked && (
           <ResignControl onResign={handleResign} disabled={resigning} />
         )}
       </div>

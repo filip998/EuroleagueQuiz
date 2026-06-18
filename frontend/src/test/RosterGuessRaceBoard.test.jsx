@@ -280,6 +280,28 @@ describe("RosterGuessRaceBoard online resign", () => {
 
     expect(screen.queryByText("Resign")).not.toBeInTheDocument();
   });
+
+  it("hides the resign control during the inter-round reveal lock", () => {
+    render(
+      <RosterGuessRaceBoard
+        initialState={activeRaceGame({
+          latest_completed_round: {
+            round_number: 3,
+            winner_player: 1,
+            player1_correct: 5,
+            player2_correct: 3,
+            next_round_starts_at: new Date(Date.now() + 10_000).toISOString(),
+          },
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Player 1 wins the round")).toBeInTheDocument();
+    expect(screen.queryByText("Resign")).not.toBeInTheDocument();
+  });
 });
 
 function activeRaceGame(overrides = {}) {

@@ -372,7 +372,7 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
             <RaceSlot key={slot.id} slot={slot} />
           ))}
         </div>
-        {isOnline && playerNumber && game?.status === "active" && (
+        {isOnline && playerNumber && game?.status === "active" && !roundLocked && (
           <ResignControl onResign={handleResign} disabled={resigning} />
         )}
       </div>
