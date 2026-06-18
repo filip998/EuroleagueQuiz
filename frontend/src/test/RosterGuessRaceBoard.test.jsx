@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sendActionMock = vi.hoisted(() => vi.fn());
@@ -88,6 +88,26 @@ describe("RosterGuessRaceBoard", () => {
       player_id: 99,
       round_number: 4,
     });
+  });
+
+  it("renders the unified online scoreboard with a seat-colored self-indicator", () => {
+    render(
+      <RosterGuessRaceBoard
+        initialState={activeRaceGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onNewGame={vi.fn()}
+        onHome={vi.fn()}
+      />
+    );
+
+    const scoreboard = screen.getByLabelText("Roster Race multiplayer scoreboard");
+    expect(within(scoreboard).getByText("Ace")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("Runner")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("Round 4")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("First to 2")).toBeInTheDocument();
+
+    const pill = within(scoreboard).getByText("You are Ace").closest("div");
+    expect(pill.querySelector(".bg-elq-player1")).toBeTruthy();
   });
 
   it("renders public waiting Race games in the quick-match searching lobby and cancels them", async () => {

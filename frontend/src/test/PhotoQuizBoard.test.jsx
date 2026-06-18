@@ -226,6 +226,7 @@ describe("PhotoQuizBoard multiplayer reveals", () => {
     expect(within(scoreboard).getByText("Round 1")).toBeInTheDocument();
     expect(within(scoreboard).getByText("First to 3")).toBeInTheDocument();
     expect(within(scoreboard).getByText("You are B")).toBeInTheDocument();
+    expect(within(scoreboard).getByText("ONLINE RACE")).toBeInTheDocument();
   });
 
   it("keeps the multiplayer scoreboard out of solo mode", () => {

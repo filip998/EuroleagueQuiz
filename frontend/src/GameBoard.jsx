@@ -4,6 +4,7 @@ import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import PlayerSearch from "./PlayerSearch";
 import BoardHeaderNav from "./BoardHeaderNav";
+import OnlineScoreboard from "./OnlineScoreboard";
 import ClubLogo from "./ClubLogo";
 import WaitingLobby from "./WaitingLobby";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
@@ -444,9 +445,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       <div className="bg-white border-b border-elq-border">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <BoardHeaderNav onHome={onHome} />
-          <span className="text-xs text-elq-muted">
-            {isSolo ? "" : `Round ${game.round_number} \u00b7 First to ${game.target_wins}`}
-          </span>
+          <span />
         </div>
       </div>
 
@@ -455,7 +454,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         <div className="bg-elq-bg text-center py-1.5 text-xs text-elq-muted border-b border-elq-border">
           <span className="inline-flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            Online &mdash; You are <strong>{game[`player${myPlayer}_name`]}</strong> (Player {myPlayer})
+            Online
             {game.status === "active" && !isMyTurn && <span className="text-elq-orange ml-1">Waiting for opponent...</span>}
           </span>
         </div>
@@ -473,53 +472,35 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
             </div>
           </div>
         ) : (
-        <div className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-4 sm:p-5 mb-4 animate-fade-in-up">
-          <div className="flex items-center justify-between">
-            {/* Player 1 */}
-            <div className="text-center flex-1">
-              <div className={`text-sm font-semibold transition-colors ${game.current_player === 1 && game.status === "active" ? "text-elq-player1" : "text-elq-muted"}`}>
-                {game.player1_name}
-              </div>
-              <div className="text-3xl sm:text-4xl font-bold text-elq-dark mt-1">
-                {game.player1_score}
-              </div>
-              {game.current_player === 1 && game.status === "active" && (
-                <div className="w-2 h-2 rounded-full bg-elq-player1 mx-auto mt-2 animate-pulse" />
-              )}
-            </div>
-
-            {/* Center: timer + status */}
-            <div className="text-center px-4 flex-shrink-0">
-              {game.turn_seconds && game.status === "active" && timeLeft !== null && (
-                <div
-                  className={`text-3xl sm:text-4xl font-bold font-mono tabular-nums ${
-                    timeLeft <= 5 ? "animate-timer-critical" : "text-elq-dark"
-                  }`}
-                >
-                  {timeLeft}
-                  <span className="text-sm text-elq-muted font-normal ml-0.5">s</span>
-                </div>
-              )}
-              <div className="text-xs text-elq-muted mt-1">
-                {game.status === "finished"
-                  ? `\ud83c\udf89 ${game.winner_player === 1 ? game.player1_name : game.player2_name} wins!`
-                  : `${currentPlayerName}'s turn`}
-              </div>
-            </div>
-
-            {/* Player 2 */}
-            <div className="text-center flex-1">
-              <div className={`text-sm font-semibold transition-colors ${game.current_player === 2 && game.status === "active" ? "text-elq-player2" : "text-elq-muted"}`}>
-                {game.player2_name}
-              </div>
-              <div className="text-3xl sm:text-4xl font-bold text-elq-dark mt-1">
-                {game.player2_score}
-              </div>
-              {game.current_player === 2 && game.status === "active" && (
-                <div className="w-2 h-2 rounded-full bg-elq-player2 mx-auto mt-2 animate-pulse" />
-              )}
-            </div>
-          </div>
+        <div className="w-full">
+          <OnlineScoreboard
+            ariaLabel="TicTacToe multiplayer scoreboard"
+            players={[
+              {
+                name: game.player1_name,
+                score: game.player1_score,
+                active: game.current_player === 1 && game.status === "active",
+              },
+              {
+                name: game.player2_name,
+                score: game.player2_score,
+                active: game.current_player === 2 && game.status === "active",
+              },
+            ]}
+            youPlayerNumber={isOnline ? myPlayer : null}
+            roundNumber={game.round_number}
+            targetWins={game.target_wins}
+            timer={
+              game.turn_seconds && game.status === "active" && timeLeft !== null
+                ? { seconds: timeLeft, critical: timeLeft <= 5 }
+                : null
+            }
+            statusText={
+              game.status === "finished"
+                ? `\ud83c\udf89 ${game.winner_player === 1 ? game.player1_name : game.player2_name} wins!`
+                : `${currentPlayerName}'s turn`
+            }
+          />
         </div>
         )}
 
