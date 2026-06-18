@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, devices } from "@playwright/test";
 
 const backendPort = Number(process.env.E2E_BACKEND_PORT || 8000);
 const backendUrl = `http://127.0.0.1:${backendPort}`;
@@ -244,6 +244,46 @@ test.describe.serial("TicTacToe Quick Match Flow", () => {
       await expect(page.getByTestId("quick-pick-standard")).toBeVisible();
     } finally {
       await cleanupQuickMatchPage(page);
+      await context.close();
+    }
+  });
+
+  test("touch: a pool card shows an at-rest tap affordance and starts searching in one tap", async ({
+    browser,
+  }) => {
+    // Emulate a real phone (hasTouch, no hover/focus) so we exercise the touch
+    // path the desktop hover reveal never covers. Uses the Long preset, which no
+    // other spec searches, so the one-tap → searching signal can't be skipped by
+    // an accidental cross-worker pairing.
+    const context = await browser.newContext({ ...devices["Pixel 5"] });
+    const page = await context.newPage();
+
+    try {
+      // /tictactoe lands directly on Online -> Quick Match (the pool grid).
+      await page.goto("/tictactoe");
+
+      // At rest on touch (no hover/focus ever fires): the persistent tap
+      // affordance AND the live presence count are both visible on the card.
+      const affordance = page.getByTestId("affordance-long");
+      const presence = page.getByTestId("presence-long");
+      await expect(affordance).toBeVisible();
+      await expect(affordance).toHaveCSS("opacity", "1");
+      await expect(presence).toBeVisible();
+      await expect(presence).toHaveCSS("opacity", "1");
+
+      // A single tap on the card goes straight to matchmaking — there is no
+      // "Find Match" button and no double-tap trap.
+      await page.getByTestId("quick-pick-long").tap();
+      await expect(page.getByText("SEARCHING THE POOL")).toBeVisible({
+        timeout: 10000,
+      });
+
+      // Clean up the public waiting game this tap created.
+      await page.getByRole("button", { name: "Cancel search" }).click();
+      await expect(page.getByTestId("quick-pick-standard")).toBeVisible({
+        timeout: 10000,
+      });
+    } finally {
       await context.close();
     }
   });
