@@ -16,54 +16,71 @@ import { buildInviteUrl } from "./inviteLink";
 import { clearOnlineInfo } from "./onlineRecovery";
 import { forgetQuickMatchSeat } from "./quickMatchSeats";
 
-function AxisLabel({ axis }) {
-  const isTeam = axis.axis_type === "team";
-  const isPlayedWith = axis.axis_type === "played_with";
-  const isSeason = axis.axis_type === "season";
-  const isNationality = axis.axis_type === "nationality";
+// Per-axis-type chip palette. Colours are the only thing that distinguishes the
+// non-image axis types (position pill, champion badge, stat-milestone chip), so
+// each type that has no logo/photo gets its own background.
+const AXIS_CHIP_STYLES = {
+  nationality: "bg-emerald-50 text-emerald-800 border-emerald-200",
+  played_with: "bg-amber-50 text-amber-800 border-amber-200",
+  season: "bg-violet-50 text-violet-800 border-violet-200",
+  position: "bg-sky-50 text-sky-800 border-sky-200",
+  champion: "bg-yellow-50 text-yellow-800 border-yellow-300",
+  stat_milestone: "bg-rose-50 text-rose-800 border-rose-200",
+};
+
+export function AxisLabel({ axis }) {
+  const axisType = axis?.axis_type;
+  const isTeam = axisType === "team";
+  const isPlayedWith = axisType === "played_with";
+  const isSeason = axisType === "season";
+  const isNationality = axisType === "nationality";
+  const isChampion = axisType === "champion";
+  const isStatMilestone = axisType === "stat_milestone";
   const countryCode = isNationality ? axis.country_code : null;
+  const imageUrl = isPlayedWith ? axis.image_url : null;
+  // Milestone labels (e.g. "15+ PPG season", "1,000+ career points") come from
+  // the backend display_label so calibration changes need no frontend edit.
+  const label = axis?.display_label || axis?.team_name || "\u2014";
   const prefix =
     isNationality && !countryCode
       ? "\ud83c\udf0d "
-      : isPlayedWith && !axis.image_url
+      : isPlayedWith && !imageUrl
         ? "\ud83e\udd1d "
         : isSeason
           ? "\ud83d\udcc5 "
-          : "";
+          : isChampion
+            ? "\ud83c\udfc6 "
+            : isStatMilestone
+              ? "\ud83d\udcca "
+              : "";
   const bgColor =
-    isNationality
-      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-      : isPlayedWith
-        ? "bg-amber-50 text-amber-800 border-amber-200"
-        : isSeason
-          ? "bg-violet-50 text-violet-800 border-violet-200"
-          : "bg-slate-50 text-slate-700 border-slate-200";
+    AXIS_CHIP_STYLES[axisType] || "bg-slate-50 text-slate-700 border-slate-200";
   return (
     <div
-      className={`px-2 py-3 text-[11px] sm:text-xs font-semibold text-center rounded-lg border ${bgColor} leading-tight flex flex-col items-center justify-center gap-1`}
+      className={`px-2 py-3 text-[11px] sm:text-xs font-semibold text-center rounded-lg border ${bgColor} leading-tight flex flex-col items-center justify-center gap-1 min-w-0`}
     >
       {isTeam && axis.team_code && (
         <ClubLogo code={axis.team_code} size={28} />
       )}
-      {isPlayedWith && axis.image_url && (
+      {imageUrl && (
         <img
-          src={optimizeHeadshot(axis.image_url, { width: HEADSHOT_WIDTHS.avatar })}
-          alt={axis.display_label}
+          src={optimizeHeadshot(imageUrl, { width: HEADSHOT_WIDTHS.avatar })}
+          alt={label}
           className="w-9 h-9 rounded-full object-cover object-top border border-amber-300"
-          onError={(e) => handleHeadshotError(e, axis.image_url, (ev) => { ev.currentTarget.style.display = "none"; })}
+          onError={(e) => handleHeadshotError(e, imageUrl, (ev) => { ev.currentTarget.style.display = "none"; })}
         />
       )}
       {countryCode && (
         <img
           src={`https://flagcdn.com/w80/${countryCode.toLowerCase()}.png`}
-          alt={axis.display_label}
+          alt={label}
           className="w-8 h-6 object-cover rounded-sm border border-emerald-200"
           onError={(e) => { e.target.style.display = "none"; }}
         />
       )}
-      <span>
+      <span className="max-w-full break-words">
         {prefix}
-        {axis.display_label || axis.team_name}
+        {label}
       </span>
     </div>
   );
