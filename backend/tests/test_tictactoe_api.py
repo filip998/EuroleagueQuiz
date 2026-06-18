@@ -465,6 +465,72 @@ def test_tictactoe_board_cache_warm_does_not_advance_rng(ttt_axis_session):
     assert random.getstate() == before
 
 
+def test_tictactoe_move_validation_uses_cached_cell_player_sets(
+    ttt_axis_session,
+    monkeypatch,
+):
+    db, _ = ttt_axis_session
+    board_data = ttt_service.warm_board_cache(db)
+    row_key, col_key = next(iter(board_data.valid_cells))
+    row_axis = {"axis_type": row_key[0], "value": row_key[1]}
+    col_axis = {"axis_type": col_key[0], "value": col_key[1]}
+    valid_player_ids = ttt_service._get_board_data_cell_player_set(
+        board_data,
+        row_axis,
+        col_axis,
+    )
+    valid_player_id = next(iter(valid_player_ids))
+
+    def fail_uncached(*args, **kwargs):
+        raise AssertionError("covered board-cache cell used uncached validation")
+
+    monkeypatch.setattr(ttt_service, "_player_matches_cell_uncached", fail_uncached)
+
+    assert ttt_service._player_matches_cell(
+        db,
+        valid_player_id,
+        row_axis,
+        col_axis,
+    )
+
+    invalid_player_id = next(
+        (
+            player_id
+            for (player_id,) in db.query(Player.id).order_by(Player.id).all()
+            if player_id not in valid_player_ids
+        ),
+        None,
+    )
+    if invalid_player_id is not None:
+        assert not ttt_service._player_matches_cell(
+            db,
+            invalid_player_id,
+            row_axis,
+            col_axis,
+        )
+
+
+def test_tictactoe_move_validation_falls_back_for_uncached_axes(
+    ttt_axis_session,
+    monkeypatch,
+):
+    db, _ = ttt_axis_session
+    ttt_service.warm_board_cache(db)
+    calls = []
+
+    def fake_uncached(db_arg, player_id, row_axis, col_axis):
+        calls.append((db_arg, player_id, row_axis, col_axis))
+        return player_id == 123
+
+    monkeypatch.setattr(ttt_service, "_player_matches_cell_uncached", fake_uncached)
+
+    row_axis = {"axis_type": "team", "value": "999998"}
+    col_axis = {"axis_type": "team", "value": "999999"}
+
+    assert ttt_service._player_matches_cell(db, 123, row_axis, col_axis)
+    assert calls == [(db, 123, row_axis, col_axis)]
+
+
 def test_tictactoe_cached_validity_is_exhaustive_and_live_equivalent(
     ttt_axis_session,
 ):
@@ -1353,6 +1419,53 @@ def test_tictactoe_move_timing_header_covers_validation_and_completed_answers(
     assert "db_commit;dur=" in header
     assert "response_completed_round_serialization;dur=" in header
     assert "response_serialization;dur=" in header
+
+
+def test_tictactoe_completed_round_uses_batched_sample_answers(
+    client: TestClient,
+    monkeypatch,
+):
+    def fail_per_cell_sample_helper(*args, **kwargs):
+        raise AssertionError("completed round used per-cell sample helper")
+
+    monkeypatch.setattr(
+        ttt_service,
+        "_get_sample_answers",
+        fail_per_cell_sample_helper,
+    )
+    response = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "single_player",
+            "target_wins": 2,
+            "timer_mode": "15s",
+        },
+    )
+    assert response.status_code == 200
+    game = _action_payload(response)["game"]
+    game_id = game["id"]
+    final_response = None
+
+    for row_index, col_index in ((0, 0), (1, 1), (2, 2)):
+        latest_state = client.get(f"/quiz/tictactoe/games/{game_id}").json()
+        cell = _find_cell(latest_state, row_index, col_index)
+        player_id = _valid_player_for_cell(client, cell)
+        final_response = client.post(
+            f"/quiz/tictactoe/games/{game_id}/moves",
+            json={
+                "row_index": row_index,
+                "col_index": col_index,
+                "player_id": player_id,
+            },
+        )
+        assert final_response.status_code == 200
+
+    assert final_response is not None
+    payload = _action_payload(final_response)
+    assert payload["result"] == "board_complete"
+    assert payload["completed_round"]["round_number"] == 1
+    for cell in payload["completed_round"]["cells"]:
+        assert isinstance(cell["sample_answers"], list)
 
 
 def test_tictactoe_timing_header_is_attached_to_domain_errors(

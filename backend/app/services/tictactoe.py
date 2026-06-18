@@ -13,7 +13,7 @@ from weakref import WeakKeyDictionary
 
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.game_actions import (
     ConflictGameActionError,
@@ -1092,6 +1092,46 @@ def reset_board_cache(db: Session | None = None) -> None:
         _BOARD_DATA_BY_ENGINE.pop(_board_cache_engine_for_session(db), None)
 
 
+def _get_cached_board_data(db: Session) -> _BoardData | None:
+    engine = _board_cache_engine_for_session(db)
+    with _BOARD_CACHE_LOCK:
+        board_data = _BOARD_DATA_BY_ENGINE.get(engine)
+        if board_data is not None and _board_data_is_current(board_data, engine):
+            return board_data
+    return None
+
+
+def _board_data_covers_axis(
+    board_data: _BoardData,
+    axis: Mapping[str, object],
+) -> bool:
+    return _axis_key(axis) in board_data.axis_player_sets
+
+
+def _get_cached_cell_player_set(
+    db: Session,
+    row_axis: Mapping[str, object],
+    col_axis: Mapping[str, object],
+    *,
+    require_valid_cell: bool = False,
+) -> frozenset[int] | None:
+    board_data = _get_cached_board_data(db)
+    if board_data is None:
+        return None
+    if not (
+        _board_data_covers_axis(board_data, row_axis)
+        and _board_data_covers_axis(board_data, col_axis)
+    ):
+        return None
+    if require_valid_cell and not _board_data_has_valid_cell(
+        board_data,
+        row_axis,
+        col_axis,
+    ):
+        return None
+    return _get_board_data_cell_player_set(board_data, row_axis, col_axis)
+
+
 def _player_matches_cell(
     db: Session, player_id: int, row_axis: dict, col_axis: dict,
 ) -> bool:
@@ -1102,6 +1142,9 @@ def _player_matches_cell(
     specifically in 2025/26).
     """
     with timed_phase("move.player_matches_cell"):
+        cached_player_ids = _get_cached_cell_player_set(db, row_axis, col_axis)
+        if cached_player_ids is not None:
+            return player_id in cached_player_ids
         return _player_matches_cell_uncached(db, player_id, row_axis, col_axis)
 
 
@@ -1141,6 +1184,32 @@ def _player_matches_cell_uncached(
         _player_matches_axis(db, player_id, row_axis)
         and _player_matches_axis(db, player_id, col_axis)
     )
+
+
+def _round_move_load_options():
+    return (
+        selectinload(QuizTicTacToeRound.axes),
+        selectinload(QuizTicTacToeRound.cells),
+    )
+
+
+def _round_serialization_load_options():
+    return (
+        selectinload(QuizTicTacToeRound.axes),
+        selectinload(QuizTicTacToeRound.cells).selectinload(
+            QuizTicTacToeCell.claimed_player
+        ),
+        joinedload(QuizTicTacToeRound.row_team_1),
+        joinedload(QuizTicTacToeRound.row_team_2),
+        joinedload(QuizTicTacToeRound.row_team_3),
+        joinedload(QuizTicTacToeRound.col_team_1),
+        joinedload(QuizTicTacToeRound.col_team_2),
+        joinedload(QuizTicTacToeRound.col_team_3),
+    )
+
+
+def _round_serialization_query(db: Session):
+    return db.query(QuizTicTacToeRound).options(*_round_serialization_load_options())
 
 
 def create_game(
@@ -1236,6 +1305,7 @@ def join_game(
 def get_active_round(db: Session, game_id: int) -> QuizTicTacToeRound:
     round_obj = (
         db.query(QuizTicTacToeRound)
+        .options(*_round_move_load_options())
         .filter(
             QuizTicTacToeRound.game_id == game_id,
             QuizTicTacToeRound.status == "active",
@@ -1483,12 +1553,7 @@ def create_next_round(
     def _team_id_or_none(axis):
         return int(axis["value"]) if axis["axis_type"] == "team" else None
 
-    next_round_number = (
-        db.query(func.max(QuizTicTacToeRound.round_number))
-        .filter(QuizTicTacToeRound.game_id == game.id)
-        .scalar()
-        or 0
-    ) + 1
+    next_round_number = game.round_number + 1
 
     round_obj = QuizTicTacToeRound(
         game_id=game.id,
@@ -1553,7 +1618,7 @@ def serialize_game_state(
     round_obj = None
     if game.status == "active":
         round_obj = (
-            db.query(QuizTicTacToeRound)
+            _round_serialization_query(db)
             .filter(
                 QuizTicTacToeRound.game_id == game.id,
                 QuizTicTacToeRound.status == "active",
@@ -1563,7 +1628,7 @@ def serialize_game_state(
         )
     if round_obj is None and game.round_number > 0:
         round_obj = (
-            db.query(QuizTicTacToeRound)
+            _round_serialization_query(db)
             .filter(QuizTicTacToeRound.game_id == game.id)
             .order_by(QuizTicTacToeRound.round_number.desc())
             .first()
@@ -1608,7 +1673,7 @@ def serialize_game_state(
 def serialize_completed_round(db: Session, game_id: int, round_number: int) -> dict | None:
     """Serialize a completed/drawn round with sample answers for unclaimed cells."""
     round_obj = (
-        db.query(QuizTicTacToeRound)
+        _round_serialization_query(db)
         .filter(
             QuizTicTacToeRound.game_id == game_id,
             QuizTicTacToeRound.round_number == round_number,
@@ -1702,6 +1767,101 @@ def player_matches_teams(
     return matched_team_count == len(required_team_ids)
 
 
+def _sample_answer_player_ids_for_axes(
+    db: Session,
+    row_axis: Mapping[str, object],
+    col_axis: Mapping[str, object],
+    *,
+    count: int,
+    exclude_player_id: int | None,
+) -> list[int]:
+    cached_player_ids = _get_cached_cell_player_set(
+        db,
+        row_axis,
+        col_axis,
+        require_valid_cell=True,
+    )
+    valid_player_ids = (
+        cached_player_ids
+        if cached_player_ids is not None
+        else _get_player_set_for_cell(db, dict(row_axis), dict(col_axis))
+    )
+    available_ids = sorted(
+        player_id
+        for player_id in valid_player_ids
+        if player_id != exclude_player_id
+    )
+    if not available_ids:
+        return []
+    return random.sample(available_ids, min(count, len(available_ids)))
+
+
+def _query_sample_player_names(
+    db: Session,
+    player_ids: set[int],
+) -> list[tuple[int, str]]:
+    if not player_ids:
+        return []
+    rows = (
+        db.query(Player.id, Player.first_name, Player.last_name)
+        .filter(Player.id.in_(player_ids))
+        .order_by(Player.id.asc())
+        .all()
+    )
+    return [
+        (row.id, f"{row.first_name} {row.last_name}")
+        for row in rows
+    ]
+
+
+def _sample_names_from_query_order(
+    player_names: list[tuple[int, str]],
+    sample_ids: list[int],
+) -> list[str]:
+    sample_id_set = set(sample_ids)
+    return [
+        name
+        for player_id, name in player_names
+        if player_id in sample_id_set
+    ]
+
+
+def _get_round_sample_answers(
+    db: Session,
+    *,
+    rows: list[dict],
+    columns: list[dict],
+    cells_by_pos: Mapping[tuple[int, int], QuizTicTacToeCell],
+) -> dict[tuple[int, int], list[str]]:
+    with timed_phase("completed_round.sample_answers"):
+        sample_ids_by_pos: dict[tuple[int, int], list[int]] = {}
+        all_sample_ids: set[int] = set()
+        for row_index in range(3):
+            for col_index in range(3):
+                cell = cells_by_pos[(row_index, col_index)]
+                count = 3 if cell.claimed_by_player is None else 2
+                exclude_player_id = (
+                    cell.claimed_player_id
+                    if cell.claimed_by_player is not None
+                    else None
+                )
+                sample_ids = _sample_answer_player_ids_for_axes(
+                    db,
+                    rows[row_index],
+                    columns[col_index],
+                    count=count,
+                    exclude_player_id=exclude_player_id,
+                )
+                sample_ids_by_pos[(row_index, col_index)] = sample_ids
+                all_sample_ids.update(sample_ids)
+
+        player_names = _query_sample_player_names(db, all_sample_ids)
+        return {
+            position: _sample_names_from_query_order(player_names, sample_ids)
+            for position, sample_ids in sample_ids_by_pos.items()
+        }
+
+
 def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -> dict:
     axes_by_pos = {a.position: a for a in round_obj.axes}
     use_axes_table = bool(axes_by_pos)
@@ -1757,6 +1917,15 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
     columns = [_axis_info("col", i, col_teams[i]) for i in range(3)]
 
     cells_by_pos = {(c.row_index, c.col_index): c for c in round_obj.cells}
+    sample_answers_by_pos = None
+    if round_obj.status in ("completed", "drawn") and db is not None:
+        sample_answers_by_pos = _get_round_sample_answers(
+            db,
+            rows=rows,
+            columns=columns,
+            cells_by_pos=cells_by_pos,
+        )
+
     cells = []
     for row_index in range(3):
         for col_index in range(3):
@@ -1781,16 +1950,10 @@ def _serialize_round(round_obj: QuizTicTacToeRound, db: Session | None = None) -
                 "claimed_player_image_url": claimed_player_image_url,
             }
             # Add sample answers when round is over
-            if round_obj.status in ("completed", "drawn") and db is not None:
-                if cell.claimed_by_player is None:
-                    cell_data["sample_answers"] = _get_sample_answers(
-                        db, round_obj, row_index, col_index
-                    )
-                else:
-                    cell_data["sample_answers"] = _get_sample_answers(
-                        db, round_obj, row_index, col_index,
-                        count=2, exclude_player_id=cell.claimed_player_id,
-                    )
+            if sample_answers_by_pos is not None:
+                cell_data["sample_answers"] = sample_answers_by_pos[
+                    (row_index, col_index)
+                ]
             # Backward compat: include team_code/team_name if both axes are teams
             if rows[row_index].get("team_code"):
                 cell_data["row_team_code"] = rows[row_index]["team_code"]
@@ -1963,14 +2126,17 @@ def _get_sample_answers(
     """Get up to `count` random valid player names for a cell."""
     with timed_phase("completed_round.sample_answers"):
         row_axis, col_axis = _cell_axes(round_obj, row_index, col_index)
-        valid_ids = list(_get_player_set_for_cell(db, row_axis, col_axis))
-        if exclude_player_id:
-            valid_ids = [pid for pid in valid_ids if pid != exclude_player_id]
-        if not valid_ids:
-            return []
-        sample_ids = random.sample(valid_ids, min(count, len(valid_ids)))
-        players = db.query(Player).filter(Player.id.in_(sample_ids)).all()
-        return [f"{p.first_name} {p.last_name}" for p in players]
+        sample_ids = _sample_answer_player_ids_for_axes(
+            db,
+            row_axis,
+            col_axis,
+            count=count,
+            exclude_player_id=exclude_player_id,
+        )
+        return _sample_names_from_query_order(
+            _query_sample_player_names(db, set(sample_ids)),
+            sample_ids,
+        )
 
 
 def _cell_team_ids(round_obj: QuizTicTacToeRound, row_index: int, col_index: int) -> tuple[int, int]:
