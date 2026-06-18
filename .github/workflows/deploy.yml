@@ -106,6 +106,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
         run: |
           npm ci
           npm run build

@@ -12,7 +12,7 @@ Set the publishable key so the SPA mounts `<ClerkProvider>`:
 
 ```
 # frontend/.env.development / .env.production (or the deploy environment)
-VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxx   # leave blank for a fully anonymous build
+VITE_CLERK_PUBLISHABLE_KEY=<clerk-publishable-key>   # leave blank for a fully anonymous build
 ```
 
 Backend resource-server verification (already documented in the root `README.md`):
@@ -20,7 +20,8 @@ Backend resource-server verification (already documented in the root `README.md`
 ```
 ELQ_CLERK_ISSUER=https://<your-subdomain>.clerk.accounts.dev
 ELQ_CLERK_JWKS_URL=https://<your-subdomain>.clerk.accounts.dev/.well-known/jwks.json
-ELQ_CLERK_SECRET_KEY=sk_test_xxx           # optional, for Backend API calls
+ELQ_CLERK_SECRET_KEY=<clerk-secret-key>             # optional, for Backend API calls
+ELQ_CLERK_WEBHOOK_SECRET=<clerk-webhook-secret>     # Svix signing secret for Clerk webhooks
 ELQ_CLERK_AUTHORIZED_PARTIES=https://app.example.com   # optional azp allow-list
 ```
 
@@ -57,14 +58,12 @@ sign-in (`get_or_create_user_for_claims` in `backend/app/auth/users.py`). Clerk 
 The JWT verifier (`backend/app/auth/clerk.py`) returns all of these claims, and the JIT helper
 maps `username` → `users.username`, plus email / display name / avatar.
 
-### Mirroring scope (current limitation)
+### Mirroring scope
 
-JIT mirroring runs **once, at first provision**. A later username change in Clerk does not
-update the existing local `User` row until the Clerk **webhook sync** (epic #83 / issue #86,
-not yet merged) lands. This is intentionally out of scope here and does **not** affect the
-in-game display name: every setup screen reads the **live** Clerk user client-side via
-`useClerkPrefilledName`, so the "Your name" field always reflects the current username
-regardless of what is cached in the local row.
+JIT mirroring provisions the first local `User` row. Later Clerk profile changes are mirrored by
+the Clerk webhook sync endpoint when `ELQ_CLERK_WEBHOOK_SECRET` is configured. The in-game display
+name still reads the **live** Clerk user client-side via `useClerkPrefilledName`, so the "Your
+name" field reflects the current username even before a webhook retry updates the local cache.
 
 ## 4. Profile view
 
