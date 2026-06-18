@@ -10,7 +10,14 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import Player, PlayerSeasonTeam, Season, Team
+from app.models import (
+    Game,
+    GamePlayerStats,
+    Player,
+    PlayerSeasonTeam,
+    Season,
+    Team,
+)
 from app.models.guess_the_list import GuessTheListGame, GuessTheListRound, GuessTheListSlot
 from app.schemas.realtime import RealtimeServerMessageAdapter
 from app.services import guess_the_list as guess_the_list_service
@@ -331,6 +338,295 @@ def test_synthetic_generator_dispatch_ties_and_answer_hiding(client: TestClient)
             10.0,
         ]
         assert all(slot["player_name"] for slot in completed_round["slots"])
+
+
+@pytest.fixture()
+def all_time_leaders_db():
+    engine = create_engine("sqlite:///:memory:")
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    session = TestingSessionLocal()
+    try:
+        _seed_all_time_leaders_fixture(session)
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def _seed_all_time_leaders_fixture(session):
+    home = Team(euroleague_code="ATL", name="All-Time Home")
+    away = Team(euroleague_code="ATX", name="All-Time Away")
+    session.add_all([home, away])
+    session.flush()
+
+    seasons = {
+        year: Season(year=year, name=f"{year}-{year + 1}")
+        for year in (2000, 2006, 2007, 2024, 2026)
+    }
+    session.add_all(seasons.values())
+    session.flush()
+
+    games = {}
+    for year, season in seasons.items():
+        games[year] = Game(
+            season_id=season.id,
+            euroleague_gamecode=year,
+            round=1,
+            phase="Regular Season",
+            home_team_id=home.id,
+            away_team_id=away.id,
+        )
+    session.add_all(games.values())
+    session.flush()
+
+    last_names = [
+        "Alpha",
+        "Bravo",
+        "Charlie",
+        "Delta",
+        "Echo",
+        "Foxtrot",
+        "Golf",
+        "Hotel",
+        "India",
+        "Juliet",
+        "Kilo",
+        "Lima",
+        "Mike",
+        "November",
+    ]
+    players = [
+        Player(
+            euroleague_code=f"ATL{i:03}",
+            first_name=f"Leader{i:02}",
+            last_name=last_name,
+            nationality="CountryA",
+            position="Guard",
+            height_cm=180 + i,
+        )
+        for i, last_name in enumerate(last_names, start=1)
+    ]
+    session.add_all(players)
+    session.flush()
+
+    def add_stat(
+        player_number,
+        year,
+        *,
+        points=0,
+        rebounds=0,
+        assists=0,
+        pir=0,
+    ):
+        session.add(
+            GamePlayerStats(
+                game_id=games[year].id,
+                player_id=players[player_number - 1].id,
+                team_id=home.id,
+                points=points,
+                total_rebounds=rebounds,
+                assists=assists,
+                pir=pir,
+            )
+        )
+
+    add_stat(1, 2007, points=2000, rebounds=200, assists=300, pir=None)
+    add_stat(1, 2024, points=3000, rebounds=300, assists=500, pir=5000)
+    add_stat(2, 2024, points=4500, rebounds=550, assists=900, pir=4500)
+    add_stat(3, 2024, points=4000, rebounds=600, assists=700, pir=6000)
+    add_stat(4, 2024, points=3500, rebounds=650, assists=600, pir=4000)
+    add_stat(5, 2024, points=3000, rebounds=700, assists=500, pir=3500)
+    add_stat(6, 2024, points=2500, rebounds=450, assists=400, pir=3000)
+    add_stat(7, 2024, points=2000, rebounds=400, assists=350, pir=2500)
+    add_stat(8, 2024, points=1500, rebounds=350, assists=300, pir=2000)
+    add_stat(9, 2024, points=1000, rebounds=300, assists=250, pir=1500)
+    add_stat(10, 2000, points=900, rebounds=250, assists=200, pir=1000)
+    add_stat(11, 2006, points=900, rebounds=250, assists=150, pir=900)
+    add_stat(12, 2024, points=800, rebounds=200, assists=100, pir=800)
+    add_stat(13, 2026, points=9999, rebounds=9999, assists=9999, pir=9999)
+    add_stat(14, 2024, points=1, rebounds=1, assists=1, pir=None)
+    session.commit()
+
+
+def _new_all_time_game():
+    now = datetime.utcnow()
+    return GuessTheListGame(
+        mode="single_player",
+        status="active",
+        join_code=None,
+        is_race=False,
+        is_public=False,
+        preset=None,
+        category_type=guess_the_list_service.CATEGORY_ALL_TIME,
+        target_wins=2,
+        turn_seconds=None,
+        turn_started_at=None,
+        race_round_seconds=None,
+        race_reveal_seconds=None,
+        player1_name="Player One",
+        player2_name=None,
+        player1_guest_id=None,
+        player2_guest_id=None,
+        player1_score=0,
+        player2_score=0,
+        current_player=1,
+        round_number=0,
+        winner_player=None,
+        season_range_start=2000,
+        season_range_end=2025,
+        pending_end_from=None,
+        pending_end_to=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def test_all_time_leaders_generator_points_totals_ordering_and_boundary_ties(
+    all_time_leaders_db,
+):
+    spec = guess_the_list_service.AllTimeLeadersGenerator(metric="points").build_round(
+        all_time_leaders_db,
+        _new_all_time_game(),
+        1,
+    )
+
+    assert spec.category_type == guess_the_list_service.CATEGORY_ALL_TIME
+    assert spec.metric == "points"
+    assert spec.scope_label == "All-time points leaders (2000-2025)"
+    assert [
+        (slot.player_name, slot.rank, slot.stat_value, slot.stat_value_label)
+        for slot in spec.slots
+    ] == [
+        ("Leader01 Alpha", 1, 5000.0, "5,000 pts"),
+        ("Leader02 Bravo", 2, 4500.0, "4,500 pts"),
+        ("Leader03 Charlie", 3, 4000.0, "4,000 pts"),
+        ("Leader04 Delta", 4, 3500.0, "3,500 pts"),
+        ("Leader05 Echo", 5, 3000.0, "3,000 pts"),
+        ("Leader06 Foxtrot", 6, 2500.0, "2,500 pts"),
+        ("Leader07 Golf", 7, 2000.0, "2,000 pts"),
+        ("Leader08 Hotel", 8, 1500.0, "1,500 pts"),
+        ("Leader09 India", 9, 1000.0, "1,000 pts"),
+        ("Leader10 Juliet", 10, 900.0, "900 pts"),
+        ("Leader11 Kilo", 10, 900.0, "900 pts"),
+    ]
+    assert "Leader13 Mike" not in [slot.player_name for slot in spec.slots]
+
+
+@pytest.mark.parametrize(
+    ("metric", "expected_name", "expected_value", "expected_label"),
+    [
+        ("rebounds", "Leader05 Echo", 700.0, "700 reb"),
+        ("assists", "Leader02 Bravo", 900.0, "900 ast"),
+        ("pir", "Leader03 Charlie", 6000.0, "6,000 PIR"),
+    ],
+)
+def test_all_time_leaders_generator_uses_metric_columns(
+    all_time_leaders_db,
+    metric,
+    expected_name,
+    expected_value,
+    expected_label,
+):
+    spec = guess_the_list_service.AllTimeLeadersGenerator(metric=metric).build_round(
+        all_time_leaders_db,
+        _new_all_time_game(),
+        1,
+    )
+
+    leader = spec.slots[0]
+    assert spec.metric == metric
+    assert leader.player_name == expected_name
+    assert leader.stat_value == expected_value
+    assert leader.stat_value_label == expected_label
+
+
+def test_all_time_leaders_round_serialization_hides_then_reveals_ranked_slots(
+    all_time_leaders_db,
+):
+    game = _new_all_time_game()
+    all_time_leaders_db.add(game)
+    all_time_leaders_db.flush()
+
+    round_obj = guess_the_list_service._create_next_round(
+        all_time_leaders_db,
+        game,
+        registry={
+            guess_the_list_service.CATEGORY_ALL_TIME: (
+                guess_the_list_service.AllTimeLeadersGenerator(metric="points")
+            )
+        },
+    )
+    all_time_leaders_db.flush()
+
+    active_state = guess_the_list_service.serialize_game_state(
+        all_time_leaders_db,
+        game,
+    )
+    active_round = active_state["round"]
+    assert active_state["category_type"] == guess_the_list_service.CATEGORY_ALL_TIME
+    assert active_round["category_type"] == guess_the_list_service.CATEGORY_ALL_TIME
+    assert active_round["metric"] == "points"
+    assert active_round["total_slots"] == 11
+    assert all(
+        slot["player_name"] is None
+        and slot["rank"] is None
+        and slot["stat_value"] is None
+        and slot["stat_value_label"] is None
+        for slot in active_round["slots"]
+    )
+
+    round_obj.status = "completed"
+    round_obj.completed_at = datetime.utcnow()
+    all_time_leaders_db.flush()
+
+    completed_round = guess_the_list_service.serialize_completed_round(
+        all_time_leaders_db,
+        game.id,
+        round_obj.round_number,
+    )
+    assert completed_round is not None
+    assert [slot["rank"] for slot in completed_round["slots"]] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        10,
+    ]
+    assert completed_round["slots"][0]["player_name"] == "Leader01 Alpha"
+    assert completed_round["slots"][0]["stat_value"] == 5000.0
+    assert completed_round["slots"][0]["stat_value_label"] == "5,000 pts"
+
+
+def test_all_time_leaders_category_is_registered_for_game_creation(
+    all_time_leaders_db,
+    monkeypatch,
+):
+    monkeypatch.setattr(guess_the_list_service.random, "choice", lambda _metrics: "points")
+
+    game = guess_the_list_service.create_game(
+        all_time_leaders_db,
+        mode="single_player",
+        target_wins=2,
+        timer_mode="40s",
+        category_type=guess_the_list_service.CATEGORY_ALL_TIME,
+        player1_name="Player One",
+        season_range_start=2000,
+        season_range_end=2025,
+    )
+
+    state = guess_the_list_service.serialize_game_state(all_time_leaders_db, game)
+    assert state["category_type"] == guess_the_list_service.CATEGORY_ALL_TIME
+    assert state["round"]["category_type"] == guess_the_list_service.CATEGORY_ALL_TIME
+    assert state["round"]["metric"] == "points"
+    assert state["round"]["scope_label"] == "All-time points leaders (2000-2025)"
 
 
 def test_legacy_roster_guess_http_routes_alias_guess_the_list(client: TestClient):
