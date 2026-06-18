@@ -27,7 +27,7 @@ Then open `http://localhost:5173` to play.
 ## Games
 
 - **TicTacToe** — Claim cells on a 3×3 board by naming players who match both row and column team criteria. Solo, local 1v1, and online modes. Opening `/tictactoe` lands on online **Quick Match** — a near-one-click, lichess-style pool grid — with Solo, Local 1v1, and Play-a-Friend one tap away.
-- **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo and multiplayer.
+- **Roster Guess** — Guess the full roster of a EuroLeague team from a specific season. Solo, local/online Classic, plus online-only Race with public Quick Match and private Play-a-Friend.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice and 2-player race modes.
 - **Photo Quiz** — Guess the player from a headshot. Solo practice, 2-player online friend races, and public Quick Match races, drawn from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
@@ -175,6 +175,13 @@ Stale actions are rejected with `round_stale` or a conflict so the frontend can 
 without applying old input to the current round. Career Quiz and Photo Quiz multiplayer use WebSocket
 push as their primary sync path, while plain `GET /quiz/{career|photo}/games/{id}` remains the
 refresh and fallback-sync Interface.
+Roster Guess Race also requires the client-visible `round_number` on claims and uses
+`latest_completed_round.next_round_starts_at` for its 12-second full-roster reveal lock
+between simultaneous 120-second claim rounds. Race friend games use
+`POST /quiz/roster-guess/race/games`, `/race/games/join`,
+`POST /quiz/roster-guess/games/{id}/guess`, `GET /quiz/roster-guess/games/{id}`,
+and `WS /quiz/roster-guess/ws/{id}`; public quick-match games hide join codes and
+can only be joined through the matchmaking path.
 
 The frontend mirrors that Interface with `frontend/src/realtimeSchema.js` and
 `frontend/src/useOnlineGameRealtime.js`, so reconnect, background state sync,
@@ -183,7 +190,11 @@ TicTacToe Quick Match setup screens can poll
 `GET /quiz/tictactoe/quick-match/pools` every 5 seconds for per-preset
 `searching` and `in_progress` presence counts derived from public pool rows.
 Photo Quiz exposes the same presence shape at `GET /quiz/photo/quick-match/pools`,
-counting only public Photo Quiz searches and active public matches.
+counting only public Photo Quiz searches and active public matches. Roster Guess Race
+does the same under `GET /quiz/roster-guess/quick-match/pools`; public Race entries
+are created with `POST /quiz/roster-guess/quick-match`, cancelled with
+`POST /quiz/roster-guess/quick-match/cancel`, and use presets
+`full|modern|nostalgia|recent` × `quick|standard|long`.
 
 Mutating TicTacToe, Roster Guess, Career Quiz, and Photo Quiz HTTP endpoints now use the same realtime
 message envelopes as WebSocket broadcasts: successful actions return
@@ -272,6 +283,21 @@ presets array plus a pools hook built from `useQuickMatchPoolsFrom(enabled, fetc
 (3) wiring its setup screen to `QuickMatchPanel` (one-click) and its board to
 `QuickMatchSearchingLobby`; and (4) a `HomeQuickMatchCta` on its home card. No new
 shared-component code is required.
+
+### Roster Guess Race Quick Match
+
+Roster Guess keeps Solo, Local 1v1, and Online as its top-level setup choices. Inside
+Online, players choose **Classic** (the existing turn-based Create/Join flow) or **Race**.
+Race is online-only: both players see the same team-season roster and claim players
+simultaneously, with each roster member awarded to the first player to name them. The
+round ends when the 120-second timer expires or the full roster is claimed; higher claim
+count wins the round, ties award no point, and non-terminal rounds reveal the full roster
+for 12 seconds before the next one unlocks.
+
+Race reuses the shared Quick Match components: `/roster?quick=1` opens Online → Race →
+Quick Match, the home card has a Quick Match CTA, and the board uses
+`QuickMatchSearchingLobby` for public pool searches. Race also supports private
+Play-a-Friend Create/Join inside the Race tab; Classic online remains unchanged.
 
 ### Guest Identity
 

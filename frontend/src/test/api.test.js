@@ -11,7 +11,12 @@ import {
   autocompletePlayer,
   connectTicTacToeRealtime,
   createRosterGame,
+  createRosterRaceGame,
   joinRosterGame,
+  joinRosterRaceGame,
+  quickMatchRosterRace,
+  cancelRosterRaceQuickMatch,
+  getRosterRaceQuickMatchPools,
   submitRosterGuess,
   autocompleteRosterPlayer,
   createHigherLowerGame,
@@ -326,6 +331,115 @@ describe("Roster Guess API", () => {
       })
     );
     expect(result.result).toBe("correct");
+  });
+
+  it("submitRosterGuess includes round_number when provided for Race claims", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 }, "correct")));
+
+    await submitRosterGuess(10, 456, 3);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/games/10/guess",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ player_id: 456, round_number: 3 }),
+      })
+    );
+  });
+
+  it("createRosterRaceGame sends Race settings and guest_id", async () => {
+    const payload = {
+      target_wins: 2,
+      player1_name: "Ace",
+      season_range_start: 2018,
+      season_range_end: 2025,
+    };
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 12 })));
+
+    const result = await createRosterRaceGame(payload);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/race/games",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ...payload, guest_id: "test-guest-id" }),
+      })
+    );
+    expect(result.state.id).toBe(12);
+  });
+
+  it("joinRosterRaceGame sends join_code, player_name and guest_id", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 13 })));
+
+    await joinRosterRaceGame("RACE42", "Runner");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/race/games/join",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          join_code: "RACE42",
+          player_name: "Runner",
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+  });
+
+  it("quickMatchRosterRace posts preset, name and guest_id", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(stateEnvelope({ id: 14, status: "waiting_for_opponent" }))
+    );
+
+    const result = await quickMatchRosterRace({ preset: "modern-standard", player_name: "Ace" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/quick-match",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          preset: "modern-standard",
+          player_name: "Ace",
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+    expect(result.state.id).toBe(14);
+  });
+
+  it("cancelRosterRaceQuickMatch posts game_id, preset and guest_id", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 14, status: "cancelled" })));
+
+    await cancelRosterRaceQuickMatch({ game_id: 14, preset: "modern-standard" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/quick-match/cancel",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          game_id: 14,
+          preset: "modern-standard",
+          guest_id: "test-guest-id",
+        }),
+      })
+    );
+  });
+
+  it("getRosterRaceQuickMatchPools fetches public Race pool counts", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse({
+        pools: { "modern-standard": { searching: 1, in_progress: 2 } },
+        poll_interval_seconds: 5,
+      })
+    );
+
+    const result = await getRosterRaceQuickMatchPools();
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/roster-guess/quick-match/pools",
+      expect.objectContaining({ method: "GET" })
+    );
+    expect(result.pools["modern-standard"].in_progress).toBe(2);
   });
 
   it("autocompleteRosterPlayer sends query", async () => {

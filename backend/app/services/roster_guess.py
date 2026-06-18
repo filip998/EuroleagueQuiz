@@ -1,7 +1,8 @@
 import random
 import string
-from datetime import datetime, timedelta
-from typing import Optional
+import threading
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from app.game_actions import (
 )
 from app.models import Player, PlayerSeasonTeam, Season, Team, TeamSeason
 from app.models.roster_guess import RosterGuessGame, RosterGuessRound, RosterGuessSlot
+from app.services.race_rounds import normalize_utc, parse_utc_datetime, reveal_window_starts_at
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -22,6 +24,9 @@ SUPPORTED_MODES = {"single_player", "local_two_player", "online_friend"}
 LOCAL_PLAY_MODES = {"single_player", "local_two_player"}
 TARGET_WINS_OPTIONS = {2, 3, 5}
 TIMER_MODE_TO_SECONDS = {"15s": 15, "40s": 40, "unlimited": None}
+RACE_TARGET_WINS_OPTIONS = {1, 2, 3}
+RACE_ROUND_SECONDS = 120
+RACE_REVEAL_SECONDS = 12
 
 MIN_ROSTER_SIZE = 5
 MAX_ROSTER_RETRIES = 10
@@ -37,6 +42,8 @@ RosterGuessNotFoundError = NotFoundGameActionError
 RosterGuessConflictError = ConflictGameActionError
 
 GUEST_ID_MAX_LENGTH = 64
+_race_locks_guard = threading.Lock()
+_race_locks: dict[int, threading.Lock] = {}
 
 
 def _clean_guest_id(guest_id: Optional[str]) -> Optional[str]:
@@ -59,6 +66,25 @@ def _other_player(p: int) -> int:
 def _ensure_game_playable(game: RosterGuessGame) -> None:
     if game.status != "active":
         raise RosterGuessConflictError("Game is not active")
+
+
+def _race_lock(game_id: int) -> threading.Lock:
+    with _race_locks_guard:
+        lock = _race_locks.get(game_id)
+        if lock is None:
+            lock = threading.Lock()
+            _race_locks[game_id] = lock
+        return lock
+
+
+def _utc_isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return normalize_utc(value).isoformat()
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _generate_join_code(db: Session) -> str:
@@ -109,8 +135,13 @@ def create_game(
         mode=mode,
         status="waiting_for_opponent" if is_online else "active",
         join_code=join_code,
+        is_race=False,
+        is_public=False,
+        preset=None,
         target_wins=target_wins,
         turn_seconds=TIMER_MODE_TO_SECONDS[timer_mode],
+        race_round_seconds=None,
+        race_reveal_seconds=None,
         player1_name=player1_name,
         player2_name=player2_name,
         player1_guest_id=_clean_guest_id(guest_id),
@@ -148,6 +179,8 @@ def join_game(
     join_code: str,
     player2_name: Optional[str] = None,
     guest_id: Optional[str] = None,
+    *,
+    allow_public: bool = False,
 ) -> RosterGuessGame:
     game = (
         db.query(RosterGuessGame)
@@ -156,6 +189,10 @@ def join_game(
     )
     if not game:
         raise RosterGuessNotFoundError("Invalid join code")
+    if game.is_race:
+        raise RosterGuessConflictError("Race games must be joined through Race endpoints")
+    if game.is_public and not allow_public:
+        raise RosterGuessConflictError("Public games must be joined through quick match")
     if game.status != "waiting_for_opponent":
         raise RosterGuessConflictError("Game is no longer accepting players")
 
@@ -171,12 +208,125 @@ def join_game(
     return game
 
 
+def create_race_game(
+    db: Session,
+    *,
+    target_wins: int,
+    player1_name: Optional[str] = None,
+    season_range_start: int,
+    season_range_end: int,
+    guest_id: Optional[str] = None,
+    is_public: bool = False,
+    preset: str | None = None,
+    race_round_seconds: int = RACE_ROUND_SECONDS,
+    race_reveal_seconds: int = RACE_REVEAL_SECONDS,
+) -> RosterGuessGame:
+    if target_wins not in RACE_TARGET_WINS_OPTIONS:
+        raise RosterGuessError("race target_wins must be one of: 1, 2, 3")
+    if season_range_start > season_range_end:
+        raise RosterGuessError("season_range_start must be <= season_range_end")
+    if race_round_seconds <= 0:
+        raise RosterGuessError("race_round_seconds must be positive")
+    if race_reveal_seconds < 0:
+        raise RosterGuessError("race_reveal_seconds must be non-negative")
+
+    game = RosterGuessGame(
+        mode="online_friend",
+        status="waiting_for_opponent",
+        join_code=_generate_join_code(db),
+        is_race=True,
+        is_public=is_public,
+        preset=preset,
+        target_wins=target_wins,
+        turn_seconds=None,
+        race_round_seconds=race_round_seconds,
+        race_reveal_seconds=race_reveal_seconds,
+        player1_name=player1_name or "Player 1",
+        player2_name=None,
+        player1_guest_id=_clean_guest_id(guest_id),
+        current_player=0,
+        player1_score=0,
+        player2_score=0,
+        round_number=0,
+        season_range_start=season_range_start,
+        season_range_end=season_range_end,
+        pending_end_from=None,
+        pending_end_to=None,
+        winner_player=None,
+        turn_started_at=None,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(game)
+    db.flush()
+    return game
+
+
+def join_race_game(
+    db: Session,
+    join_code: str,
+    *,
+    player_name: Optional[str] = None,
+    guest_id: Optional[str] = None,
+    allow_public: bool = False,
+) -> RosterGuessGame:
+    game = (
+        db.query(RosterGuessGame)
+        .filter(RosterGuessGame.join_code == join_code.upper())
+        .first()
+    )
+    if not game:
+        raise RosterGuessNotFoundError("Invalid join code")
+    if not game.is_race:
+        raise RosterGuessConflictError("Game is not a Race game")
+    if game.is_public and not allow_public:
+        raise RosterGuessConflictError("Public games must be joined through quick match")
+    if game.status != "waiting_for_opponent":
+        raise RosterGuessConflictError("Game is no longer accepting players")
+
+    cleaned_guest_id = _clean_guest_id(guest_id)
+    if cleaned_guest_id is not None and game.player1_guest_id == cleaned_guest_id:
+        raise RosterGuessConflictError("Cannot join your own race")
+
+    joined_at = datetime.utcnow()
+    updated = (
+        db.query(RosterGuessGame)
+        .filter(RosterGuessGame.id == game.id)
+        .filter(RosterGuessGame.is_race.is_(True))
+        .filter(RosterGuessGame.status == "waiting_for_opponent")
+        .update(
+            {
+                "player2_name": player_name or "Player 2",
+                "player2_guest_id": cleaned_guest_id or game.player2_guest_id,
+                "status": "active",
+                "updated_at": joined_at,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated != 1:
+        raise RosterGuessConflictError("Game is no longer accepting players")
+
+    game.player2_name = player_name or "Player 2"
+    game.player2_guest_id = cleaned_guest_id or game.player2_guest_id
+    game.status = "active"
+    game.updated_at = joined_at
+    _create_next_round(db, game)
+    db.flush()
+    return game
+
+
 # ---------------------------------------------------------------------------
 # Round creation
 # ---------------------------------------------------------------------------
 
 
-def _create_next_round(db: Session, game: RosterGuessGame) -> RosterGuessRound:
+def _create_next_round(
+    db: Session,
+    game: RosterGuessGame,
+    *,
+    starts_at: datetime | None = None,
+) -> RosterGuessRound:
     """Pick a random team+season, build the roster, and create the round."""
 
     # Gather all eligible (team_id, season_id) pairs in the configured range
@@ -260,6 +410,7 @@ def _create_next_round(db: Session, game: RosterGuessGame) -> RosterGuessRound:
         or 0
     ) + 1
 
+    created_at = starts_at or datetime.utcnow()
     round_obj = RosterGuessRound(
         game_id=game.id,
         round_number=next_round_number,
@@ -272,7 +423,8 @@ def _create_next_round(db: Session, game: RosterGuessGame) -> RosterGuessRound:
         player1_correct=0,
         player2_correct=0,
         winner_player=None,
-        created_at=datetime.utcnow(),
+        created_at=created_at,
+        completed_at=None,
     )
     db.add(round_obj)
     db.flush()
@@ -297,11 +449,11 @@ def _create_next_round(db: Session, game: RosterGuessGame) -> RosterGuessRound:
 
     # Update game state
     game.round_number = next_round_number
-    game.current_player = 1
+    game.current_player = 0 if game.is_race else 1
     game.pending_end_from = None
     game.pending_end_to = None
     now = datetime.utcnow()
-    game.turn_started_at = now
+    game.turn_started_at = None if game.is_race else now
     game.updated_at = now
     db.flush()
     return round_obj
@@ -399,6 +551,140 @@ def submit_guess(
     return "correct" if is_correct else "incorrect"
 
 
+def submit_race_claim(
+    db: Session,
+    *,
+    game: RosterGuessGame,
+    player_id: int,
+    acting_player: int,
+    round_number: int,
+) -> str:
+    if acting_player not in (1, 2):
+        raise RosterGuessConflictError("Online game actions require realtime player identity")
+    if not game.is_race:
+        raise RosterGuessConflictError("Game is not a Race game")
+
+    with _race_lock(game.id):
+        _ensure_game_playable(game)
+        _raise_if_race_round_stale(game, round_number)
+        _raise_if_race_round_locked(game)
+        round_obj = get_active_round(db, game.id)
+        _assert_active_race_round(db, game, round_obj, round_number)
+
+        now = datetime.utcnow()
+        updated = (
+            db.query(RosterGuessSlot)
+            .filter(RosterGuessSlot.round_id == round_obj.id)
+            .filter(RosterGuessSlot.player_id == player_id)
+            .filter(RosterGuessSlot.guessed_by_player.is_(None))
+            .filter(
+                RosterGuessSlot.round.has(
+                    (RosterGuessRound.status == "active")
+                    & (RosterGuessRound.game_id == game.id)
+                    & (
+                        RosterGuessRound.game.has(
+                            (RosterGuessGame.status == "active")
+                            & (RosterGuessGame.is_race.is_(True))
+                            & (RosterGuessGame.round_number == round_number)
+                        )
+                    )
+                )
+            )
+            .update(
+                {
+                    "guessed_by_player": acting_player,
+                    "guessed_at": now,
+                },
+                synchronize_session=False,
+            )
+        )
+
+        if updated != 1:
+            _assert_active_race_round(db, game, round_obj, round_number)
+            return "incorrect"
+
+        _sync_race_claim_counts(db, round_obj)
+        if _race_unguessed_count(db, round_obj) == 0:
+            result = _finish_race_round(
+                db,
+                game,
+                round_obj,
+                expected_round=round_number,
+                completed_at=now,
+            )
+            if result is not None:
+                return result
+
+        game.updated_at = now
+        db.flush()
+        return "correct"
+
+
+def _raise_if_race_round_stale(game: RosterGuessGame, round_number: int) -> None:
+    if round_number != game.round_number:
+        raise RosterGuessConflictError("round_stale")
+
+
+def _raise_if_race_round_locked(game: RosterGuessGame) -> None:
+    if _race_reveal_window_starts_at(game) is not None:
+        raise RosterGuessConflictError("round_locked")
+
+
+def _assert_active_race_round(
+    db: Session,
+    game: RosterGuessGame,
+    round_obj: RosterGuessRound,
+    round_number: int,
+) -> None:
+    exists = (
+        db.query(RosterGuessRound.id)
+        .join(RosterGuessGame, RosterGuessGame.id == RosterGuessRound.game_id)
+        .filter(RosterGuessRound.id == round_obj.id)
+        .filter(RosterGuessRound.status == "active")
+        .filter(RosterGuessGame.id == game.id)
+        .filter(RosterGuessGame.is_race.is_(True))
+        .filter(RosterGuessGame.status == "active")
+        .filter(RosterGuessGame.round_number == round_number)
+        .first()
+    )
+    if exists is None:
+        raise RosterGuessConflictError("round_stale")
+
+
+def _sync_race_claim_counts(db: Session, round_obj: RosterGuessRound) -> None:
+    player1_count = _race_claim_count(db, round_obj, 1)
+    player2_count = _race_claim_count(db, round_obj, 2)
+    db.query(RosterGuessRound).filter(RosterGuessRound.id == round_obj.id).update(
+        {
+            "player1_correct": player1_count,
+            "player2_correct": player2_count,
+        },
+        synchronize_session=False,
+    )
+    round_obj.player1_correct = player1_count
+    round_obj.player2_correct = player2_count
+
+
+def _race_claim_count(db: Session, round_obj: RosterGuessRound, player: int) -> int:
+    return int(
+        db.query(func.count(RosterGuessSlot.id))
+        .filter(RosterGuessSlot.round_id == round_obj.id)
+        .filter(RosterGuessSlot.guessed_by_player == player)
+        .scalar()
+        or 0
+    )
+
+
+def _race_unguessed_count(db: Session, round_obj: RosterGuessRound) -> int:
+    return int(
+        db.query(func.count(RosterGuessSlot.id))
+        .filter(RosterGuessSlot.round_id == round_obj.id)
+        .filter(RosterGuessSlot.guessed_by_player.is_(None))
+        .scalar()
+        or 0
+    )
+
+
 def _finish_round(
     db: Session,
     game: RosterGuessGame,
@@ -443,6 +729,69 @@ def _finish_round(
     return "round_won" if round_obj.winner_player is not None else "round_complete"
 
 
+def _finish_race_round(
+    db: Session,
+    game: RosterGuessGame,
+    round_obj: RosterGuessRound,
+    *,
+    expected_round: int,
+    completed_at: datetime | None = None,
+) -> str | None:
+    if not game.is_race:
+        raise RosterGuessConflictError("Game is not a Race game")
+    if game.status != "active" or game.round_number != expected_round:
+        return None
+
+    completed_at = completed_at or datetime.utcnow()
+    updated = (
+        db.query(RosterGuessRound)
+        .filter(RosterGuessRound.id == round_obj.id)
+        .filter(RosterGuessRound.status == "active")
+        .update(
+            {
+                "status": "completed",
+                "completed_at": completed_at,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated != 1:
+        return None
+
+    round_obj.status = "completed"
+    round_obj.completed_at = completed_at
+    _sync_race_claim_counts(db, round_obj)
+
+    if round_obj.player1_correct > round_obj.player2_correct:
+        round_obj.winner_player = 1
+    elif round_obj.player2_correct > round_obj.player1_correct:
+        round_obj.winner_player = 2
+    else:
+        round_obj.winner_player = None
+
+    if round_obj.winner_player == 1:
+        game.player1_score += 1
+    elif round_obj.winner_player == 2:
+        game.player2_score += 1
+
+    game.pending_end_from = None
+    game.pending_end_to = None
+    game.updated_at = completed_at
+
+    if max(game.player1_score, game.player2_score) >= game.target_wins:
+        game.status = "finished"
+        game.winner_player = 1 if game.player1_score >= game.target_wins else 2
+        db.flush()
+        return "match_won"
+
+    next_round_starts_at = completed_at + timedelta(
+        seconds=game.race_reveal_seconds or RACE_REVEAL_SECONDS
+    )
+    _create_next_round(db, game, starts_at=next_round_starts_at)
+    db.flush()
+    return "round_won" if round_obj.winner_player is not None else "round_complete"
+
+
 # ---------------------------------------------------------------------------
 # End-of-round offer
 # ---------------------------------------------------------------------------
@@ -455,6 +804,8 @@ def offer_end(
     acting_player: Optional[int] = None,
 ) -> None:
     _ensure_game_playable(game)
+    if game.is_race:
+        raise RosterGuessConflictError("End offers are not available in Race mode")
     if game.pending_end_from is not None:
         raise RosterGuessConflictError("An end offer is already pending")
 
@@ -483,6 +834,8 @@ def respond_end(
     acting_player: Optional[int] = None,
 ) -> str:
     _ensure_game_playable(game)
+    if game.is_race:
+        raise RosterGuessConflictError("End offers are not available in Race mode")
     if game.pending_end_from is None or game.pending_end_to is None:
         raise RosterGuessConflictError("No pending end offer")
 
@@ -516,6 +869,72 @@ def respond_end(
 # ---------------------------------------------------------------------------
 
 
+def race_round_timer_delay_seconds(
+    game: RosterGuessGame,
+    *,
+    now: datetime | None = None,
+) -> float | None:
+    deadline = _race_round_deadline_at(game)
+    if deadline is None:
+        return None
+    now_utc = normalize_utc(now or _utc_now())
+    return max((deadline - now_utc).total_seconds(), 0.001)
+
+
+def race_round_timer_delay_seconds_from_state(
+    game_state: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> float | None:
+    if (
+        game_state.get("mode") != "online_friend"
+        or game_state.get("status") != "active"
+        or not game_state.get("is_race")
+    ):
+        return None
+    current_round = game_state.get("round")
+    if not isinstance(current_round, dict) or current_round.get("status") != "active":
+        return None
+    deadline = parse_utc_datetime(game_state.get("race_round_deadline_utc"))
+    if deadline is None:
+        return None
+    now_utc = normalize_utc(now or _utc_now())
+    return max((deadline - now_utc).total_seconds(), 0.001)
+
+
+def handle_race_round_time_expired(
+    db: Session,
+    game: RosterGuessGame,
+    *,
+    expected_round: int,
+) -> bool:
+    if not game.is_race:
+        return False
+
+    with _race_lock(game.id):
+        if game.status != "active" or game.round_number != expected_round:
+            return False
+        if _race_reveal_window_starts_at(game) is not None:
+            return False
+
+        deadline = _race_round_deadline_at(game)
+        if deadline is None or normalize_utc(_utc_now()) < deadline:
+            return False
+
+        try:
+            round_obj = get_active_round(db, game.id)
+        except RosterGuessConflictError:
+            return False
+        result = _finish_race_round(
+            db,
+            game,
+            round_obj,
+            expected_round=expected_round,
+            completed_at=datetime.utcnow(),
+        )
+        return result is not None
+
+
 def handle_time_expired(
     db: Session,
     game: RosterGuessGame,
@@ -542,6 +961,75 @@ def handle_time_expired(
     db.flush()
 
 
+def _race_round_deadline_at(game: RosterGuessGame) -> datetime | None:
+    if not game.is_race or game.status != "active":
+        return None
+    try:
+        round_obj = _current_game_round(game)
+    except RosterGuessConflictError:
+        return None
+    if round_obj.status != "active":
+        return None
+    starts_at = _race_round_starts_at(game, round_obj)
+    if starts_at is None:
+        return None
+    return starts_at + timedelta(seconds=game.race_round_seconds or RACE_ROUND_SECONDS)
+
+
+def _race_round_starts_at(
+    game: RosterGuessGame,
+    round_obj: RosterGuessRound,
+) -> datetime | None:
+    previous_round = _previous_completed_race_round_for_current(game)
+    if previous_round is not None and previous_round.completed_at is not None:
+        return normalize_utc(previous_round.completed_at) + timedelta(
+            seconds=game.race_reveal_seconds or RACE_REVEAL_SECONDS
+        )
+    return normalize_utc(round_obj.created_at)
+
+
+def _race_reveal_window_starts_at(
+    game: RosterGuessGame,
+    *,
+    now: datetime | None = None,
+) -> datetime | None:
+    if not game.is_race or game.status != "active":
+        return None
+    try:
+        current_round = _current_game_round(game)
+    except RosterGuessConflictError:
+        return None
+    if current_round.status != "active":
+        return None
+    previous_round = _previous_completed_race_round_for_current(game)
+    if previous_round is None:
+        return None
+    return reveal_window_starts_at(
+        previous_round.completed_at,
+        reveal_seconds=game.race_reveal_seconds or RACE_REVEAL_SECONDS,
+        now=now,
+    )
+
+
+def _previous_completed_race_round_for_current(
+    game: RosterGuessGame,
+) -> RosterGuessRound | None:
+    previous_round_number = game.round_number - 1
+    if previous_round_number < 1:
+        return None
+    for round_obj in game.rounds:
+        if round_obj.round_number == previous_round_number and round_obj.status == "completed":
+            return round_obj
+    return None
+
+
+def _current_game_round(game: RosterGuessGame) -> RosterGuessRound:
+    for round_obj in game.rounds:
+        if round_obj.round_number == game.round_number:
+            return round_obj
+    raise RosterGuessConflictError("Current round not found")
+
+
 # ---------------------------------------------------------------------------
 # Give up (single player)
 # ---------------------------------------------------------------------------
@@ -552,6 +1040,8 @@ def give_up(db: Session, game: RosterGuessGame) -> int:
     and creates the next round (like tic-tac-toe). Returns the given-up
     round number so the caller can serialize it as ``completed_round``."""
     _ensure_game_playable(game)
+    if game.is_race:
+        raise RosterGuessConflictError("Give up is not available in Race mode")
     if game.mode != "single_player":
         raise RosterGuessConflictError("Give up is only available in single player mode")
 
@@ -599,14 +1089,23 @@ def serialize_game_state(db: Session, game: RosterGuessGame) -> dict:
             game.turn_started_at + timedelta(seconds=game.turn_seconds)
         ).isoformat() + "Z"
 
+    latest_completed_round = _latest_completed_round_payload(db, game)
+    race_round_deadline = _utc_isoformat(_race_round_deadline_at(game))
+
     return {
         "id": game.id,
         "mode": game.mode,
         "status": game.status,
-        "join_code": game.join_code,
+        "join_code": None if game.is_public else game.join_code,
+        "is_race": game.is_race,
+        "is_public": game.is_public,
+        "preset": game.preset,
         "target_wins": game.target_wins,
         "turn_seconds": game.turn_seconds,
         "turn_deadline_utc": turn_deadline,
+        "race_round_seconds": game.race_round_seconds,
+        "race_reveal_seconds": game.race_reveal_seconds,
+        "race_round_deadline_utc": race_round_deadline,
         "player1_name": game.player1_name or "Player 1",
         "player2_name": game.player2_name or "Player 2",
         "player1_score": game.player1_score,
@@ -623,6 +1122,7 @@ def serialize_game_state(db: Session, game: RosterGuessGame) -> dict:
         if game.pending_end_from is not None
         else None,
         "round": round_payload,
+        "latest_completed_round": latest_completed_round,
     }
 
 
@@ -632,11 +1132,14 @@ def _serialize_round(round_obj: RosterGuessRound) -> dict:
     round_over = round_obj.status in ("completed", "given_up")
 
     return {
+        "round_number": round_obj.round_number,
         "team_code": round_obj.team_code,
         "team_name": round_obj.team_name,
         "season_year": round_obj.season_year,
         "player1_correct": round_obj.player1_correct,
         "player2_correct": round_obj.player2_correct,
+        "winner_player": round_obj.winner_player,
+        "completed_at": _utc_isoformat(round_obj.completed_at),
         "total_slots": len(slots),
         "guessed_count": guessed_count,
         "status": round_obj.status,
@@ -645,6 +1148,33 @@ def _serialize_round(round_obj: RosterGuessRound) -> dict:
             for slot in slots
         ],
     }
+
+
+def _latest_completed_round_payload(
+    db: Session,
+    game: RosterGuessGame,
+) -> dict[str, Any] | None:
+    if not game.is_race:
+        return None
+    round_obj = (
+        db.query(RosterGuessRound)
+        .filter(RosterGuessRound.game_id == game.id)
+        .filter(RosterGuessRound.status == "completed")
+        .order_by(RosterGuessRound.round_number.desc())
+        .first()
+    )
+    if round_obj is None:
+        return None
+    payload = _serialize_round(round_obj)
+    next_round_starts_at = _race_reveal_window_starts_at(game)
+    if (
+        next_round_starts_at is not None
+        and round_obj.round_number == game.round_number - 1
+    ):
+        payload["next_round_starts_at"] = _utc_isoformat(next_round_starts_at)
+    else:
+        payload["next_round_starts_at"] = None
+    return payload
 
 
 # Reuse the TicTacToe nationality mapping for flag images
@@ -660,6 +1190,7 @@ def _serialize_slot(slot, round_over: bool) -> dict:
         "nationality": slot.nationality,
         "height_cm": slot.height_cm,
         "guessed_by_player": slot.guessed_by_player,
+        "guessed_at": _utc_isoformat(slot.guessed_at),
         "player_name": slot.player_name if show_answer else None,
     }
     # Include country code for flag display

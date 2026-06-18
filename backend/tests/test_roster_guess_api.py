@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import random
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +11,8 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base, get_db
 from app.main import app
 from app.models import Player, PlayerSeasonTeam, Season, Team
-from app.models.roster_guess import RosterGuessGame
+from app.models.roster_guess import RosterGuessGame, RosterGuessRound
+from app.services import roster_guess as roster_service
 
 
 @pytest.fixture(autouse=True)
@@ -210,3 +212,235 @@ def test_online_roster_guess_persists_guest_id(client: TestClient):
         stored = db.get(RosterGuessGame, game["id"])
         assert stored.player1_guest_id == "host-guest-abc"
         assert stored.player2_guest_id == "joiner-guest-def"
+
+
+def _create_roster_race(client: TestClient, target_wins: int = 2) -> dict:
+    response = client.post(
+        "/quiz/roster-guess/race/games",
+        json={
+            "target_wins": target_wins,
+            "player1_name": "Host",
+            "season_range_start": 2024,
+            "season_range_end": 2024,
+            "guest_id": "host-race",
+        },
+    )
+    assert response.status_code == 200
+    return _action_payload(response)["game"]
+
+
+def _join_roster_race(client: TestClient, join_code: str) -> dict:
+    response = client.post(
+        "/quiz/roster-guess/race/games/join",
+        json={
+            "join_code": join_code,
+            "player_name": "Joiner",
+            "guest_id": "joiner-race",
+        },
+    )
+    assert response.status_code == 200
+    return _action_payload(response)["game"]
+
+
+def test_roster_race_claims_slot_once_and_duplicate_has_no_penalty(client: TestClient):
+    created = _create_roster_race(client)
+    game = _join_roster_race(client, created["join_code"])
+    slot_player_id = 1
+    round_number = game["round_number"]
+
+    claim = client.post(
+        f"/quiz/roster-guess/games/{game['id']}/guess?player=1",
+        json={"player_id": slot_player_id, "round_number": round_number},
+    )
+    assert claim.status_code == 200
+    claimed = _action_payload(claim)
+    assert claimed["result"] == "correct"
+    assert claimed["game"]["round"]["player1_correct"] == 1
+    assert claimed["game"]["round"]["player2_correct"] == 0
+
+    duplicate = client.post(
+        f"/quiz/roster-guess/games/{game['id']}/guess?player=2",
+        json={"player_id": slot_player_id, "round_number": round_number},
+    )
+    assert duplicate.status_code == 200
+    duplicated = _action_payload(duplicate)
+    assert duplicated["result"] == "incorrect"
+    assert duplicated["game"]["round"]["player1_correct"] == 1
+    assert duplicated["game"]["round"]["player2_correct"] == 0
+
+
+def test_roster_race_finishes_match_when_full_roster_claimed(client: TestClient):
+    created = _create_roster_race(client, target_wins=1)
+    game = _join_roster_race(client, created["join_code"])
+    round_number = game["round_number"]
+    player_ids = list(range(1, 7))
+
+    result = None
+    for player_id in player_ids:
+        response = client.post(
+            f"/quiz/roster-guess/games/{game['id']}/guess?player=1",
+            json={"player_id": player_id, "round_number": round_number},
+        )
+        assert response.status_code == 200
+        result = _action_payload(response)
+
+    assert result["result"] == "match_won"
+    assert result["game"]["status"] == "finished"
+    assert result["game"]["winner_player"] == 1
+    assert result["completed_round"]["status"] == "completed"
+    assert all(slot["player_name"] for slot in result["completed_round"]["slots"])
+
+
+def test_roster_race_timer_tie_starts_reveal_locked_next_round(client: TestClient):
+    created = _create_roster_race(client, target_wins=2)
+    game = _join_roster_race(client, created["join_code"])
+    round_number = game["round_number"]
+    player1_id = 1
+    player2_id = 2
+
+    assert client.post(
+        f"/quiz/roster-guess/games/{game['id']}/guess?player=1",
+        json={"player_id": player1_id, "round_number": round_number},
+    ).status_code == 200
+    assert client.post(
+        f"/quiz/roster-guess/games/{game['id']}/guess?player=2",
+        json={"player_id": player2_id, "round_number": round_number},
+    ).status_code == 200
+
+    with client.session_local() as db:
+        stored = db.get(RosterGuessGame, game["id"])
+        active_round = (
+            db.query(RosterGuessRound)
+            .filter_by(game_id=game["id"], round_number=round_number)
+            .one()
+        )
+        active_round.created_at = datetime.utcnow() - timedelta(seconds=121)
+        assert roster_service.handle_race_round_time_expired(
+            db,
+            stored,
+            expected_round=round_number,
+        )
+        db.commit()
+
+    state = client.get(f"/quiz/roster-guess/games/{game['id']}").json()
+    assert state["status"] == "active"
+    assert state["player1_score"] == 0
+    assert state["player2_score"] == 0
+    assert state["round_number"] == round_number + 1
+    assert state["latest_completed_round"]["winner_player"] is None
+    assert state["latest_completed_round"]["next_round_starts_at"] is not None
+
+    stale = client.post(
+        f"/quiz/roster-guess/games/{game['id']}/guess?player=1",
+        json={
+            "player_id": 1,
+            "round_number": round_number,
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["payload"]["message"] == "round_stale"
+
+    locked = client.post(
+        f"/quiz/roster-guess/games/{game['id']}/guess?player=1",
+        json={
+            "player_id": 1,
+            "round_number": state["round_number"],
+        },
+    )
+    assert locked.status_code == 409
+    assert locked.json()["payload"]["message"] == "round_locked"
+
+
+def test_roster_race_quick_match_pair_cancel_and_public_join_guard(client: TestClient):
+    first = client.post(
+        "/quiz/roster-guess/quick-match",
+        json={
+            "preset": "modern-standard",
+            "player_name": "One",
+            "guest_id": "guest-one",
+        },
+    )
+    assert first.status_code == 200
+    waiting = _action_payload(first)["game"]
+    assert waiting["status"] == "waiting_for_opponent"
+    assert waiting["is_race"] is True
+    assert waiting["is_public"] is True
+    assert waiting["join_code"] is None
+
+    with client.session_local() as db:
+        stored = db.get(RosterGuessGame, waiting["id"])
+        public_join_code = stored.join_code
+
+    bypass = client.post(
+        "/quiz/roster-guess/race/games/join",
+        json={
+            "join_code": public_join_code,
+            "player_name": "Bypass",
+            "guest_id": "guest-bypass",
+        },
+    )
+    assert bypass.status_code == 409
+
+    repeat = client.post(
+        "/quiz/roster-guess/quick-match",
+        json={
+            "preset": "modern-standard",
+            "player_name": "One again",
+            "guest_id": "guest-one",
+        },
+    )
+    assert repeat.status_code == 200
+    assert _action_payload(repeat)["game"]["id"] == waiting["id"]
+    assert _action_payload(repeat)["game"]["status"] == "waiting_for_opponent"
+
+    pools = client.get("/quiz/roster-guess/quick-match/pools")
+    assert pools.status_code == 200
+    assert pools.json()["pools"]["modern-standard"]["searching"] == 1
+
+    second = client.post(
+        "/quiz/roster-guess/quick-match",
+        json={
+            "preset": "modern-standard",
+            "player_name": "Two",
+            "guest_id": "guest-two",
+        },
+    )
+    assert second.status_code == 200
+    matched = _action_payload(second)["game"]
+    assert matched["id"] == waiting["id"]
+    assert matched["status"] == "active"
+    assert matched["round"] is not None
+    assert matched["join_code"] is None
+
+    cancel_seed = client.post(
+        "/quiz/roster-guess/quick-match",
+        json={
+            "preset": "full-quick",
+            "player_name": "Cancel",
+            "guest_id": "guest-cancel",
+        },
+    )
+    search = _action_payload(cancel_seed)["game"]
+    cancel = client.post(
+        "/quiz/roster-guess/quick-match/cancel",
+        json={
+            "preset": "full-quick",
+            "game_id": search["id"],
+            "guest_id": "guest-cancel",
+        },
+    )
+    assert cancel.status_code == 200
+    assert _action_payload(cancel)["game"]["status"] == "cancelled"
+
+
+def test_roster_race_quick_match_rejects_invalid_preset(client: TestClient):
+    response = client.post(
+        "/quiz/roster-guess/quick-match",
+        json={
+            "preset": "unknown",
+            "player_name": "One",
+            "guest_id": "guest-one",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["payload"]["code"] == "invalid_input"
