@@ -104,7 +104,7 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
   );
 
   // Per-round countdown affordance for public Quick Match. The realtime layer
-  // does not push a deadline, so we anchor a fresh 60s window each time a round
+  // does not push a deadline, so we anchor a fresh 10s window each time a round
   // becomes active and unlocked. It is display-only: it never disables guessing
   // or posts on expiry — the server owns the authoritative timer and broadcasts
   // the auto-skip, which the board reflects through the normal reveal flow.

@@ -46,8 +46,8 @@ describe("photo preset metadata", () => {
     expect(photoPresetLabel("mystery")).toBe("mystery");
   });
 
-  it("uses a 60 second per-round window", () => {
-    expect(PHOTO_QUICK_MATCH_ROUND_SECONDS).toBe(60);
+  it("uses a 10 second per-round window", () => {
+    expect(PHOTO_QUICK_MATCH_ROUND_SECONDS).toBe(10);
   });
 });
 

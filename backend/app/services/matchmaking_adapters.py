@@ -42,7 +42,7 @@ class TicTacToeQuickMatchPoolCounts:
 class PhotoQuizMatchmakingPreset:
     target_wins: int
     wrong_guess_visibility: str = "private"
-    round_seconds: int = 60
+    round_seconds: int = 10
 
 
 @dataclass(frozen=True)
