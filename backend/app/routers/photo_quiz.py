@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, WebSocket
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionFactory, get_db, get_session_factory
 from app.game_actions import (
     GameActionError,
     http_exception_for_game_action_error,
@@ -55,7 +55,7 @@ photo_quiz_realtime = OnlineGameRealtimeModule(
 
 
 async def _photo_quiz_http_action(
-    db: Session,
+    session_factory: SessionFactory,
     action: GameActionName,
     *,
     payload=None,
@@ -64,11 +64,11 @@ async def _photo_quiz_http_action(
 ):
     try:
         return await photo_quiz_realtime.game_actions.http_action(
-            db=db,
             action=action,
             payload=payload,
             game_id=game_id,
             player=player,
+            session_factory=session_factory,
         )
     except HttpGameActionRejected as exc:
         return JSONResponse(status_code=exc.status_code, content=exc.envelope)
@@ -168,18 +168,24 @@ def autocomplete_photo_players(
 
 
 @router.post("/photo/games")
-async def create_game(payload: PhotoQuizCreateRequest, db: Session = Depends(get_db)):
+async def create_game(
+    payload: PhotoQuizCreateRequest,
+    session_factory: SessionFactory = Depends(get_session_factory),
+):
     return await _photo_quiz_http_action(
-        db,
+        session_factory,
         GameActionName.CREATE,
         payload=payload,
     )
 
 
 @router.post("/photo/games/join")
-async def join_game(payload: PhotoQuizJoinRequest, db: Session = Depends(get_db)):
+async def join_game(
+    payload: PhotoQuizJoinRequest,
+    session_factory: SessionFactory = Depends(get_session_factory),
+):
     return await _photo_quiz_http_action(
-        db,
+        session_factory,
         GameActionName.JOIN,
         payload=payload,
     )
@@ -260,10 +266,10 @@ async def submit_guess(
     game_id: int,
     payload: PhotoQuizGuessRequest,
     player: int = Query(..., ge=1, le=2),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _photo_quiz_http_action(
-        db,
+        session_factory,
         GameActionName.GUESS,
         payload=payload,
         game_id=game_id,
@@ -275,10 +281,10 @@ async def submit_guess(
 async def resign_game(
     game_id: int,
     player: int = Query(..., ge=1, le=2),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _photo_quiz_http_action(
-        db,
+        session_factory,
         GameActionName.GIVE_UP,
         game_id=game_id,
         player=player,
@@ -290,10 +296,10 @@ async def offer_no_answer(
     game_id: int,
     payload: PhotoQuizNoAnswerOfferRequest,
     player: int = Query(..., ge=1, le=2),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _photo_quiz_http_action(
-        db,
+        session_factory,
         GameActionName.OFFER_NO_ANSWER,
         payload=payload,
         game_id=game_id,
@@ -306,10 +312,10 @@ async def respond_no_answer(
     game_id: int,
     payload: PhotoQuizNoAnswerResponseRequest,
     player: int = Query(..., ge=1, le=2),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _photo_quiz_http_action(
-        db,
+        session_factory,
         GameActionName.RESPOND_NO_ANSWER,
         payload=payload,
         game_id=game_id,
@@ -318,5 +324,15 @@ async def respond_no_answer(
 
 
 @router.websocket("/photo/ws/{game_id}")
-async def photo_quiz_websocket(websocket: WebSocket, game_id: int, player: int = 1):
-    await photo_quiz_realtime.connect(websocket, game_id, player)
+async def photo_quiz_websocket(
+    websocket: WebSocket,
+    game_id: int,
+    player: int = 1,
+    session_factory: SessionFactory = Depends(get_session_factory),
+):
+    await photo_quiz_realtime.connect(
+        websocket,
+        game_id,
+        player,
+        session_factory=session_factory,
+    )

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import func
 
 from app.config import settings
-from app.database import get_db
+from app.database import SessionFactory, get_db, get_session_factory
 from app.game_actions import (
     GameActionError,
     http_exception_for_game_action_error,
@@ -62,7 +62,7 @@ _TIMED_TICTACTOE_HTTP_ACTIONS = {
 
 
 async def _tictactoe_http_action(
-    db: Session,
+    session_factory: SessionFactory,
     action: GameActionName,
     *,
     payload=None,
@@ -83,11 +83,11 @@ async def _tictactoe_http_action(
         status_code = 200
         try:
             content = await tictactoe_realtime.game_actions.http_action(
-                db=db,
                 action=action,
                 payload=payload,
                 game_id=game_id,
                 player=player,
+                session_factory=session_factory,
             )
         except HttpGameActionRejected as exc:
             status_code = exc.status_code
@@ -342,10 +342,10 @@ def season_leaders(season_year: int, stat: str, db: Session = Depends(get_db)):
 @router.post("/tictactoe/games")
 async def create_tictactoe_game(
     payload: TicTacToeCreateGameRequest,
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _tictactoe_http_action(
-        db,
+        session_factory,
         GameActionName.CREATE,
         payload=payload,
     )
@@ -425,10 +425,10 @@ async def submit_tictactoe_move(
     game_id: int,
     payload: TicTacToeMoveRequest,
     player: int | None = Query(None),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _tictactoe_http_action(
-        db,
+        session_factory,
         GameActionName.MOVE,
         payload=payload,
         game_id=game_id,
@@ -440,10 +440,10 @@ async def submit_tictactoe_move(
 async def offer_tictactoe_draw(
     game_id: int,
     player: int | None = Query(None),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _tictactoe_http_action(
-        db,
+        session_factory,
         GameActionName.OFFER_DRAW,
         game_id=game_id,
         player=player,
@@ -455,10 +455,10 @@ async def respond_tictactoe_draw(
     game_id: int,
     payload: TicTacToeDrawResponseRequest,
     player: int | None = Query(None),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _tictactoe_http_action(
-        db,
+        session_factory,
         GameActionName.RESPOND_DRAW,
         payload=payload,
         game_id=game_id,
@@ -470,10 +470,10 @@ async def respond_tictactoe_draw(
 async def give_up_tictactoe_game(
     game_id: int,
     player: int | None = Query(None),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _tictactoe_http_action(
-        db,
+        session_factory,
         GameActionName.GIVE_UP,
         game_id=game_id,
         player=player,
@@ -508,18 +508,28 @@ def tictactoe_player_autocomplete(
 @router.post("/tictactoe/games/join")
 async def join_tictactoe_game(
     payload: TicTacToeJoinGameRequest,
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _tictactoe_http_action(
-        db,
+        session_factory,
         GameActionName.JOIN,
         payload=payload,
     )
 
 
 @router.websocket("/tictactoe/ws/{game_id}")
-async def tictactoe_websocket(websocket: WebSocket, game_id: int, player: int = 1):
-    await tictactoe_realtime.connect(websocket, game_id, player)
+async def tictactoe_websocket(
+    websocket: WebSocket,
+    game_id: int,
+    player: int = 1,
+    session_factory: SessionFactory = Depends(get_session_factory),
+):
+    await tictactoe_realtime.connect(
+        websocket,
+        game_id,
+        player,
+        session_factory=session_factory,
+    )
 
 
 def _build_season_entries(db: Session, player_id: int) -> List[SeasonStatsEntry]:

@@ -1,5 +1,8 @@
+from collections.abc import Callable
+from typing import TypeAlias
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
 
@@ -10,6 +13,7 @@ engine = create_engine(
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionFactory: TypeAlias = Callable[[], Session]
 
 
 class Base(DeclarativeBase):
@@ -22,3 +26,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def get_session_factory() -> SessionFactory:
+    return SessionLocal

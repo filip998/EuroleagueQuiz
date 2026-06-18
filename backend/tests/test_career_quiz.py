@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.database import Base, get_db
+from app.database import Base, get_db, get_session_factory
 from app.game_actions import ConflictGameActionError
 from app.main import app
 from app.models import (
@@ -823,7 +823,9 @@ def career_client(tmp_path: Path):
             db.close()
 
     previous_override = app.dependency_overrides.get(get_db)
+    previous_session_factory_override = app.dependency_overrides.get(get_session_factory)
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_session_factory] = lambda: TestingSessionLocal
 
     with TestClient(app) as test_client:
         test_client.session_local = TestingSessionLocal
@@ -833,6 +835,10 @@ def career_client(tmp_path: Path):
         app.dependency_overrides.pop(get_db, None)
     else:
         app.dependency_overrides[get_db] = previous_override
+    if previous_session_factory_override is None:
+        app.dependency_overrides.pop(get_session_factory, None)
+    else:
+        app.dependency_overrides[get_session_factory] = previous_session_factory_override
     engine.dispose()
 
 

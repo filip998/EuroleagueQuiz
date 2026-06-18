@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, WebSocket
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionFactory, get_db, get_session_factory
 from app.game_actions import (
     GameActionError,
     http_exception_for_game_action_error,
@@ -55,7 +55,7 @@ guess_the_list_realtime = OnlineGameRealtimeModule(GuessTheListRealtimeAdapter()
 
 
 async def _guess_the_list_http_action(
-    db: Session,
+    session_factory: SessionFactory,
     action: GameActionName,
     *,
     payload=None,
@@ -64,11 +64,11 @@ async def _guess_the_list_http_action(
 ):
     try:
         return await guess_the_list_realtime.game_actions.http_action(
-            db=db,
             action=action,
             payload=payload,
             game_id=game_id,
             player=player,
+            session_factory=session_factory,
         )
     except HttpGameActionRejected as exc:
         return JSONResponse(status_code=exc.status_code, content=exc.envelope)
@@ -140,10 +140,10 @@ def _cancelled_quick_match_state(result) -> dict:
 @router.post("/games")
 async def create_guess_the_list_game(
     payload: GuessTheListCreateRequest,
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _guess_the_list_http_action(
-        db,
+        session_factory,
         GameActionName.CREATE,
         payload=payload,
     )
@@ -152,12 +152,12 @@ async def create_guess_the_list_game(
 @router.post("/race/games")
 async def create_guess_the_list_race_game(
     payload: GuessTheListRaceCreateRequest,
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     race_payload = payload.model_dump()
     race_payload["is_race"] = True
     return await _guess_the_list_http_action(
-        db,
+        session_factory,
         GameActionName.CREATE,
         payload=race_payload,
     )
@@ -166,12 +166,12 @@ async def create_guess_the_list_race_game(
 @router.post("/race/games/join")
 async def join_guess_the_list_race_game(
     payload: GuessTheListRaceJoinRequest,
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     race_payload = payload.model_dump()
     race_payload["is_race"] = True
     return await _guess_the_list_http_action(
-        db,
+        session_factory,
         GameActionName.JOIN,
         payload=race_payload,
     )
@@ -251,10 +251,10 @@ async def submit_guess_the_list(
     game_id: int,
     payload: GuessTheListGuessRequest,
     player: int | None = Query(None),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _guess_the_list_http_action(
-        db,
+        session_factory,
         GameActionName.GUESS,
         payload=payload,
         game_id=game_id,
@@ -266,10 +266,10 @@ async def submit_guess_the_list(
 async def offer_end_round(
     game_id: int,
     player: int | None = Query(None),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _guess_the_list_http_action(
-        db,
+        session_factory,
         GameActionName.OFFER_END,
         game_id=game_id,
         player=player,
@@ -281,10 +281,10 @@ async def respond_end_round(
     game_id: int,
     payload: GuessTheListEndResponseRequest,
     player: int | None = Query(None),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _guess_the_list_http_action(
-        db,
+        session_factory,
         GameActionName.RESPOND_END,
         payload=payload,
         game_id=game_id,
@@ -296,10 +296,10 @@ async def respond_end_round(
 async def give_up_round(
     game_id: int,
     player: int | None = Query(None),
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _guess_the_list_http_action(
-        db,
+        session_factory,
         GameActionName.GIVE_UP,
         game_id=game_id,
         player=player,
@@ -309,10 +309,10 @@ async def give_up_round(
 @router.post("/games/join")
 async def join_guess_the_list_game(
     payload: GuessTheListJoinRequest,
-    db: Session = Depends(get_db),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ):
     return await _guess_the_list_http_action(
-        db,
+        session_factory,
         GameActionName.JOIN,
         payload=payload,
     )
@@ -337,5 +337,15 @@ def guess_the_list_autocomplete(
 
 
 @router.websocket("/ws/{game_id}")
-async def guess_the_list_websocket(websocket: WebSocket, game_id: int, player: int = 1):
-    await guess_the_list_realtime.connect(websocket, game_id, player)
+async def guess_the_list_websocket(
+    websocket: WebSocket,
+    game_id: int,
+    player: int = 1,
+    session_factory: SessionFactory = Depends(get_session_factory),
+):
+    await guess_the_list_realtime.connect(
+        websocket,
+        game_id,
+        player,
+        session_factory=session_factory,
+    )

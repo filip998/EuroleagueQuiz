@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,17 +30,43 @@ class FakeGame:
 class FakeSession:
     def __init__(self, game: FakeGame):
         self.game = game
+        self.owner_thread_id = threading.get_ident()
+        self.method_thread_ids: list[int] = []
         self.commits = 0
         self.rollbacks = 0
+        self.closed = False
+
+    def _assert_owner_thread(self):
+        current_thread_id = threading.get_ident()
+        self.method_thread_ids.append(current_thread_id)
+        assert current_thread_id == self.owner_thread_id
 
     def commit(self):
+        self._assert_owner_thread()
         self.commits += 1
 
     def rollback(self):
+        self._assert_owner_thread()
         self.rollbacks += 1
 
     def refresh(self, _obj):
+        self._assert_owner_thread()
         return None
+
+    def close(self):
+        self._assert_owner_thread()
+        self.closed = True
+
+
+class FakeStore:
+    def __init__(self, game: FakeGame | None = None):
+        self.game = game or FakeGame()
+        self.sessions: list[FakeSession] = []
+
+    def session_factory(self) -> FakeSession:
+        session = FakeSession(self.game)
+        self.sessions.append(session)
+        return session
 
 
 class FakeAdapter:
@@ -109,25 +137,48 @@ class FakeEffects:
         self.cancelled.append(game_id)
 
 
-def _orchestrator(effects: FakeEffects | None = None) -> GameActionOrchestrator:
-    return GameActionOrchestrator(FakeAdapter(), effects or FakeEffects())
+class BlockingEffects(FakeEffects):
+    def __init__(self):
+        super().__init__()
+        self.first_broadcast_started = asyncio.Event()
+        self.release_first_broadcast = asyncio.Event()
+
+    async def broadcast_state(self, game_id: int, game_state: dict[str, Any], **kwargs):
+        if not self.broadcasts:
+            self.broadcasts.append((game_id, game_state, kwargs))
+            self.first_broadcast_started.set()
+            await self.release_first_broadcast.wait()
+            return 1
+        return await super().broadcast_state(game_id, game_state, **kwargs)
+
+
+def _orchestrator(
+    effects: FakeEffects | None = None,
+    *,
+    store: FakeStore | None = None,
+) -> GameActionOrchestrator:
+    active_store = store or FakeStore()
+    return GameActionOrchestrator(
+        FakeAdapter(),
+        effects or FakeEffects(),
+        session_factory=active_store.session_factory,
+    )
 
 
 @pytest.mark.asyncio
 async def test_http_and_websocket_actions_share_state_envelope_shape():
-    http_db = FakeSession(FakeGame())
-    ws_db = FakeSession(FakeGame())
-    orchestrator = _orchestrator()
+    http_store = FakeStore()
+    ws_store = FakeStore()
+    http_orchestrator = _orchestrator(store=http_store)
+    ws_orchestrator = _orchestrator(store=ws_store)
 
-    http_envelope = await orchestrator.http_action(
-        db=http_db,
+    http_envelope = await http_orchestrator.http_action(
         action=GameActionName.MOVE,
         payload={},
         game_id=1,
         player=1,
     )
-    ws_envelope = await orchestrator.websocket_action(
-        db=ws_db,
+    ws_envelope = await ws_orchestrator.websocket_action(
         action=GameActionName.MOVE.value,
         payload={},
         game_id=1,
@@ -137,16 +188,15 @@ async def test_http_and_websocket_actions_share_state_envelope_shape():
     assert http_envelope == ws_envelope
     assert http_envelope["type"] == "state"
     assert http_envelope["payload"]["completed_round"] == {"round_number": 1}
-    assert http_db.commits == 1
-    assert ws_db.commits == 1
+    assert http_store.sessions[0].commits == 1
+    assert ws_store.sessions[0].commits == 1
 
 
 @pytest.mark.asyncio
 async def test_create_action_returns_state_envelope_with_game_id():
-    db = FakeSession(FakeGame())
+    store = FakeStore()
 
-    envelope = await _orchestrator().http_action(
-        db=db,
+    envelope = await _orchestrator(store=store).http_action(
         action=GameActionName.CREATE,
         payload={},
     )
@@ -157,10 +207,9 @@ async def test_create_action_returns_state_envelope_with_game_id():
 
 @pytest.mark.asyncio
 async def test_websocket_rejects_http_only_action_at_seam():
-    db = FakeSession(FakeGame())
+    store = FakeStore()
 
-    envelope = await _orchestrator().websocket_action(
-        db=db,
+    envelope = await _orchestrator(store=store).websocket_action(
         action=GameActionName.CREATE.value,
         payload={},
         game_id=1,
@@ -174,16 +223,15 @@ async def test_websocket_rejects_http_only_action_at_seam():
             "message": "Unsupported websocket game action: create",
         },
     }
-    assert db.commits == 0
+    assert store.sessions == []
 
 
 @pytest.mark.asyncio
 async def test_http_game_action_error_uses_realtime_error_envelope():
-    db = FakeSession(FakeGame())
+    store = FakeStore()
 
     with pytest.raises(HttpGameActionRejected) as exc_info:
-        await _orchestrator().http_action(
-            db=db,
+        await _orchestrator(store=store).http_action(
             action=GameActionName.MOVE,
             payload={},
             game_id=1,
@@ -197,16 +245,15 @@ async def test_http_game_action_error_uses_realtime_error_envelope():
             "message": "Online game actions require player identity",
         },
     }
-    assert db.rollbacks == 1
+    assert store.sessions[0].rollbacks == 1
 
 
 @pytest.mark.asyncio
 async def test_post_commit_side_effect_failures_are_logged_and_state_wins(caplog):
-    db = FakeSession(FakeGame())
-    orchestrator = _orchestrator(FakeEffects(fail=True))
+    store = FakeStore()
+    orchestrator = _orchestrator(FakeEffects(fail=True), store=store)
 
     envelope = await orchestrator.http_action(
-        db=db,
         action=GameActionName.MOVE,
         payload={},
         game_id=1,
@@ -214,17 +261,16 @@ async def test_post_commit_side_effect_failures_are_logged_and_state_wins(caplog
     )
 
     assert envelope["type"] == "state"
-    assert db.commits == 1
+    assert store.sessions[0].commits == 1
     assert "Post-commit game action side effect failed" in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_broadcast_can_be_targeted_to_one_player():
-    db = FakeSession(FakeGame())
+    store = FakeStore()
     effects = FakeEffects()
 
-    await _orchestrator(effects).websocket_action(
-        db=db,
+    await _orchestrator(effects, store=store).websocket_action(
         action=GameActionName.MOVE.value,
         payload={"broadcast_to_player": 1},
         game_id=1,
@@ -232,3 +278,56 @@ async def test_broadcast_can_be_targeted_to_one_player():
     )
 
     assert effects.broadcasts[0][2]["only_player"] == 1
+
+
+@pytest.mark.asyncio
+async def test_game_action_session_is_created_and_used_in_worker_thread():
+    event_loop_thread_id = threading.get_ident()
+    store = FakeStore()
+
+    await _orchestrator(store=store).http_action(
+        action=GameActionName.MOVE,
+        payload={},
+        game_id=1,
+        player=1,
+    )
+
+    session = store.sessions[0]
+    assert session.owner_thread_id != event_loop_thread_id
+    assert session.method_thread_ids
+    assert set(session.method_thread_ids) == {session.owner_thread_id}
+    assert session.closed is True
+
+
+@pytest.mark.asyncio
+async def test_same_game_actions_are_serialized_through_post_commit_effects():
+    store = FakeStore()
+    effects = BlockingEffects()
+    orchestrator = _orchestrator(effects, store=store)
+
+    first = asyncio.create_task(
+        orchestrator.websocket_action(
+            action=GameActionName.MOVE.value,
+            payload={},
+            game_id=1,
+            player=1,
+        )
+    )
+    await effects.first_broadcast_started.wait()
+
+    second = asyncio.create_task(
+        orchestrator.websocket_action(
+            action=GameActionName.MOVE.value,
+            payload={},
+            game_id=1,
+            player=1,
+        )
+    )
+    await asyncio.sleep(0)
+
+    assert len(store.sessions) == 1
+    effects.release_first_broadcast.set()
+    await asyncio.gather(first, second)
+
+    assert len(store.sessions) == 2
+    assert len(effects.broadcasts) == 2
