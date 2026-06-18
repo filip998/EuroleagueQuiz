@@ -3,6 +3,7 @@ from pathlib import Path
 import asyncio
 import pytest
 import random
+from dataclasses import replace
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -89,6 +90,25 @@ def _action_payload(response) -> dict:
     payload = response.json()
     assert payload["type"] == "state"
     return payload["payload"]
+
+
+def _seed_player_positions(db):
+    positions_by_code = {
+        "P001": "Guard",
+        "P002": "Guard",
+        "P003": "Forward",
+        "P004": "Forward",
+        "P005": "Center",
+        "P006": None,
+    }
+    for euroleague_code, position in positions_by_code.items():
+        player = (
+            db.query(Player)
+            .filter(Player.euroleague_code == euroleague_code)
+            .one()
+        )
+        player.position = position
+    db.flush()
 
 
 @pytest.fixture()
@@ -201,6 +221,231 @@ def quick_match_effects(monkeypatch):
         fake_broadcast_state,
     )
     return effects
+
+
+def test_axis_registry_preserves_existing_axis_weights():
+    assert {
+        axis_type: ttt_service.AXIS_REGISTRY[axis_type].weight
+        for axis_type in ("team", "nationality", "played_with", "season")
+    } == {
+        "team": 0.58,
+        "nationality": 0.12,
+        "played_with": 0.20,
+        "season": 0.10,
+    }
+    assert ttt_service.AXIS_WEIGHTS["position"] == ttt_service.AXIS_REGISTRY["position"].weight
+
+
+def test_axis_registry_preserves_existing_axis_sets_and_matchers(client: TestClient):
+    with client.session_local() as db:
+        team_b = db.query(Team).filter(Team.euroleague_code == "BBB").one()
+        season = db.query(Season).filter(Season.year == 2024).one()
+        player_1 = db.query(Player).filter(Player.euroleague_code == "P001").one()
+        player_2 = db.query(Player).filter(Player.euroleague_code == "P002").one()
+        player_6 = db.query(Player).filter(Player.euroleague_code == "P006").one()
+        outsider = Player(
+            euroleague_code="POUT",
+            first_name="Out",
+            last_name="Sider",
+            nationality="CountryB",
+        )
+        db.add(outsider)
+        db.flush()
+
+        team_axis = {"axis_type": "team", "value": str(team_b.id)}
+        nationality_axis = {"axis_type": "nationality", "value": "CountryA"}
+        played_with_axis = {"axis_type": "played_with", "value": str(player_1.id)}
+        season_axis = {"axis_type": "season", "value": str(season.id)}
+
+        team_set = ttt_service._get_player_set_for_axis(db, team_axis)
+        assert player_1.id in team_set
+        assert player_6.id not in team_set
+        assert ttt_service._player_matches_axis(db, player_1.id, team_axis)
+        assert not ttt_service._player_matches_axis(db, player_6.id, team_axis)
+
+        nationality_set = ttt_service._get_player_set_for_axis(db, nationality_axis)
+        assert player_1.id in nationality_set
+        assert player_6.id in nationality_set
+        assert outsider.id not in nationality_set
+        assert ttt_service._player_matches_axis(db, player_1.id, nationality_axis)
+        assert not ttt_service._player_matches_axis(db, outsider.id, nationality_axis)
+
+        played_with_set = ttt_service._get_player_set_for_axis(db, played_with_axis)
+        assert player_2.id in played_with_set
+        assert player_6.id in played_with_set
+        assert player_1.id not in played_with_set
+        assert outsider.id not in played_with_set
+        assert ttt_service._player_matches_axis(db, player_2.id, played_with_axis)
+        assert not ttt_service._player_matches_axis(db, outsider.id, played_with_axis)
+
+        season_set = ttt_service._get_player_set_for_axis(db, season_axis)
+        assert player_1.id in season_set
+        assert player_6.id in season_set
+        assert outsider.id not in season_set
+        assert ttt_service._player_matches_axis(db, player_1.id, season_axis)
+        assert not ttt_service._player_matches_axis(db, outsider.id, season_axis)
+
+
+def test_existing_season_cross_axis_behaviour_stays_precise(client: TestClient):
+    with client.session_local() as db:
+        team_b = db.query(Team).filter(Team.euroleague_code == "BBB").one()
+        season = db.query(Season).filter(Season.year == 2024).one()
+        player_1 = db.query(Player).filter(Player.euroleague_code == "P001").one()
+        player_2 = db.query(Player).filter(Player.euroleague_code == "P002").one()
+        player_6 = db.query(Player).filter(Player.euroleague_code == "P006").one()
+        country_a_outsider = Player(
+            euroleague_code="PNSA",
+            first_name="No",
+            last_name="Season",
+            nationality="CountryA",
+        )
+        db.add(country_a_outsider)
+        db.flush()
+
+        season_axis = {"axis_type": "season", "value": str(season.id)}
+        team_axis = {"axis_type": "team", "value": str(team_b.id)}
+        played_with_axis = {"axis_type": "played_with", "value": str(player_1.id)}
+        nationality_axis = {"axis_type": "nationality", "value": "CountryA"}
+
+        team_season_set = ttt_service._get_player_set_for_cell(db, season_axis, team_axis)
+        assert player_1.id in team_season_set
+        assert player_6.id not in team_season_set
+        assert ttt_service._player_matches_cell(db, player_1.id, season_axis, team_axis)
+        assert not ttt_service._player_matches_cell(db, player_6.id, season_axis, team_axis)
+
+        played_with_season_set = ttt_service._get_player_set_for_cell(
+            db,
+            season_axis,
+            played_with_axis,
+        )
+        assert player_2.id in played_with_season_set
+        assert player_1.id not in played_with_season_set
+        assert ttt_service._player_matches_cell(
+            db,
+            player_2.id,
+            season_axis,
+            played_with_axis,
+        )
+        assert not ttt_service._player_matches_cell(
+            db,
+            player_1.id,
+            season_axis,
+            played_with_axis,
+        )
+
+        nationality_season_set = ttt_service._get_player_set_for_cell(
+            db,
+            season_axis,
+            nationality_axis,
+        )
+        assert player_1.id in nationality_season_set
+        assert country_a_outsider.id not in nationality_season_set
+        assert ttt_service._player_matches_cell(
+            db,
+            player_1.id,
+            season_axis,
+            nationality_axis,
+        )
+        assert not ttt_service._player_matches_cell(
+            db,
+            country_a_outsider.id,
+            season_axis,
+            nationality_axis,
+        )
+
+
+def test_position_axis_provider_sets_and_matcher(client: TestClient):
+    with client.session_local() as db:
+        _seed_player_positions(db)
+        player_1 = db.query(Player).filter(Player.euroleague_code == "P001").one()
+        player_2 = db.query(Player).filter(Player.euroleague_code == "P002").one()
+        player_3 = db.query(Player).filter(Player.euroleague_code == "P003").one()
+        player_6 = db.query(Player).filter(Player.euroleague_code == "P006").one()
+
+        candidates = ttt_service._get_position_candidates(db)
+        assert [candidate["value"] for candidate in candidates] == [
+            "Guard",
+            "Forward",
+            "Center",
+        ]
+
+        guard_axis = {"axis_type": "position", "value": "Guard"}
+        guard_set = ttt_service._get_player_set_for_axis(db, guard_axis)
+        assert player_1.id in guard_set
+        assert player_2.id in guard_set
+        assert player_3.id not in guard_set
+        assert player_6.id not in guard_set
+        assert ttt_service._player_matches_axis(db, player_1.id, guard_axis)
+        assert not ttt_service._player_matches_axis(db, player_3.id, guard_axis)
+        assert not ttt_service._player_matches_axis(db, player_6.id, guard_axis)
+
+
+def test_season_position_cell_uses_runtime_matcher(client: TestClient):
+    with client.session_local() as db:
+        _seed_player_positions(db)
+        season = db.query(Season).filter(Season.year == 2024).one()
+        player_1 = db.query(Player).filter(Player.euroleague_code == "P001").one()
+        player_3 = db.query(Player).filter(Player.euroleague_code == "P003").one()
+        player_6 = db.query(Player).filter(Player.euroleague_code == "P006").one()
+        season_axis = {"axis_type": "season", "value": str(season.id)}
+        guard_axis = {"axis_type": "position", "value": "Guard"}
+
+        season_guard_set = ttt_service._get_player_set_for_cell(
+            db,
+            season_axis,
+            guard_axis,
+        )
+        assert player_1.id in season_guard_set
+        assert player_3.id not in season_guard_set
+        assert player_6.id not in season_guard_set
+        assert ttt_service._player_matches_cell(db, player_1.id, season_axis, guard_axis)
+        assert not ttt_service._player_matches_cell(db, player_3.id, season_axis, guard_axis)
+        assert not ttt_service._player_matches_cell(db, player_6.id, season_axis, guard_axis)
+
+
+def test_board_generation_caps_position_and_keeps_cells_solvable(
+    client: TestClient,
+    monkeypatch,
+):
+    forced_registry = {
+        axis_type: replace(definition, weight=0.0)
+        for axis_type, definition in ttt_service.AXIS_REGISTRY.items()
+    }
+    forced_registry["position"] = replace(
+        forced_registry["position"],
+        weight=1.0,
+    )
+    monkeypatch.setattr(ttt_service, "AXIS_REGISTRY", forced_registry)
+    monkeypatch.setattr(
+        ttt_service,
+        "AXIS_WEIGHTS",
+        {
+            axis_type: definition.weight
+            for axis_type, definition in forced_registry.items()
+        },
+    )
+
+    with client.session_local() as db:
+        _seed_player_positions(db)
+        axes = ttt_service._select_board_axes(db)
+
+        assert [axis["axis_type"] for axis in axes].count("position") == 1
+        assert len(axes) == 6
+        for row_axis in axes[:3]:
+            for col_axis in axes[3:]:
+                assert ttt_service._get_player_set_for_cell(db, row_axis, col_axis)
+
+
+def test_axis_cap_hook_limits_position_and_future_achievement_axes():
+    assert ttt_service._axis_type_exceeds_board_caps(
+        "position",
+        [{"axis_type": "position", "value": "Guard"}],
+    )
+    assert ttt_service._axis_type_exceeds_board_caps(
+        "stat_milestone",
+        [{"axis_type": "champion", "value": "2024"}],
+    )
+    assert not ttt_service._axis_type_exceeds_board_caps("champion", [])
 
 
 def test_create_tictactoe_game_has_board(client: TestClient):

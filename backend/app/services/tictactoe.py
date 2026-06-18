@@ -1,9 +1,10 @@
+from dataclasses import dataclass
 import math
 import random
 import string
 from datetime import date, datetime, timedelta
 from itertools import combinations
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import Session
@@ -52,8 +53,6 @@ def _clean_guest_id(guest_id: Optional[str]) -> Optional[str]:
 # Axis registry — extensible axis types for board generation
 # ---------------------------------------------------------------------------
 
-# Weights for axis type selection (must sum to 1.0)
-AXIS_WEIGHTS = {"team": 0.58, "nationality": 0.12, "played_with": 0.20, "season": 0.10}
 MIN_NATIONALITY_PLAYERS = 5
 PLAYED_WITH_TOP_N = 100  # raw PIR query limit (filtered down after scoring)
 PLAYED_WITH_CANDIDATE_LIMIT = 80
@@ -63,6 +62,35 @@ SEASON_RECENCY_DECAY = 0.10  # 10% weight reduction per year from current
 RECENCY_PENALTY_PER_YEAR = 0.05  # 5% score reduction per year since last active
 RECENCY_FLOOR = 0.10
 TEAM_DIVERSITY_BONUS = 0.10  # 10% score bonus per additional team played for
+POSITION_AXIS_VALUES = ("Guard", "Forward", "Center")
+ACHIEVEMENT_AXIS_TYPES = frozenset({"champion", "stat_milestone"})
+
+
+@dataclass(frozen=True)
+class AxisCapGroup:
+    axis_types: frozenset[str]
+    max_per_board: int
+
+
+@dataclass(frozen=True)
+class TicTacToeAxisDefinition:
+    axis_type: str
+    weight: float
+    candidate_provider: Callable[[Session], list[dict]]
+    player_set_builder: Callable[[Session, dict], set[int]]
+    matcher: Callable[[Session, int, dict], bool]
+    candidate_picker: Callable[[list[dict]], dict] | None = None
+    max_per_board: int | None = None
+
+    def pick_candidate(self, candidates: list[dict]) -> dict:
+        if self.candidate_picker is not None:
+            return self.candidate_picker(candidates)
+        return random.choice(candidates)
+
+
+AXIS_CAP_GROUPS = (
+    AxisCapGroup(axis_types=ACHIEVEMENT_AXIS_TYPES, max_per_board=1),
+)
 
 
 def _get_team_candidates(db: Session) -> list[dict]:
@@ -251,6 +279,27 @@ def _get_season_candidates(db: Session) -> list[dict]:
     return candidates
 
 
+def _get_position_candidates(db: Session) -> list[dict]:
+    """Get coarse player-position axis candidates with at least one matching player."""
+    rows = (
+        db.query(Player.position, func.count(Player.id).label("cnt"))
+        .filter(Player.position.in_(POSITION_AXIS_VALUES))
+        .group_by(Player.position)
+        .having(func.count(Player.id) > 0)
+        .all()
+    )
+    available_positions = {r.position for r in rows}
+    return [
+        {
+            "axis_type": "position",
+            "value": position,
+            "display_label": position,
+        }
+        for position in POSITION_AXIS_VALUES
+        if position in available_positions
+    ]
+
+
 def _pick_weighted(candidates: list[dict]) -> dict:
     """Pick a candidate using _weight field (or uniform if no weights)."""
     weights = [c.get("_weight", 1.0) for c in candidates]
@@ -269,120 +318,13 @@ def _stints_overlap(
     return start_a <= end_b and start_b <= end_a
 
 
-def _get_player_set_for_axis(db: Session, axis: dict) -> set[int]:
-    """Get set of player IDs matching an axis constraint."""
-    if axis["axis_type"] == "team":
-        team_id = int(axis["value"])
-        rows = (
-            db.query(PlayerSeasonTeam.player_id)
-            .filter(PlayerSeasonTeam.team_id == team_id)
-            .distinct()
-            .all()
-        )
-        return {r.player_id for r in rows}
-    elif axis["axis_type"] == "nationality":
-        rows = (
-            db.query(Player.id)
-            .filter(Player.nationality == axis["value"])
-            .all()
-        )
-        return {r.id for r in rows}
-    elif axis["axis_type"] == "played_with":
-        star_id = int(axis["value"])
-        # Find all stints for the star with dates
-        star_stints = (
-            db.query(
-                PlayerSeasonTeam.team_id,
-                PlayerSeasonTeam.season_id,
-                PlayerSeasonTeam.registration_start,
-                PlayerSeasonTeam.registration_end,
-            )
-            .filter(PlayerSeasonTeam.player_id == star_id)
-            .all()
-        )
-        if not star_stints:
-            return set()
-        # Find all players on the same teams/seasons
-        conditions = [
-            (PlayerSeasonTeam.team_id == s.team_id)
-            & (PlayerSeasonTeam.season_id == s.season_id)
-            for s in star_stints
-        ]
-        candidate_rows = (
-            db.query(
-                PlayerSeasonTeam.player_id,
-                PlayerSeasonTeam.team_id,
-                PlayerSeasonTeam.season_id,
-                PlayerSeasonTeam.registration_start,
-                PlayerSeasonTeam.registration_end,
-            )
-            .filter(or_(*conditions))
-            .filter(PlayerSeasonTeam.player_id != star_id)
-            .all()
-        )
-        # Filter by date overlap
-        result: set[int] = set()
-        star_by_key = {}
-        for s in star_stints:
-            star_by_key.setdefault((s.team_id, s.season_id), []).append(s)
-        for row in candidate_rows:
-            key = (row.team_id, row.season_id)
-            for s in star_by_key.get(key, []):
-                if _stints_overlap(
-                    row.registration_start, row.registration_end,
-                    s.registration_start, s.registration_end,
-                ):
-                    result.add(row.player_id)
-                    break
-        return result
-    elif axis["axis_type"] == "season":
-        season_id = int(axis["value"])
-        rows = (
-            db.query(PlayerSeasonTeam.player_id)
-            .filter(PlayerSeasonTeam.season_id == season_id)
-            .distinct()
-            .all()
-        )
-        return {r.player_id for r in rows}
-    return set()
-
-
-def _player_matches_axis(db: Session, player_id: int, axis: dict) -> bool:
-    """Check if a player matches an axis constraint."""
-    if axis["axis_type"] == "team":
-        team_id = int(axis["value"])
-        return (
-            db.query(PlayerSeasonTeam)
-            .filter(
-                PlayerSeasonTeam.player_id == player_id,
-                PlayerSeasonTeam.team_id == team_id,
-            )
-            .first()
-        ) is not None
-    elif axis["axis_type"] == "nationality":
-        player = db.query(Player).filter(Player.id == player_id).first()
-        return player is not None and player.nationality == axis["value"]
-    elif axis["axis_type"] == "played_with":
-        return _player_is_teammate(db, player_id, int(axis["value"]))
-    elif axis["axis_type"] == "season":
-        season_id = int(axis["value"])
-        return (
-            db.query(PlayerSeasonTeam)
-            .filter(
-                PlayerSeasonTeam.player_id == player_id,
-                PlayerSeasonTeam.season_id == season_id,
-            )
-            .first()
-        ) is not None
-    return False
-
-
-def _player_is_teammate(
-    db: Session, player_id: int, star_id: int, *, season_id: int | None = None,
-) -> bool:
-    """Check if player was a teammate of star (optionally restricted to a season)."""
-    if player_id == star_id:
-        return False
+def _get_teammate_player_set(
+    db: Session,
+    star_id: int,
+    *,
+    season_id: int | None = None,
+) -> set[int]:
+    """Get teammates of a star, preserving registration date overlap semantics."""
     star_q = db.query(
         PlayerSeasonTeam.team_id,
         PlayerSeasonTeam.season_id,
@@ -393,35 +335,196 @@ def _player_is_teammate(
         star_q = star_q.filter(PlayerSeasonTeam.season_id == season_id)
     star_stints = star_q.all()
     if not star_stints:
-        return False
+        return set()
+
     conditions = [
         (PlayerSeasonTeam.team_id == s.team_id)
         & (PlayerSeasonTeam.season_id == s.season_id)
         for s in star_stints
     ]
-    player_stints = (
+    candidate_rows = (
         db.query(
+            PlayerSeasonTeam.player_id,
             PlayerSeasonTeam.team_id,
             PlayerSeasonTeam.season_id,
             PlayerSeasonTeam.registration_start,
             PlayerSeasonTeam.registration_end,
         )
-        .filter(PlayerSeasonTeam.player_id == player_id)
         .filter(or_(*conditions))
+        .filter(PlayerSeasonTeam.player_id != star_id)
         .all()
     )
-    for ps in player_stints:
-        for ss in star_stints:
-            if (
-                ps.team_id == ss.team_id
-                and ps.season_id == ss.season_id
-                and _stints_overlap(
-                    ps.registration_start, ps.registration_end,
-                    ss.registration_start, ss.registration_end,
-                )
+
+    result: set[int] = set()
+    star_by_key = {}
+    for stint in star_stints:
+        star_by_key.setdefault((stint.team_id, stint.season_id), []).append(stint)
+    for row in candidate_rows:
+        key = (row.team_id, row.season_id)
+        for stint in star_by_key.get(key, []):
+            if _stints_overlap(
+                row.registration_start,
+                row.registration_end,
+                stint.registration_start,
+                stint.registration_end,
             ):
-                return True
-    return False
+                result.add(row.player_id)
+                break
+    return result
+
+
+def _team_player_set(db: Session, axis: dict) -> set[int]:
+    team_id = int(axis["value"])
+    rows = (
+        db.query(PlayerSeasonTeam.player_id)
+        .filter(PlayerSeasonTeam.team_id == team_id)
+        .distinct()
+        .all()
+    )
+    return {r.player_id for r in rows}
+
+
+def _nationality_player_set(db: Session, axis: dict) -> set[int]:
+    rows = db.query(Player.id).filter(Player.nationality == axis["value"]).all()
+    return {r.id for r in rows}
+
+
+def _played_with_player_set(db: Session, axis: dict) -> set[int]:
+    return _get_teammate_player_set(db, int(axis["value"]))
+
+
+def _season_player_set(db: Session, axis: dict) -> set[int]:
+    season_id = int(axis["value"])
+    rows = (
+        db.query(PlayerSeasonTeam.player_id)
+        .filter(PlayerSeasonTeam.season_id == season_id)
+        .distinct()
+        .all()
+    )
+    return {r.player_id for r in rows}
+
+
+def _position_player_set(db: Session, axis: dict) -> set[int]:
+    rows = (
+        db.query(Player.id)
+        .filter(Player.position == axis["value"], Player.position != "")
+        .all()
+    )
+    return {r.id for r in rows}
+
+
+def _matches_team_axis(db: Session, player_id: int, axis: dict) -> bool:
+    return (
+        db.query(PlayerSeasonTeam)
+        .filter(
+            PlayerSeasonTeam.player_id == player_id,
+            PlayerSeasonTeam.team_id == int(axis["value"]),
+        )
+        .first()
+    ) is not None
+
+
+def _matches_nationality_axis(db: Session, player_id: int, axis: dict) -> bool:
+    player = db.query(Player).filter(Player.id == player_id).first()
+    return player is not None and player.nationality == axis["value"]
+
+
+def _matches_played_with_axis(db: Session, player_id: int, axis: dict) -> bool:
+    return _player_is_teammate(db, player_id, int(axis["value"]))
+
+
+def _matches_season_axis(db: Session, player_id: int, axis: dict) -> bool:
+    return (
+        db.query(PlayerSeasonTeam)
+        .filter(
+            PlayerSeasonTeam.player_id == player_id,
+            PlayerSeasonTeam.season_id == int(axis["value"]),
+        )
+        .first()
+    ) is not None
+
+
+def _matches_position_axis(db: Session, player_id: int, axis: dict) -> bool:
+    player = db.query(Player).filter(Player.id == player_id).first()
+    return player is not None and player.position == axis["value"]
+
+
+AXIS_REGISTRY: dict[str, TicTacToeAxisDefinition] = {
+    "team": TicTacToeAxisDefinition(
+        axis_type="team",
+        weight=0.58,
+        candidate_provider=_get_team_candidates,
+        player_set_builder=_team_player_set,
+        matcher=_matches_team_axis,
+    ),
+    "nationality": TicTacToeAxisDefinition(
+        axis_type="nationality",
+        weight=0.12,
+        candidate_provider=_get_nationality_candidates,
+        player_set_builder=_nationality_player_set,
+        matcher=_matches_nationality_axis,
+        candidate_picker=_pick_weighted,
+    ),
+    "played_with": TicTacToeAxisDefinition(
+        axis_type="played_with",
+        weight=0.20,
+        candidate_provider=_get_played_with_candidates,
+        player_set_builder=_played_with_player_set,
+        matcher=_matches_played_with_axis,
+    ),
+    "season": TicTacToeAxisDefinition(
+        axis_type="season",
+        weight=0.10,
+        candidate_provider=_get_season_candidates,
+        player_set_builder=_season_player_set,
+        matcher=_matches_season_axis,
+        candidate_picker=_pick_weighted,
+        max_per_board=1,
+    ),
+    "position": TicTacToeAxisDefinition(
+        axis_type="position",
+        weight=0.08,
+        candidate_provider=_get_position_candidates,
+        player_set_builder=_position_player_set,
+        matcher=_matches_position_axis,
+        max_per_board=1,
+    ),
+}
+
+# Raw random.choices weights; they are normalized at selection time.
+AXIS_WEIGHTS = {
+    axis_type: definition.weight
+    for axis_type, definition in AXIS_REGISTRY.items()
+}
+
+
+def _get_player_set_for_axis(db: Session, axis: dict) -> set[int]:
+    """Get set of player IDs matching an axis constraint."""
+    definition = AXIS_REGISTRY.get(axis["axis_type"])
+    if definition is None:
+        return set()
+    return definition.player_set_builder(db, axis)
+
+
+def _player_matches_axis(db: Session, player_id: int, axis: dict) -> bool:
+    """Check if a player matches an axis constraint."""
+    definition = AXIS_REGISTRY.get(axis["axis_type"])
+    if definition is None:
+        return False
+    return definition.matcher(db, player_id, axis)
+
+
+def _player_is_teammate(
+    db: Session, player_id: int, star_id: int, *, season_id: int | None = None,
+) -> bool:
+    """Check if player was a teammate of star (optionally restricted to a season)."""
+    if player_id == star_id:
+        return False
+    return player_id in _get_teammate_player_set(
+        db,
+        star_id,
+        season_id=season_id,
+    )
 
 
 def _player_matches_cell(
@@ -464,15 +567,12 @@ def _player_matches_cell(
                 )
                 .first()
             ) is not None
-        elif other_axis["axis_type"] == "played_with":
+        if other_axis["axis_type"] == "played_with":
             # Played_with × Season: teammate in that season only
             return _player_is_teammate(
                 db, player_id, int(other_axis["value"]), season_id=season_id
             )
-        elif other_axis["axis_type"] == "nationality":
-            # Nationality × Season: player in that season with that nationality
-            return _player_matches_axis(db, player_id, other_axis)
-        return False
+        return _player_matches_axis(db, player_id, other_axis)
 
     # No season axis — use independent checks (correct for team×team, team×nat, etc.)
     return (
@@ -1197,6 +1297,20 @@ def _cell_axes(round_obj: QuizTicTacToeRound, row_index: int, col_index: int) ->
 def _get_player_set_for_cell(
     db: Session, row_axis: dict, col_axis: dict,
 ) -> set[int]:
+    return _get_player_set_for_cell_with_cache(
+        db,
+        row_axis,
+        col_axis,
+        lambda axis: _get_player_set_for_axis(db, axis),
+    )
+
+
+def _get_player_set_for_cell_with_cache(
+    db: Session,
+    row_axis: dict,
+    col_axis: dict,
+    player_set_for: Callable[[dict], set[int]],
+) -> set[int]:
     """Get player IDs valid for a cell, handling cross-axis constraints."""
     season_axis = row_axis if row_axis["axis_type"] == "season" else (
         col_axis if col_axis["axis_type"] == "season" else None
@@ -1218,69 +1332,19 @@ def _get_player_set_for_cell(
                 .all()
             )
             return {r.player_id for r in rows}
-        elif other_axis["axis_type"] == "played_with":
+        if other_axis["axis_type"] == "played_with":
             # Played_with × Season: teammates of star in that season only
-            star_id = int(other_axis["value"])
-            star_stints = (
-                db.query(
-                    PlayerSeasonTeam.team_id,
-                    PlayerSeasonTeam.season_id,
-                    PlayerSeasonTeam.registration_start,
-                    PlayerSeasonTeam.registration_end,
-                )
-                .filter(
-                    PlayerSeasonTeam.player_id == star_id,
-                    PlayerSeasonTeam.season_id == season_id,
-                )
-                .all()
+            return _get_teammate_player_set(
+                db,
+                int(other_axis["value"]),
+                season_id=season_id,
             )
-            if not star_stints:
-                return set()
-            conditions = [
-                (PlayerSeasonTeam.team_id == s.team_id)
-                & (PlayerSeasonTeam.season_id == s.season_id)
-                for s in star_stints
-            ]
-            candidate_rows = (
-                db.query(
-                    PlayerSeasonTeam.player_id,
-                    PlayerSeasonTeam.team_id,
-                    PlayerSeasonTeam.season_id,
-                    PlayerSeasonTeam.registration_start,
-                    PlayerSeasonTeam.registration_end,
-                )
-                .filter(or_(*conditions))
-                .filter(PlayerSeasonTeam.player_id != star_id)
-                .all()
-            )
-            result: set[int] = set()
-            star_by_key = {}
-            for s in star_stints:
-                star_by_key.setdefault((s.team_id, s.season_id), []).append(s)
-            for row in candidate_rows:
-                key = (row.team_id, row.season_id)
-                for s in star_by_key.get(key, []):
-                    if _stints_overlap(
-                        row.registration_start, row.registration_end,
-                        s.registration_start, s.registration_end,
-                    ):
-                        result.add(row.player_id)
-                        break
-            return result
-        elif other_axis["axis_type"] == "nationality":
-            # Nationality × Season: players with that nationality in that season
-            season_players = {
-                r.player_id
-                for r in db.query(PlayerSeasonTeam.player_id)
-                .filter(PlayerSeasonTeam.season_id == season_id)
-                .distinct()
-                .all()
-            }
-            nat_players = _get_player_set_for_axis(db, other_axis)
-            return season_players & nat_players
+
+        season_players = player_set_for(season_axis)
+        return season_players & player_set_for(other_axis)
 
     # No season cross-constraint — use standard intersection
-    return _get_player_set_for_axis(db, row_axis) & _get_player_set_for_axis(db, col_axis)
+    return player_set_for(row_axis) & player_set_for(col_axis)
 
 
 def _get_sample_answers(
@@ -1338,224 +1402,105 @@ def _other_player(player_no: int) -> int:
     return 2 if player_no == 1 else 1
 
 
+def _axis_key(axis: dict) -> tuple[str, str]:
+    return axis["axis_type"], axis["value"]
+
+
+def _axis_type_exceeds_board_caps(
+    axis_type: str,
+    selected_axes: list[dict],
+    *,
+    cap_groups: tuple[AxisCapGroup, ...] = AXIS_CAP_GROUPS,
+) -> bool:
+    definition = AXIS_REGISTRY.get(axis_type)
+    if definition and definition.max_per_board is not None:
+        existing_count = sum(
+            1 for axis in selected_axes if axis["axis_type"] == axis_type
+        )
+        if existing_count + 1 > definition.max_per_board:
+            return True
+
+    for cap_group in cap_groups:
+        if axis_type not in cap_group.axis_types:
+            continue
+        existing_group_count = sum(
+            1
+            for axis in selected_axes
+            if axis["axis_type"] in cap_group.axis_types
+        )
+        if existing_group_count + 1 > cap_group.max_per_board:
+            return True
+    return False
+
+
 def _select_board_axes(db: Session) -> list[dict]:
     """Select 6 axes (3 rows + 3 cols) using weighted axis type selection.
 
     Returns list of 6 axis dicts: [row0, row1, row2, col0, col1, col2].
     Each dict has: axis_type, value, display_label.
     """
-    team_candidates = _get_team_candidates(db)
-    nationality_candidates = _get_nationality_candidates(db)
-    played_with_candidates = _get_played_with_candidates(db)
-    season_candidates = _get_season_candidates(db)
+    candidates_by_type = {
+        axis_type: definition.candidate_provider(db)
+        for axis_type, definition in AXIS_REGISTRY.items()
+    }
+    team_candidates = candidates_by_type.get("team", [])
 
     if len(team_candidates) < 6:
         raise TicTacToeConflictError(
             "Not enough teams with player history to generate a TicTacToe board"
         )
 
-    # Precompute player sets for validation
-    team_ids = [int(c["value"]) for c in team_candidates]
-    pairs = (
-        db.query(PlayerSeasonTeam.team_id, PlayerSeasonTeam.player_id)
-        .filter(PlayerSeasonTeam.team_id.in_(team_ids))
-        .distinct()
-        .all()
-    )
-    team_player_sets: dict[str, set[int]] = {}
-    for team_id, player_id in pairs:
-        team_player_sets.setdefault(str(team_id), set()).add(player_id)
-
-    # Precompute nationality player sets
-    nat_player_sets: dict[str, set[int]] = {}
-    if nationality_candidates:
-        nat_names = [c["value"] for c in nationality_candidates]
-        nat_rows = (
-            db.query(Player.id, Player.nationality)
-            .filter(Player.nationality.in_(nat_names))
-            .all()
-        )
-        for pid, nat in nat_rows:
-            nat_player_sets.setdefault(nat, set()).add(pid)
-
-    # Precompute played_with player sets (teammates with date overlap)
-    pw_player_sets: dict[str, set[int]] = {}
-    star_stint_map: dict[int, list] = {}
-    roster_by_key: dict[tuple[int, int], list] = {}
-    if played_with_candidates:
-        star_ids = [int(c["value"]) for c in played_with_candidates]
-        star_stints = (
-            db.query(
-                PlayerSeasonTeam.player_id,
-                PlayerSeasonTeam.team_id,
-                PlayerSeasonTeam.season_id,
-                PlayerSeasonTeam.registration_start,
-                PlayerSeasonTeam.registration_end,
-            )
-            .filter(PlayerSeasonTeam.player_id.in_(star_ids))
-            .all()
-        )
-        # Map star → list of stint records
-        star_stint_map: dict[int, list] = {}
-        for s in star_stints:
-            star_stint_map.setdefault(s.player_id, []).append(s)
-
-        # Collect all (team, season) keys across stars
-        all_roster_keys: set[tuple[int, int]] = set()
-        for stints in star_stint_map.values():
-            for s in stints:
-                all_roster_keys.add((s.team_id, s.season_id))
-
-        if all_roster_keys:
-            roster_conditions = [
-                (PlayerSeasonTeam.team_id == tid) & (PlayerSeasonTeam.season_id == sid)
-                for tid, sid in all_roster_keys
-            ]
-            all_roster_entries = (
-                db.query(
-                    PlayerSeasonTeam.player_id,
-                    PlayerSeasonTeam.team_id,
-                    PlayerSeasonTeam.season_id,
-                    PlayerSeasonTeam.registration_start,
-                    PlayerSeasonTeam.registration_end,
-                )
-                .filter(or_(*roster_conditions))
-                .all()
-            )
-            # Index roster entries by (team_id, season_id)
-            roster_by_key: dict[tuple[int, int], list] = {}
-            for r in all_roster_entries:
-                roster_by_key.setdefault((r.team_id, r.season_id), []).append(r)
-
-            for star_id, stints in star_stint_map.items():
-                teammates: set[int] = set()
-                for s in stints:
-                    for r in roster_by_key.get((s.team_id, s.season_id), []):
-                        if r.player_id != star_id and _stints_overlap(
-                            s.registration_start, s.registration_end,
-                            r.registration_start, r.registration_end,
-                        ):
-                            teammates.add(r.player_id)
-                pw_player_sets[str(star_id)] = teammates
-
-    # Precompute season player sets AND team-season cross-index
-    season_player_sets: dict[str, set[int]] = {}
-    team_season_player_sets: dict[tuple[str, str], set[int]] = {}
-    if season_candidates:
-        season_ids = [int(c["value"]) for c in season_candidates]
-        season_rows = (
-            db.query(PlayerSeasonTeam.season_id, PlayerSeasonTeam.team_id, PlayerSeasonTeam.player_id)
-            .filter(PlayerSeasonTeam.season_id.in_(season_ids))
-            .distinct()
-            .all()
-        )
-        for sid, tid, pid in season_rows:
-            season_player_sets.setdefault(str(sid), set()).add(pid)
-            team_season_player_sets.setdefault((str(tid), str(sid)), set()).add(pid)
-
-    def _cell_player_set(ra: dict, ca: dict) -> set[int]:
-        """Compute the TRUE set of valid players for a row×col cell.
-
-        For season cross-constraints, we compute the precise set rather than
-        naively intersecting independent all-time player sets.
-        """
-        # Identify if one axis is a season
-        season_axis = None
-        other_axis = None
-        if ra["axis_type"] == "season" and ca["axis_type"] != "season":
-            season_axis, other_axis = ra, ca
-        elif ca["axis_type"] == "season" and ra["axis_type"] != "season":
-            season_axis, other_axis = ca, ra
-
-        if season_axis:
-            sid = season_axis["value"]
-            if other_axis["axis_type"] == "team":
-                # Team × Season: players on that team in that season
-                return team_season_player_sets.get((other_axis["value"], sid), set())
-            elif other_axis["axis_type"] == "played_with":
-                # Played_with × Season: teammates restricted to that season
-                all_teammates = pw_player_sets.get(other_axis["value"], set())
-                season_players = season_player_sets.get(sid, set())
-                # Filter to teammates who were actually teammates IN that season
-                star_id = int(other_axis["value"])
-                star_season_teams = {
-                    (s.team_id, s.season_id)
-                    for s in star_stint_map.get(star_id, [])
-                    if str(s.season_id) == sid
-                }
-                if not star_season_teams:
-                    return set()
-                # Only include teammates from rosters matching star's teams in this season
-                result = set()
-                for team_id, s_id in star_season_teams:
-                    for r in roster_by_key.get((team_id, s_id), []):
-                        if r.player_id != star_id and r.player_id in all_teammates:
-                            result.add(r.player_id)
-                return result
-            elif other_axis["axis_type"] == "nationality":
-                # Nationality × Season
-                season_players = season_player_sets.get(sid, set())
-                nat_players = nat_player_sets.get(other_axis["value"], set())
-                return season_players & nat_players
-
-        # No season cross-constraint — standard intersection
-        return _player_set_for(ra) & _player_set_for(ca)
+    player_set_cache: dict[tuple[str, str], set[int]] = {}
+    cell_set_cache: dict[tuple[tuple[str, str], tuple[str, str]], set[int]] = {}
 
     def _player_set_for(axis: dict) -> set[int]:
-        if axis["axis_type"] == "team":
-            return team_player_sets.get(axis["value"], set())
-        elif axis["axis_type"] == "nationality":
-            return nat_player_sets.get(axis["value"], set())
-        elif axis["axis_type"] == "played_with":
-            return pw_player_sets.get(axis["value"], set())
-        elif axis["axis_type"] == "season":
-            return season_player_sets.get(axis["value"], set())
-        return set()
+        key = _axis_key(axis)
+        if key not in player_set_cache:
+            player_set_cache[key] = _get_player_set_for_axis(db, axis)
+        return player_set_cache[key]
 
-    # Build candidate map by type for axis selection
-    candidates_by_type = {
-        "team": team_candidates,
-        "nationality": nationality_candidates,
-        "played_with": played_with_candidates,
-        "season": season_candidates,
-    }
+    def _cell_player_set(ra: dict, ca: dict) -> set[int]:
+        key = (_axis_key(ra), _axis_key(ca))
+        if key not in cell_set_cache:
+            cell_set_cache[key] = _get_player_set_for_cell_with_cache(
+                db,
+                ra,
+                ca,
+                _player_set_for,
+            )
+        return cell_set_cache[key]
 
-    axis_types = list(AXIS_WEIGHTS.keys())
-    axis_probs = [AXIS_WEIGHTS[t] for t in axis_types]
+    axis_types = list(AXIS_REGISTRY.keys())
+    axis_probs = [AXIS_REGISTRY[t].weight for t in axis_types]
 
     max_attempts = 500
     for _ in range(max_attempts):
         axes = []
         used_values: set[tuple[str, str]] = set()
-        has_season = False
         for _ in range(6):
             chosen_type = random.choices(axis_types, weights=axis_probs, k=1)[0]
-            # At most 1 season axis per board
-            if chosen_type == "season" and has_season:
+            if _axis_type_exceeds_board_caps(chosen_type, axes):
                 chosen_type = "team"
             pool = candidates_by_type.get(chosen_type, [])
             available = [
                 c for c in pool
-                if (c["axis_type"], c["value"]) not in used_values
+                if _axis_key(c) not in used_values
+                and not _axis_type_exceeds_board_caps(c["axis_type"], axes)
             ]
 
             if not available:
                 # Fallback to team
                 available = [
                     c for c in team_candidates
-                    if (c["axis_type"], c["value"]) not in used_values
+                    if _axis_key(c) not in used_values
                 ]
                 if not available:
                     break
-                axis = random.choice(available)
-            elif chosen_type in ("nationality", "season"):
-                axis = _pick_weighted(available)
+                axis = AXIS_REGISTRY["team"].pick_candidate(available)
             else:
-                axis = random.choice(available)
+                axis = AXIS_REGISTRY[chosen_type].pick_candidate(available)
 
-            if axis["axis_type"] == "season":
-                has_season = True
-            used_values.add((axis["axis_type"], axis["value"]))
+            used_values.add(_axis_key(axis))
             axes.append(axis)
 
         if len(axes) != 6:
