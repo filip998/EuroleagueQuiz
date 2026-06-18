@@ -19,7 +19,7 @@ from app.auth.clerk import (
 from app.auth.users import UserProvisioningError, get_or_create_user_for_claims
 from app.auth_database import SessionLocal as AuthSessionLocal
 from app.config import settings
-from app.database import SessionLocal
+from app.database import SessionFactory, SessionLocal
 from app.game_actions import (
     GAME_ACTION_NOOP,
     GameActionError,
@@ -298,11 +298,29 @@ class OnlineGameRealtimeModule:
             else disconnect_grace_seconds
         )
         self._broadcast_locks: dict[int, asyncio.Lock] = {}
-        self.game_actions = GameActionOrchestrator(adapter, self, log=logger)
+        self.game_actions = GameActionOrchestrator(
+            adapter,
+            self,
+            session_factory=session_factory,
+            log=logger,
+        )
 
-    async def connect(self, websocket: WebSocket, game_id: int, player: int) -> None:
+    async def connect(
+        self,
+        websocket: WebSocket,
+        game_id: int,
+        player: int,
+        *,
+        session_factory: SessionFactory | None = None,
+    ) -> None:
+        active_session_factory = session_factory or self.session_factory
         try:
-            await self._send_initial_state(websocket, game_id, player)
+            await self._send_initial_state(
+                websocket,
+                game_id,
+                player,
+                session_factory=active_session_factory,
+            )
             while True:
                 try:
                     data = await websocket.receive_json()
@@ -323,7 +341,13 @@ class OnlineGameRealtimeModule:
                     )
                     continue
 
-                await self.handle_client_message(websocket, game_id, player, data)
+                await self.handle_client_message(
+                    websocket,
+                    game_id,
+                    player,
+                    data,
+                    session_factory=active_session_factory,
+                )
         except WebSocketDisconnect:
             self.disconnect(game_id, player, websocket)
         except Exception:
@@ -331,9 +355,14 @@ class OnlineGameRealtimeModule:
             raise
 
     async def _send_initial_state(
-        self, websocket: WebSocket, game_id: int, player: int
+        self,
+        websocket: WebSocket,
+        game_id: int,
+        player: int,
+        *,
+        session_factory: SessionFactory | None = None,
     ) -> None:
-        db = self.session_factory()
+        db = (session_factory or self.session_factory)()
         try:
             game = self.adapter.get_game(db, game_id)
             state = self.adapter.serialize_state(db, game)
@@ -382,6 +411,8 @@ class OnlineGameRealtimeModule:
         game_id: int,
         player: int,
         data: Any,
+        *,
+        session_factory: SessionFactory | None = None,
     ) -> dict[str, Any] | None:
         if not isinstance(data, dict):
             await websocket.send_json(
@@ -402,17 +433,13 @@ class OnlineGameRealtimeModule:
         if action == RealtimeClientAction.TIME_EXPIRED:
             return None
 
-        db = self.session_factory()
-        try:
-            envelope = await self.game_actions.websocket_action(
-                db=db,
-                action=str(action),
-                payload=data,
-                game_id=game_id,
-                player=player,
-            )
-        finally:
-            db.close()
+        envelope = await self.game_actions.websocket_action(
+            action=str(action),
+            payload=data,
+            game_id=game_id,
+            player=player,
+            session_factory=session_factory,
+        )
 
         if envelope["type"] == "error":
             await websocket.send_json(envelope)
@@ -554,45 +581,50 @@ class OnlineGameRealtimeModule:
         if self.connections.has_player(game_id, player):
             return
 
-        db = self.session_factory()
-        try:
-            def action():
-                if self.connections.has_player(game_id, player):
-                    return GAME_ACTION_NOOP
-                try:
-                    game = self.adapter.get_game(db, game_id)
-                except GameActionError:
-                    return GAME_ACTION_NOOP
-                if (
-                    getattr(game, "mode", None) != "online_friend"
-                    or getattr(game, "status", None) != "active"
-                ):
-                    return GAME_ACTION_NOOP
-                eligible_hook = getattr(self.adapter, "disconnect_forfeit_eligible", None)
-                if eligible_hook is not None and not eligible_hook(game):
-                    return GAME_ACTION_NOOP
-                return self.adapter.handle_player_forfeit(
-                    db,
-                    game,
-                    forfeiting_player=player,
-                    result=RealtimeResult.OPPONENT_LEFT,
+        async with self.game_actions.game_lock(game_id):
+            db = self.session_factory()
+            try:
+                def action():
+                    if self.connections.has_player(game_id, player):
+                        return GAME_ACTION_NOOP
+                    try:
+                        game = self.adapter.get_game(db, game_id)
+                    except GameActionError:
+                        return GAME_ACTION_NOOP
+                    if (
+                        getattr(game, "mode", None) != "online_friend"
+                        or getattr(game, "status", None) != "active"
+                    ):
+                        return GAME_ACTION_NOOP
+                    eligible_hook = getattr(
+                        self.adapter,
+                        "disconnect_forfeit_eligible",
+                        None,
+                    )
+                    if eligible_hook is not None and not eligible_hook(game):
+                        return GAME_ACTION_NOOP
+                    return self.adapter.handle_player_forfeit(
+                        db,
+                        game,
+                        forfeiting_player=player,
+                        result=RealtimeResult.OPPONENT_LEFT,
+                    )
+
+                game = run_game_action(db, action)
+                if game is GAME_ACTION_NOOP:
+                    return
+
+                db.refresh(game)
+                state = self.adapter.serialize_state(db, game)
+            except Exception:
+                logger.exception(
+                    "Error in realtime disconnect grace timer for game %s player %s",
+                    game_id,
+                    player,
                 )
-
-            game = run_game_action(db, action)
-            if game is GAME_ACTION_NOOP:
                 return
-
-            db.refresh(game)
-            state = self.adapter.serialize_state(db, game)
-        except Exception:
-            logger.exception(
-                "Error in realtime disconnect grace timer for game %s player %s",
-                game_id,
-                player,
-            )
-            return
-        finally:
-            db.close()
+            finally:
+                db.close()
 
         self.cancel_timer(game_id)
         self.disconnect_grace_timer.cancel_game(game_id)
@@ -605,47 +637,48 @@ class OnlineGameRealtimeModule:
     async def _expire_turn(
         self, game_id: int, expected_player: int, expected_round: int
     ) -> None:
-        db = self.session_factory()
-        try:
-            def action():
-                try:
-                    game = self.adapter.get_game(db, game_id)
-                except GameActionError:
-                    return GAME_ACTION_NOOP
-                handle_unattended_time_expired = getattr(
-                    self.adapter,
-                    "handle_unattended_time_expired",
-                    None,
-                )
-                if (
-                    handle_unattended_time_expired is not None
-                    and not self.connections.has_player(game_id, 1)
-                    and not self.connections.has_player(game_id, 2)
-                ):
-                    return handle_unattended_time_expired(
+        async with self.game_actions.game_lock(game_id):
+            db = self.session_factory()
+            try:
+                def action():
+                    try:
+                        game = self.adapter.get_game(db, game_id)
+                    except GameActionError:
+                        return GAME_ACTION_NOOP
+                    handle_unattended_time_expired = getattr(
+                        self.adapter,
+                        "handle_unattended_time_expired",
+                        None,
+                    )
+                    if (
+                        handle_unattended_time_expired is not None
+                        and not self.connections.has_player(game_id, 1)
+                        and not self.connections.has_player(game_id, 2)
+                    ):
+                        return handle_unattended_time_expired(
+                            db,
+                            game,
+                            expected_player=expected_player,
+                            expected_round=expected_round,
+                        )
+                    return self.adapter.handle_time_expired(
                         db,
                         game,
                         expected_player=expected_player,
                         expected_round=expected_round,
                     )
-                return self.adapter.handle_time_expired(
-                    db,
-                    game,
-                    expected_player=expected_player,
-                    expected_round=expected_round,
-                )
 
-            game = run_game_action(db, action)
-            if game is GAME_ACTION_NOOP:
+                game = run_game_action(db, action)
+                if game is GAME_ACTION_NOOP:
+                    return
+
+                db.refresh(game)
+                state = self.adapter.serialize_state(db, game)
+            except Exception:
+                logger.exception("Error in realtime turn timer for game %s", game_id)
                 return
-
-            db.refresh(game)
-            state = self.adapter.serialize_state(db, game)
-        except Exception:
-            logger.exception("Error in realtime turn timer for game %s", game_id)
-            return
-        finally:
-            db.close()
+            finally:
+                db.close()
 
         await self.broadcast_state(game_id, state, result=RealtimeResult.TIME_EXPIRED)
         fresh_state = self._fresh_active_state(game_id)

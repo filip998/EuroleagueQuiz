@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
+from app.database import SessionFactory, SessionLocal
 from app.game_actions import (
     GameActionCode,
     GameActionError,
@@ -60,12 +64,30 @@ class RealtimeActionOutcome:
 
 
 @dataclass(frozen=True)
+class GameActionExecution:
+    state: dict[str, Any]
+    envelope: dict[str, Any]
+    result: RealtimeResult | str | None
+    completed_round: dict[str, Any] | None
+    broadcast: bool
+    broadcast_to_player: int | None
+    schedule_timer: bool
+    cancel_timer: bool
+
+
+@dataclass(frozen=True)
 class GameActionCommand:
     action: str
     payload: dict[str, Any]
     game_id: int | None = None
     player: int | None = None
     source: str = "http"
+
+
+@dataclass
+class _ActionLockEntry:
+    lock: asyncio.Lock
+    waiters: int = 0
 
 
 class HttpGameActionRejected(Exception):
@@ -116,20 +138,23 @@ class GameActionOrchestrator:
         adapter: GameActionAdapter,
         realtime_effects: RealtimeEffects,
         *,
+        session_factory: SessionFactory = SessionLocal,
         log: logging.Logger | None = None,
     ):
         self.adapter = adapter
         self.realtime_effects = realtime_effects
+        self.session_factory = session_factory
         self.log = log or logger
+        self._action_locks: dict[str, _ActionLockEntry] = {}
 
     async def http_action(
         self,
         *,
-        db: Session,
         action: str | GameActionName,
         payload: Any = None,
         game_id: int | None = None,
         player: int | None = None,
+        session_factory: SessionFactory | None = None,
     ) -> dict[str, Any]:
         action_value = _action_value(action)
         if action_value not in self._http_actions():
@@ -141,7 +166,6 @@ class GameActionOrchestrator:
 
         try:
             return await self._execute(
-                db,
                 GameActionCommand(
                     action=action_value,
                     payload=_payload_dict(payload),
@@ -149,6 +173,7 @@ class GameActionOrchestrator:
                     player=player,
                     source="http",
                 ),
+                session_factory=session_factory,
             )
         except GameActionError as exc:
             raise _http_rejected_for_game_action(exc) from exc
@@ -163,11 +188,11 @@ class GameActionOrchestrator:
     async def websocket_action(
         self,
         *,
-        db: Session,
         action: str,
         payload: dict[str, Any],
         game_id: int,
         player: int,
+        session_factory: SessionFactory | None = None,
     ) -> dict[str, Any]:
         known_actions = self._http_actions() | self._websocket_actions()
         if action not in known_actions:
@@ -180,7 +205,6 @@ class GameActionOrchestrator:
 
         try:
             return await self._execute(
-                db,
                 GameActionCommand(
                     action=action,
                     payload=_payload_dict(payload),
@@ -188,6 +212,7 @@ class GameActionOrchestrator:
                     player=player,
                     source="websocket",
                 ),
+                session_factory=session_factory,
             )
         except GameActionError as exc:
             return websocket_error_payload(exc)
@@ -200,64 +225,122 @@ class GameActionOrchestrator:
 
     async def _execute(
         self,
-        db: Session,
         command: GameActionCommand,
+        *,
+        session_factory: SessionFactory | None = None,
     ) -> dict[str, Any]:
-        outcome = run_game_action(db, lambda: self._handle_adapter_action(db, command))
+        factory = session_factory or self.session_factory
+        async with self._command_lock(command):
+            execution = await run_in_threadpool(
+                self._execute_in_worker,
+                factory,
+                command,
+            )
+            await self._apply_realtime_effects(execution)
+            return execution.envelope
 
-        db.refresh(outcome.game)
-        with timed_phase("response.state_serialization"):
-            state = self.adapter.serialize_state(db, outcome.game)
-            completed_round = outcome.completed_round
-            if completed_round is None and outcome.completed_round_number is not None:
-                with timed_phase("response.completed_round_serialization"):
-                    completed_round = self.adapter.serialize_completed_round(
-                        db,
-                        state["id"],
-                        outcome.completed_round_number,
-                    )
+    def _execute_in_worker(
+        self,
+        session_factory: SessionFactory,
+        command: GameActionCommand,
+    ) -> GameActionExecution:
+        db = session_factory()
+        try:
+            outcome = run_game_action(
+                db,
+                lambda: self._handle_adapter_action(db, command),
+            )
 
-            envelope = state_message(
-                state,
+            db.refresh(outcome.game)
+            with timed_phase("response.state_serialization"):
+                state = self.adapter.serialize_state(db, outcome.game)
+                completed_round = outcome.completed_round
+                if completed_round is None and outcome.completed_round_number is not None:
+                    with timed_phase("response.completed_round_serialization"):
+                        completed_round = self.adapter.serialize_completed_round(
+                            db,
+                            state["id"],
+                            outcome.completed_round_number,
+                        )
+
+                envelope = state_message(
+                    state,
+                    result=outcome.result,
+                    completed_round=completed_round,
+                )
+            return GameActionExecution(
+                state=state,
+                envelope=envelope,
                 result=outcome.result,
                 completed_round=completed_round,
+                broadcast=outcome.broadcast,
+                broadcast_to_player=outcome.broadcast_to_player,
+                schedule_timer=outcome.schedule_timer,
+                cancel_timer=outcome.cancel_timer,
             )
-        await self._apply_realtime_effects(state, outcome, completed_round)
-        return envelope
+        finally:
+            db.close()
 
     async def _apply_realtime_effects(
         self,
-        state: dict[str, Any],
-        outcome: RealtimeActionOutcome,
-        completed_round: dict[str, Any] | None,
+        execution: GameActionExecution,
     ) -> None:
+        state = execution.state
         if state.get("mode", "online_friend") != "online_friend":
             return
 
         game_id = state["id"]
-        if outcome.cancel_timer:
+        if execution.cancel_timer:
             self._log_post_commit_failure(
                 "cancel timer",
                 lambda: self.realtime_effects.cancel_timer(game_id),
             )
-        if outcome.schedule_timer and state.get("status") == "active":
+        if execution.schedule_timer and state.get("status") == "active":
             self._log_post_commit_failure(
                 "start timer",
                 lambda: self.realtime_effects.start_timer_from_state(state),
             )
-        if outcome.broadcast:
+        if execution.broadcast:
             try:
                 await self.realtime_effects.broadcast_state(
                     game_id,
                     state,
-                    result=outcome.result,
-                    completed_round=completed_round,
-                    only_player=outcome.broadcast_to_player,
+                    result=execution.result,
+                    completed_round=execution.completed_round,
+                    only_player=execution.broadcast_to_player,
                 )
             except Exception:
                 self.log.exception(
                     "Post-commit game action side effect failed: broadcast state"
                 )
+
+    @asynccontextmanager
+    async def _command_lock(self, command: GameActionCommand):
+        async with self.action_lock(_command_lock_key(command)):
+            yield
+
+    @asynccontextmanager
+    async def game_lock(self, game_id: int):
+        async with self.action_lock(f"game:{game_id}"):
+            yield
+
+    @asynccontextmanager
+    async def action_lock(self, key: str | None):
+        if key is None:
+            yield
+            return
+        entry = self._action_locks.get(key)
+        if entry is None:
+            entry = _ActionLockEntry(asyncio.Lock())
+            self._action_locks[key] = entry
+        entry.waiters += 1
+        try:
+            async with entry.lock:
+                yield
+        finally:
+            entry.waiters -= 1
+            if entry.waiters == 0 and not entry.lock.locked():
+                self._action_locks.pop(key, None)
 
     def _log_post_commit_failure(self, effect: str, run: Any) -> None:
         try:
@@ -310,6 +393,16 @@ def _payload_dict(payload: Any) -> dict[str, Any]:
     if isinstance(payload, dict):
         return dict(payload)
     raise InvalidGameActionError("Game action payload must be an object")
+
+
+def _command_lock_key(command: GameActionCommand) -> str | None:
+    if command.game_id is not None:
+        return f"game:{command.game_id}"
+    if command.action == GameActionName.JOIN:
+        join_code = command.payload.get("join_code")
+        if isinstance(join_code, str) and join_code.strip():
+            return f"join:{join_code.strip().upper()}"
+    return None
 
 
 def _http_rejected(

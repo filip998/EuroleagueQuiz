@@ -85,3 +85,36 @@ Representative correct move `Server-Timing`:
 ```text
 move_player_matches_cell;dur=0.763, db_commit;dur=0.470, response_state_serialization;dur=1.645, response_serialization;dur=0.049, http_status_code;desc="200"
 ```
+
+## Game-action event-loop offload result
+
+Issue: #184
+Captured: 2026-06-19 on local macOS development hardware
+Database: tracked content DB (`backend/data/euroleague.db`)
+
+The game-action orchestration seam now runs synchronous service/database work in a
+threadpool with a worker-owned SQLAlchemy session, then applies realtime
+broadcast/timer effects back on the event loop after commit. The goal is fairness
+under concurrency: unrelated requests can interleave instead of waiting behind a
+slow synchronous game action. This does not reduce single-request CPU cost, and
+raw CPU throughput is still capped by the GIL and the single-vCPU App Service
+tier. Multi-process `uvicorn --workers` remains deferred because realtime
+connections and timers are process-local today.
+
+Before #184, the issue benchmark measured a normally ~100 ms unrelated read
+freezing to **5654 ms** while 5 heavy board-generation actions ran on the event
+loop. After #184, the existing concurrent benchmark stayed responsive with the
+same concurrency shape:
+
+| Concurrent task | Duration |
+| --- | ---: |
+| Wall time | 4.566 ms |
+| Board #1 | 0.888 ms |
+| Board #2 | 0.618 ms |
+| Board #3 | 1.198 ms |
+| Board #4 | 0.396 ms |
+| Board #5 | 0.730 ms |
+| Unrelated read (`count(players.id)=3718`) | 4.557 ms |
+
+Warm board-generation runs were `1.000, 1.336, 0.411, 0.676, 0.146 ms`
+(`mean=0.714 ms`); the cold cache build was `223.963 ms`.
