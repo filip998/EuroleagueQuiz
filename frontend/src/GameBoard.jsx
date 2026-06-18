@@ -4,6 +4,8 @@ import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import PlayerSearch from "./PlayerSearch";
 import BoardHeaderNav from "./BoardHeaderNav";
+import GameResult from "./GameResult";
+import { winnerDisplayName } from "./winnerName";
 import OnlineScoreboard from "./OnlineScoreboard";
 import ClubLogo from "./ClubLogo";
 import WaitingLobby from "./WaitingLobby";
@@ -66,41 +68,6 @@ function AxisLabel({ axis }) {
   );
 }
 
-const CONFETTI_PIECES = [
-  { left: "6%", delay: "0s", duration: "2.7s", color: "#FF6600" },
-  { left: "14%", delay: "0.25s", duration: "3.1s", color: "#2563EB" },
-  { left: "22%", delay: "0.5s", duration: "2.5s", color: "#DC2626" },
-  { left: "30%", delay: "0.1s", duration: "3.3s", color: "#059669" },
-  { left: "38%", delay: "0.45s", duration: "2.8s", color: "#FF8533" },
-  { left: "46%", delay: "0.2s", duration: "3.0s", color: "#D97706" },
-  { left: "54%", delay: "0.55s", duration: "2.6s", color: "#2563EB" },
-  { left: "62%", delay: "0.15s", duration: "3.2s", color: "#FF6600" },
-  { left: "70%", delay: "0.4s", duration: "2.9s", color: "#DC2626" },
-  { left: "78%", delay: "0.05s", duration: "3.4s", color: "#059669" },
-  { left: "86%", delay: "0.5s", duration: "2.7s", color: "#FF8533" },
-  { left: "94%", delay: "0.3s", duration: "3.1s", color: "#2563EB" },
-];
-
-// Lightweight celebratory confetti shown only to the winner. Purely decorative:
-// pointer-events-none and aria-hidden so it never blocks the modal or assistive tech.
-function VictoryConfetti() {
-  return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-      {CONFETTI_PIECES.map((p, i) => (
-        <span
-          key={i}
-          className="absolute -top-4 w-2 h-3 rounded-[1px]"
-          style={{
-            left: p.left,
-            background: p.color,
-            animation: `confetti-fall ${p.duration} linear ${p.delay} forwards`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
 export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo }) {
   const [game, setGame] = useState(initialState?.game || initialState);
   const [selectedCell, setSelectedCell] = useState(null);
@@ -110,7 +77,6 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const [timeLeft, setTimeLeft] = useState(null);
   const [roundTransition, setRoundTransition] = useState(null);
   const [cancelling, setCancelling] = useState(false);
-  const [resultDismissed, setResultDismissed] = useState(false);
 
   const isSolo = game?.mode === "single_player";
   // A solo / local game must never be treated as online, even if `onlineInfo`
@@ -208,15 +174,6 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     }, 1000);
     return () => clearTimeout(timer);
   }, [roundTransition]);
-
-  // Keep the dismissed-result flag tied to the match lifecycle. It only ever
-  // becomes true after the user dismisses the victory modal on a finished game,
-  // so resetting whenever the game is not finished guarantees a later finished
-  // state always reveals the modal (and a polling refresh of a finished game,
-  // which keeps status === "finished", never reopens a dismissed modal).
-  useEffect(() => {
-    if (game?.status !== "finished") setResultDismissed(false);
-  }, [game?.status]);
 
   function startRoundTransition(result, completedRound) {
     if (completedRound) {
@@ -425,10 +382,10 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     finishedReason = iWon ? "Your opponent left the game." : "You left the game.";
   }
 
-  // Subtitle shown in the victory modal. Reuse the perspective-aware forfeit
-  // reason when we have it; otherwise (a normal final-round win, or a plain
-  // GET refresh with no terminal reason) fall back to a generic line that is
-  // still perspective-aware for online players.
+  // Subtitle shown on the finished-game result screen. Reuse the
+  // perspective-aware forfeit reason when we have it; otherwise (a normal
+  // final-round win, or a plain GET refresh with no terminal reason) fall back
+  // to a generic line that is still perspective-aware for online players.
   const finishedSubtitle =
     finishedReason ||
     (iWon
@@ -436,6 +393,19 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       : isOnline && myPlayer != null
         ? "Better luck next time."
         : "Match complete \u2014 well played!");
+
+  if (!isSolo && game.status === "finished" && !inTransition) {
+    const finishedWinnerName = winnerDisplayName(game);
+    return (
+      <GameResult
+        title={finishedWinnerName ? `${finishedWinnerName} WINS!` : "No winner"}
+        subtitle={finishedSubtitle}
+        onPlayAgain={onNewGame}
+        onHome={onHome}
+        celebrate={iWon}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -729,73 +699,6 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           onSelect={handlePlayerSelect}
           onCancel={() => setSelectedCell(null)}
         />
-      )}
-
-      {/* Victory modal — revealed over the board so the result is seen at any
-          scroll position. Dismissible via the scrim or the close button; the
-          "View result" pill below reopens it so the final board stays inspectable. */}
-      {!isSolo && game.status === "finished" && !inTransition && !resultDismissed && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-overlay-in"
-          style={{ background: "rgba(15, 25, 35, 0.62)", backdropFilter: "blur(4px)" }}
-          onClick={() => setResultDismissed(true)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Match result"
-        >
-          {iWon && <VictoryConfetti />}
-          <div
-            className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 sm:p-8 text-center animate-modal-in"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={() => setResultDismissed(true)}
-              aria-label="Close"
-              className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-lg text-elq-muted hover:text-elq-text hover:bg-elq-bg transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-              </svg>
-            </button>
-
-            <div className="mx-auto mb-4 w-20 h-20 rounded-full bg-gradient-to-br from-elq-orange to-elq-orange-light flex items-center justify-center text-4xl shadow-lg animate-pulse-ring">
-              {"\ud83c\udfc6"}
-            </div>
-
-            <h2 className="font-display text-4xl tracking-wide text-elq-dark mb-2">
-              {game.winner_player === 1 ? game.player1_name : game.player2_name} WINS!
-            </h2>
-
-            <p className="text-sm text-elq-muted mb-6">{finishedSubtitle}</p>
-
-            <div className="flex flex-col gap-2.5">
-              <button
-                onClick={onNewGame}
-                className="w-full px-8 py-3 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all text-lg"
-              >
-                New Game
-              </button>
-              <button
-                onClick={onHome}
-                className="w-full px-8 py-2.5 bg-white border border-elq-border text-elq-text font-medium rounded-xl hover:bg-elq-bg active:scale-[0.98] transition-all"
-              >
-                Back to Home
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Reopen the dismissed victory modal without scrolling. */}
-      {!isSolo && game.status === "finished" && !inTransition && resultDismissed && (
-        <button
-          type="button"
-          onClick={() => setResultDismissed(false)}
-          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 px-5 py-2.5 bg-elq-dark text-white text-sm font-semibold rounded-full shadow-lg hover:opacity-90 active:scale-95 transition-all flex items-center gap-2 animate-fade-in-up"
-        >
-          <span aria-hidden="true">{"\ud83c\udfc6"}</span> View result
-        </button>
       )}
     </div>
   );

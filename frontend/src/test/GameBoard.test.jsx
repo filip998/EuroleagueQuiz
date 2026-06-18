@@ -258,8 +258,8 @@ describe("GameBoard online resign", () => {
   });
 });
 
-describe("GameBoard victory modal", () => {
-  it("reveals the modal and clears the waiting indicator when the opponent resigns", async () => {
+describe("GameBoard end-of-game result", () => {
+  it("reveals the inline result and clears the waiting indicator when the opponent resigns", async () => {
     // Player 2 is the viewer and it is player 1's turn, so the stale-prone
     // "Waiting for opponent..." indicator is on screen before the match ends.
     render(
@@ -273,8 +273,8 @@ describe("GameBoard victory modal", () => {
 
     expect(screen.getByText("Waiting for opponent...")).toBeInTheDocument();
 
-    // Player 1 resigns remotely; player 2 wins. The result must surface in the
-    // over-the-board modal and the waiting indicator must vanish once the game
+    // Player 1 resigns remotely; player 2 wins. The result must surface on the
+    // inline result screen and the waiting indicator must vanish once the game
     // is no longer active.
     act(() => {
       realtimeHolder.opts.onState({
@@ -288,7 +288,7 @@ describe("GameBoard victory modal", () => {
     expect(screen.queryByText("Waiting for opponent...")).not.toBeInTheDocument();
   });
 
-  it("shows the modal only after the round transition for a normal final-round win", () => {
+  it("shows the result only after the round transition for a normal final-round win", () => {
     vi.useFakeTimers();
     try {
       render(
@@ -301,7 +301,7 @@ describe("GameBoard victory modal", () => {
       );
 
       // A match-winning move flows through the shared 3s round transition, during
-      // which the victory modal stays hidden (no flicker of the final reveal).
+      // which the result screen stays hidden (no flicker of the final reveal).
       act(() => {
         realtimeHolder.opts.onState({
           state: activeGame({ status: "finished", winner_player: 1 }),
@@ -324,7 +324,7 @@ describe("GameBoard victory modal", () => {
         });
       }
 
-      // After the transition the modal appears with the generic, perspective-aware
+      // After the transition the result appears with the generic, perspective-aware
       // win line (no forfeit reason for a normal win).
       expect(screen.getByText(/WINS!/)).toBeInTheDocument();
       expect(screen.getByText("You won the match!")).toBeInTheDocument();
@@ -333,7 +333,7 @@ describe("GameBoard victory modal", () => {
     }
   });
 
-  it("is dismissible and reopens from the View result pill", async () => {
+  it("renders a persistent inline result with no dismiss control", async () => {
     render(
       <GameBoard
         initialState={activeGame()}
@@ -350,18 +350,23 @@ describe("GameBoard victory modal", () => {
       });
     });
 
+    // The unified result screen replaces the board inline — it is not a
+    // dismissible modal, so the forfeit reason and winner stay on screen.
     expect(await screen.findByText("Your opponent resigned.")).toBeInTheDocument();
+    expect(screen.getByText(/WINS!/)).toBeInTheDocument();
 
-    // Dismiss via the close button to inspect the final board...
-    fireEvent.click(screen.getByLabelText("Close"));
-    expect(screen.queryByText("Your opponent resigned.")).not.toBeInTheDocument();
+    // The old dismissible modal is gone: no Close button, no "View result" pill,
+    // and no dialog role to dismiss.
+    expect(screen.queryByLabelText("Close")).toBeNull();
+    expect(screen.queryByText("View result")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
 
-    // ...the result stays reachable through the View result pill.
-    fireEvent.click(screen.getByText("View result"));
-    expect(screen.getByText("Your opponent resigned.")).toBeInTheDocument();
+    // The end-of-game actions use the standardized, cross-game labels.
+    expect(screen.getByText("Play Again")).toBeInTheDocument();
+    expect(screen.getByText("Home")).toBeInTheDocument();
   });
 
-  it("does not render the victory modal for a finished solo game", () => {
+  it("does not render the result screen for a finished solo game", () => {
     render(
       <GameBoard
         initialState={activeGame({ mode: "single_player", status: "finished", winner_player: 1 })}
@@ -371,8 +376,32 @@ describe("GameBoard victory modal", () => {
       />
     );
 
+    // Solo games keep their final board (the shared result screen is online-only),
+    // so neither the winner headline nor the Play Again action appears.
     expect(screen.queryByText(/WINS!/)).not.toBeInTheDocument();
-    expect(screen.queryByText("View result")).not.toBeInTheDocument();
+    expect(screen.queryByText("Play Again")).not.toBeInTheDocument();
+  });
+
+  it("does not credit Player 2 when a finished online game has no winner", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame({ current_player: 1 })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 2 }}
+      />
+    );
+
+    // A null winner must not fall through to the Player 2 name; the shared
+    // winnerDisplayName helper renders a neutral "No winner" headline.
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ status: "finished", winner_player: null }),
+      });
+    });
+
+    expect(await screen.findByRole("heading", { name: "No winner" })).toBeInTheDocument();
+    expect(screen.queryByText("Bob WINS!")).not.toBeInTheDocument();
   });
 });
 

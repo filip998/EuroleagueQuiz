@@ -5,6 +5,8 @@ import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import BoardHeaderNav from "./BoardHeaderNav";
 import ClubLogo from "./ClubLogo";
+import GameResult from "./GameResult";
+import { winnerDisplayName } from "./winnerName";
 
 const POSITION_ORDER = { "Guard": 0, "Guard-Forward": 1, "Forward": 2, "Forward-Center": 3, "Center": 4 };
 function posRank(p) { return POSITION_ORDER[p] ?? 5; }
@@ -202,7 +204,15 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   const canGuess = game.status === "active" && !inTransition && !isRevealing && !game.pending_end && isMyTurn && !roundOver;
 
   if (!isSolo && game.status === "finished" && !inTransition && !isRevealing) {
-    return (<div className="min-h-screen flex flex-col"><div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" /><div className="flex-1 flex items-center justify-center p-4"><div className="text-center animate-fade-in-up"><div className="text-5xl mb-3">{"\ud83c\udfc6"}</div><h2 className="font-display text-4xl text-elq-dark mb-2">{game.winner_player === 1 ? game.player1_name : game.player2_name} WINS!</h2><p className="text-elq-muted mb-6">{game.player1_name} {game.player1_score} &ndash; {game.player2_score} {game.player2_name}</p><div className="flex gap-3 justify-center"><button onClick={onNewGame} className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all">Play Again</button>{onHome && <button onClick={onHome} className="px-8 py-3 bg-white border border-elq-border text-elq-text font-bold rounded-xl hover:bg-elq-bg transition-all">Home</button>}</div></div></div></div>);
+    const finishedWinnerName = winnerDisplayName(game);
+    return (
+      <GameResult
+        title={finishedWinnerName ? `${finishedWinnerName} WINS!` : "No winner"}
+        subtitle={`${game.player1_name} ${game.player1_score} \u2013 ${game.player2_score} ${game.player2_name}`}
+        onPlayAgain={onNewGame}
+        onHome={onHome}
+      />
+    );
   }
 
   return (

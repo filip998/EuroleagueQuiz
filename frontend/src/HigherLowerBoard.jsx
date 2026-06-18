@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { submitHigherLowerAnswer } from "./api";
 import BoardHeaderNav from "./BoardHeaderNav";
+import GameResult from "./GameResult";
 
 // Country code mapping for flag emojis
 const COUNTRY_FLAGS = {
@@ -85,67 +86,43 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
   // Game over screen
   if (gameOver && result) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="text-center animate-fade-in-up max-w-md w-full">
-            <div className="text-6xl mb-4">
-              {gameOver.streak === 0 ? "😬" : gameOver.streak < 5 ? "👏" : gameOver.streak < 10 ? "🔥" : "🏆"}
+      <GameResult
+        emoji={gameOver.streak === 0 ? "😬" : gameOver.streak < 5 ? "👏" : gameOver.streak < 10 ? "🔥" : "🏆"}
+        title="GAME OVER"
+        subtitle={gameOver.streak === 0 ? "Better luck next time!" : `${gameOver.streak} correct in a row!`}
+        onPlayAgain={onNewGame}
+        onHome={onHome}
+      >
+        {/* Last answer reveal */}
+        <div className="bg-white rounded-2xl border border-red-200 p-4 mb-6">
+          <div className="text-xs text-elq-muted uppercase tracking-wider mb-3">{pair.category_label}</div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1 text-center">
+              <div className="text-lg font-semibold text-elq-dark">{pair.left.name}</div>
+              <div className="text-2xl font-bold text-elq-dark mt-1">{formatValue(result.left_value)}</div>
             </div>
-            <h2 className="font-display text-5xl text-elq-dark mb-2">GAME OVER</h2>
-            <p className="text-elq-muted text-lg mb-6">
-              {gameOver.streak === 0 ? "Better luck next time!" : `${gameOver.streak} correct in a row!`}
-            </p>
-
-            {/* Last answer reveal */}
-            <div className="bg-white rounded-2xl border border-red-200 p-4 mb-6">
-              <div className="text-xs text-elq-muted uppercase tracking-wider mb-3">{pair.category_label}</div>
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex-1 text-center">
-                  <div className="text-lg font-semibold text-elq-dark">{pair.left.name}</div>
-                  <div className="text-2xl font-bold text-elq-dark mt-1">{formatValue(result.left_value)}</div>
-                </div>
-                <div className="text-elq-muted text-sm font-medium">vs</div>
-                <div className="flex-1 text-center">
-                  <div className="text-lg font-semibold text-elq-dark">{pair.right.name}</div>
-                  <div className="text-2xl font-bold text-elq-dark mt-1">{formatValue(result.right_value)}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Stats */}
-            <div className="space-y-2 mb-8">
-              {gameOver.is_personal_best && gameOver.streak > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-sm font-semibold text-amber-700">
-                  🎉 New Personal Best!
-                </div>
-              )}
-              {gameOver.leaderboard_position <= 10 && gameOver.streak > 0 && (
-                <div className="bg-elq-orange/10 border border-elq-orange/20 rounded-xl px-4 py-2 text-sm font-semibold text-elq-orange">
-                  🏆 #{gameOver.leaderboard_position} on the Leaderboard!
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3 justify-center">
-              <button
-                onClick={onNewGame}
-                className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all text-lg"
-              >
-                Play Again
-              </button>
-              {onHome && (
-                <button
-                  onClick={onHome}
-                  className="px-8 py-3 bg-white border border-elq-border text-elq-text font-bold rounded-xl hover:bg-elq-bg transition-all"
-                >
-                  Home
-                </button>
-              )}
+            <div className="text-elq-muted text-sm font-medium">vs</div>
+            <div className="flex-1 text-center">
+              <div className="text-lg font-semibold text-elq-dark">{pair.right.name}</div>
+              <div className="text-2xl font-bold text-elq-dark mt-1">{formatValue(result.right_value)}</div>
             </div>
           </div>
         </div>
-      </div>
+
+        {/* Stats */}
+        <div className="space-y-2 mb-8">
+          {gameOver.is_personal_best && gameOver.streak > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-sm font-semibold text-amber-700">
+              🎉 New Personal Best!
+            </div>
+          )}
+          {gameOver.leaderboard_position <= 10 && gameOver.streak > 0 && (
+            <div className="bg-elq-orange/10 border border-elq-orange/20 rounded-xl px-4 py-2 text-sm font-semibold text-elq-orange">
+              🏆 #{gameOver.leaderboard_position} on the Leaderboard!
+            </div>
+          )}
+        </div>
+      </GameResult>
     );
   }
 

@@ -281,6 +281,20 @@ describe("RosterGuessRaceBoard online resign", () => {
     expect(screen.queryByText("Resign")).not.toBeInTheDocument();
   });
 
+  it("does not credit Player 2 when an unattended public game has no winner", () => {
+    render(
+      <RosterGuessRaceBoard
+        initialState={activeRaceGame({ status: "finished", winner_player: null })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "No winner" })).toBeInTheDocument();
+    expect(screen.queryByText("Runner WINS!")).not.toBeInTheDocument();
+  });
+
   it("hides the resign control during the inter-round reveal lock", () => {
     render(
       <RosterGuessRaceBoard

@@ -1015,6 +1015,20 @@ describe("PhotoQuizBoard online resign", () => {
     expect(screen.queryByText("Resign")).not.toBeInTheDocument();
   });
 
+  it("does not credit Player 2 when an unattended public game has no winner", () => {
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame({ status: "finished", winner_player: null })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "No winner" })).toBeInTheDocument();
+    expect(screen.queryByText("B WINS!")).not.toBeInTheDocument();
+  });
+
   it("hides the resign control during the inter-round reveal lock", () => {
     render(
       <PhotoQuizBoard
