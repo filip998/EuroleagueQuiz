@@ -32,9 +32,11 @@ export default function RosterGuessBoard({ initialState, onNewGame, onHome, onli
   const [searchFocused, setSearchFocused] = useState(false);
   const searchInputRef = useRef(null);
 
-  const isOnline = onlineInfo?.isOnline;
-  const myPlayer = onlineInfo?.playerNumber;
   const isSolo = game?.mode === "single_player";
+  // A solo / local game must never be treated as online, even if `onlineInfo`
+  // carries a stale seat recovered for a reused game id (see onlineRecovery.js).
+  const isOnline = game?.mode === "online_friend" && Boolean(onlineInfo?.isOnline);
+  const myPlayer = onlineInfo?.playerNumber;
   const realtimeUnavailableMessage = "Realtime connection unavailable. Reconnecting...";
 
   function handleRealtimeState(message) {

@@ -12,6 +12,8 @@ import {
   loadOnlineInfo,
   recoverOnlineInfo,
   recoverPhotoOnlineInfo,
+  recoverCareerOnlineInfo,
+  recoverRosterOnlineInfo,
   clearOnlineInfo,
 } from "../onlineRecovery";
 
@@ -149,4 +151,116 @@ describe("recoverPhotoOnlineInfo", () => {
     recallMock.mockReturnValue(null);
     expect(recoverPhotoOnlineInfo(7, publicQuickMatch)).toBeNull();
   });
+});
+
+describe("recoverCareerOnlineInfo", () => {
+  const publicQuickMatch = {
+    mode: "online_friend",
+    is_public: true,
+    preset: "standard",
+  };
+
+  it("prefers the per-tab sessionStorage seat", () => {
+    saveOnlineInfo(7, { playerNumber: 1, isOnline: true });
+    expect(recoverCareerOnlineInfo(7, publicQuickMatch)).toEqual({
+      playerNumber: 1,
+      isOnline: true,
+    });
+    expect(recallMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the career-namespaced seat map for public Quick Match games", () => {
+    recallMock.mockReturnValue(2);
+    expect(recoverCareerOnlineInfo(7, publicQuickMatch)).toEqual({
+      playerNumber: 2,
+      isOnline: true,
+    });
+    expect(recallMock).toHaveBeenCalledWith("career:7");
+  });
+
+  it("does not fall back for non-online_friend games", () => {
+    recallMock.mockReturnValue(2);
+    expect(
+      recoverCareerOnlineInfo(7, { mode: "single_player", is_public: true, preset: "standard" })
+    ).toBeNull();
+    expect(recallMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("recoverRosterOnlineInfo", () => {
+  const publicRaceQuickMatch = {
+    mode: "online_friend",
+    is_race: true,
+    is_public: true,
+    preset: "full-standard",
+  };
+
+  it("prefers the per-tab sessionStorage seat", () => {
+    saveOnlineInfo(7, { playerNumber: 1, isOnline: true });
+    expect(recoverRosterOnlineInfo(7, publicRaceQuickMatch)).toEqual({
+      playerNumber: 1,
+      isOnline: true,
+    });
+    expect(recallMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the roster-race-namespaced seat map for public race Quick Match games", () => {
+    recallMock.mockReturnValue(2);
+    expect(recoverRosterOnlineInfo(7, publicRaceQuickMatch)).toEqual({
+      playerNumber: 2,
+      isOnline: true,
+    });
+    expect(recallMock).toHaveBeenCalledWith("roster-race:7");
+  });
+
+  it("does not consult the race seat map for a private classic online game", () => {
+    recallMock.mockReturnValue(2);
+    expect(recoverRosterOnlineInfo(7, { mode: "online_friend" })).toBeNull();
+    expect(recallMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back for non-online_friend games", () => {
+    recallMock.mockReturnValue(2);
+    expect(
+      recoverRosterOnlineInfo(7, {
+        mode: "single_player",
+        is_race: true,
+        is_public: true,
+        preset: "full-standard",
+      })
+    ).toBeNull();
+    expect(recallMock).not.toHaveBeenCalled();
+  });
+});
+
+// Issue #150: a stale `elq_game_<id>` seat (left over from an earlier online game
+// whose numeric id was later reused by a brand-new solo/local game after a prod DB
+// reseed) must never make a non-online game recover as online — across every
+// per-game recovery variant.
+describe("solo / local games never recover a stale online seat (issue #150)", () => {
+  const variants = [
+    ["recoverOnlineInfo", recoverOnlineInfo],
+    ["recoverPhotoOnlineInfo", recoverPhotoOnlineInfo],
+    ["recoverCareerOnlineInfo", recoverCareerOnlineInfo],
+    ["recoverRosterOnlineInfo", recoverRosterOnlineInfo],
+  ];
+  const nonOnlineModes = ["single_player", "local_two_player"];
+
+  for (const [name, recover] of variants) {
+    for (const mode of nonOnlineModes) {
+      it(`${name} ignores a stale stored seat for a ${mode} game`, () => {
+        saveOnlineInfo(7, { playerNumber: 2, isOnline: true });
+        recallMock.mockReturnValue(2);
+
+        expect(
+          recover(7, { mode, is_public: true, preset: "standard", is_race: true })
+        ).toBeNull();
+        // The seat-map fallback must never run for a non-online game...
+        expect(recallMock).not.toHaveBeenCalled();
+        // ...and the shared, non-namespaced seat key is left intact so a live
+        // online game of another type that reuses this id keeps its seat.
+        expect(loadOnlineInfo(7)).toEqual({ playerNumber: 2, isOnline: true });
+      });
+    }
+  }
 });
