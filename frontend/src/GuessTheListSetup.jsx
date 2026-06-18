@@ -17,6 +17,7 @@ import {
   DEFAULT_GUESS_THE_LIST_RACE_QUICK_MATCH_PRESET,
   GUESS_THE_LIST_RACE_QUICK_MATCH_PRESETS,
   guessTheListRaceSeatKey,
+  legacyGuessTheListRaceSeatKey,
   useGuessTheListRaceQuickMatchPools,
 } from "./guessTheListRaceQuickMatch";
 
@@ -116,7 +117,8 @@ export default function GuessTheListSetup({
       const game = gameStateFromResponse(response);
       const playerNumber = resolveQuickMatchSeat(
         guessTheListRaceSeatKey(game.id),
-        game.status
+        game.status,
+        [legacyGuessTheListRaceSeatKey(game.id)]
       );
       onGameCreated(game, { playerNumber, isOnline: true });
     } catch (err) {

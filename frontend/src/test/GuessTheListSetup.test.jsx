@@ -8,6 +8,10 @@ import {
   quickMatchGuessTheListRace,
 } from "../api";
 
+const resolveQuickMatchSeatMock = vi.hoisted(() =>
+  vi.fn((key, status) => (status === "active" ? 2 : 1))
+);
+
 vi.mock("../api", () => ({
   createGuessTheListGame: vi.fn(),
   createGuessTheListRaceGame: vi.fn(),
@@ -38,7 +42,7 @@ vi.mock("../guessTheListRaceQuickMatch", async () => {
 });
 
 vi.mock("../quickMatchSeats", () => ({
-  resolveQuickMatchSeat: (key, status) => (status === "active" ? 2 : 1),
+  resolveQuickMatchSeat: resolveQuickMatchSeatMock,
 }));
 
 vi.mock("../Logo", () => ({
@@ -116,6 +120,11 @@ describe("GuessTheListSetup", () => {
     expect(onGameCreated).toHaveBeenCalledWith(
       { id: 20, status: "waiting_for_opponent" },
       { playerNumber: 1, isOnline: true }
+    );
+    expect(resolveQuickMatchSeatMock).toHaveBeenCalledWith(
+      "guess-the-list-race:20",
+      "waiting_for_opponent",
+      ["roster-race:20"]
     );
   });
 
