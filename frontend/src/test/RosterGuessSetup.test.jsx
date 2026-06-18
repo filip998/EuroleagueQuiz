@@ -124,7 +124,7 @@ describe("RosterGuessSetup", () => {
 
     renderSetup({ initialMode: "online", initialOnlineGameType: "race" });
     fireEvent.click(screen.getByText("Play a Friend"));
-    fireEvent.click(screen.getByText("Create Race"));
+    fireEvent.click(screen.getByText("Create Online Game"));
 
     await waitFor(() => expect(onGameCreated).toHaveBeenCalled());
     expect(createRosterRaceGame).toHaveBeenCalledWith(
@@ -150,7 +150,7 @@ describe("RosterGuessSetup", () => {
     fireEvent.change(screen.getByPlaceholderText("ABC123"), {
       target: { value: "race42" },
     });
-    fireEvent.click(screen.getByText("Join Race"));
+    fireEvent.click(screen.getByText("Join Game"));
 
     await waitFor(() => expect(onGameCreated).toHaveBeenCalled());
     expect(joinRosterRaceGame).toHaveBeenCalledWith("RACE42", "Ace");
