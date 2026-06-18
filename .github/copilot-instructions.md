@@ -91,11 +91,17 @@ running `alembic upgrade head` and `alembic -c alembic_auth.ini upgrade head`,
 then starting Uvicorn on `${PORT:-8000}`. Production auth data must live outside
 the deploy directory with `ELQ_AUTH_DATABASE_URL=sqlite:////home/data/users.db`;
 set or preserve `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` so `/home` survives
-App Service restarts and deployments. This SQLite auth DB path assumes a single
-App Service instance; use managed Postgres (`postgresql+psycopg://...`) for
-scale-out instead of sharing the SQLite file across workers/instances. Backend
-Clerk values (`ELQ_CLERK_SECRET_KEY`, `ELQ_CLERK_WEBHOOK_SECRET`,
-`ELQ_CLERK_ISSUER`, `ELQ_CLERK_JWKS_URL`, optional
+App Service restarts and deployments. Keep Always On enabled on the Basic B1
+backend App Service (`az webapp config set --resource-group
+euroleague-quiz-rg --name euroleague-quiz-backend-app --always-on true`) so
+deploys/restarts do not reintroduce idle cold starts; this is a site-config
+setting and does not change the pricing tier. The deploy workflow reasserts it
+when the `AZURE_CREDENTIALS` Actions secret is present because the publish
+profile can deploy code but cannot update App Service management settings. This
+SQLite auth DB path assumes a single App Service instance; use managed Postgres
+(`postgresql+psycopg://...`) for scale-out instead of sharing the SQLite file
+across workers/instances. Backend Clerk values (`ELQ_CLERK_SECRET_KEY`,
+`ELQ_CLERK_WEBHOOK_SECRET`, `ELQ_CLERK_ISSUER`, `ELQ_CLERK_JWKS_URL`, optional
 `ELQ_CLERK_AUTHORIZED_PARTIES`) belong in App Service application settings only;
 the frontend deploy build reads `VITE_CLERK_PUBLISHABLE_KEY` from GitHub Actions
 secrets and must keep anonymous builds working when it is unset.
