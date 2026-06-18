@@ -29,10 +29,12 @@ from app.models import (
     QuizTicTacToeCell,
     QuizTicTacToeGame,
     QuizTicTacToeRound,
+    QuizTicTacToeStatMilestonePlayer,
     Season,
     Team,
 )
 from app.services.timing import set_timing_metric, timed_phase
+from app.services.tictactoe_stat_milestones import SHIPPED_STAT_MILESTONE_DEFINITIONS
 
 SUPPORTED_MODES = {"single_player", "local_two_player", "online_friend"}
 LOCAL_PLAY_MODES = {"single_player", "local_two_player"}
@@ -318,6 +320,27 @@ def _get_position_candidates(db: Session) -> list[dict]:
     ]
 
 
+def _get_champion_candidates(db: Session) -> list[dict]:
+    return [
+        {
+            "axis_type": "champion",
+            "value": "euroleague_champion",
+            "display_label": "EuroLeague champion",
+        }
+    ]
+
+
+def _get_stat_milestone_candidates(db: Session) -> list[dict]:
+    return [
+        {
+            "axis_type": "stat_milestone",
+            "value": definition.key,
+            "display_label": definition.display_label,
+        }
+        for definition in SHIPPED_STAT_MILESTONE_DEFINITIONS
+    ]
+
+
 def _pick_weighted(candidates: list[dict]) -> dict:
     """Pick a candidate using _weight field (or uniform if no weights)."""
     weights = [c.get("_weight", 1.0) for c in candidates]
@@ -465,6 +488,52 @@ def _player_matches_position_axis(db: Session, player_id: int, axis: dict) -> bo
     return player is not None and player.position == axis["value"]
 
 
+def _get_champion_player_set(db: Session, axis: dict) -> set[int]:
+    rows = (
+        db.query(PlayerSeasonTeam.player_id)
+        .filter(PlayerSeasonTeam.is_champion.is_(True))
+        .distinct()
+        .all()
+    )
+    return {row.player_id for row in rows}
+
+
+def _player_matches_champion_axis(db: Session, player_id: int, axis: dict) -> bool:
+    return (
+        db.query(PlayerSeasonTeam.id)
+        .filter(
+            PlayerSeasonTeam.player_id == player_id,
+            PlayerSeasonTeam.is_champion.is_(True),
+        )
+        .first()
+    ) is not None
+
+
+def _get_stat_milestone_player_set(db: Session, axis: dict) -> set[int]:
+    milestone_key = str(axis["value"])
+    rows = (
+        db.query(QuizTicTacToeStatMilestonePlayer.player_id)
+        .filter(QuizTicTacToeStatMilestonePlayer.milestone_key == milestone_key)
+        .all()
+    )
+    return {row.player_id for row in rows}
+
+
+def _player_matches_stat_milestone_axis(
+    db: Session,
+    player_id: int,
+    axis: dict,
+) -> bool:
+    return (
+        db.query(QuizTicTacToeStatMilestonePlayer.player_id)
+        .filter(
+            QuizTicTacToeStatMilestonePlayer.milestone_key == str(axis["value"]),
+            QuizTicTacToeStatMilestonePlayer.player_id == player_id,
+        )
+        .first()
+    ) is not None
+
+
 def _get_player_set_for_axis(db: Session, axis: dict) -> set[int]:
     """Get set of player IDs matching an axis constraint."""
     definition = AXIS_REGISTRY.get(axis["axis_type"])
@@ -531,14 +600,14 @@ def _player_is_teammate(
 AXIS_REGISTRY: dict[str, AxisDefinition] = {
     "team": AxisDefinition(
         axis_type="team",
-        weight=0.58,
+        weight=0.50,
         candidate_provider=_get_team_candidates,
         player_set_builder=_get_team_player_set,
         matcher=_player_matches_team_axis,
     ),
     "nationality": AxisDefinition(
         axis_type="nationality",
-        weight=0.12,
+        weight=0.11,
         candidate_provider=_get_nationality_candidates,
         player_set_builder=_get_nationality_player_set,
         matcher=_player_matches_nationality_axis,
@@ -546,14 +615,14 @@ AXIS_REGISTRY: dict[str, AxisDefinition] = {
     ),
     "played_with": AxisDefinition(
         axis_type="played_with",
-        weight=0.20,
+        weight=0.18,
         candidate_provider=_get_played_with_candidates,
         player_set_builder=_get_played_with_player_set,
         matcher=_player_matches_played_with_axis,
     ),
     "season": AxisDefinition(
         axis_type="season",
-        weight=0.10,
+        weight=0.08,
         candidate_provider=_get_season_candidates,
         player_set_builder=_get_season_player_set,
         matcher=_player_matches_season_axis,
@@ -562,11 +631,25 @@ AXIS_REGISTRY: dict[str, AxisDefinition] = {
     ),
     "position": AxisDefinition(
         axis_type="position",
-        weight=0.05,
+        weight=0.04,
         candidate_provider=_get_position_candidates,
         player_set_builder=_get_position_player_set,
         matcher=_player_matches_position_axis,
         max_per_board=1,
+    ),
+    "champion": AxisDefinition(
+        axis_type="champion",
+        weight=0.03,
+        candidate_provider=_get_champion_candidates,
+        player_set_builder=_get_champion_player_set,
+        matcher=_player_matches_champion_axis,
+    ),
+    "stat_milestone": AxisDefinition(
+        axis_type="stat_milestone",
+        weight=0.06,
+        candidate_provider=_get_stat_milestone_candidates,
+        player_set_builder=_get_stat_milestone_player_set,
+        matcher=_player_matches_stat_milestone_axis,
     ),
 }
 AXIS_WEIGHTS = {

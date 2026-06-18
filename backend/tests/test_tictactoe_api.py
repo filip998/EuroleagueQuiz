@@ -12,7 +12,14 @@ from sqlalchemy.orm import sessionmaker
 from app import main as app_main
 from app.database import Base, get_db
 from app.main import app
-from app.models import Player, PlayerSeasonStats, PlayerSeasonTeam, Season, Team
+from app.models import (
+    Player,
+    PlayerSeasonStats,
+    PlayerSeasonTeam,
+    QuizTicTacToeStatMilestonePlayer,
+    Season,
+    Team,
+)
 from app.models.tictactoe import QuizTicTacToeGame
 from app.routers import quiz as quiz_router
 from app.services import realtime as realtime_service
@@ -21,6 +28,7 @@ from app.schemas.realtime import RealtimeClientAction
 from app.services import matchmaking, tictactoe as ttt_service
 from app.services.realtime import DisconnectGraceTimerManager, OnlineGameRealtimeModule
 from app.services.realtime_adapters import TicTacToeRealtimeAdapter
+from app.services.tictactoe_stat_milestones import SHIPPED_STAT_MILESTONE_DEFINITIONS
 from tests.realtime_helpers import FakeWebSocket, SleepController, drain_tasks
 
 
@@ -155,8 +163,17 @@ def client(tmp_path: Path):
                     player_id=player_id,
                     team_id=team_id,
                     season_id=sid,
+                    is_champion=player_id == player_1.id and team_id == team_a.id,
                 )
             )
+        for definition in SHIPPED_STAT_MILESTONE_DEFINITIONS:
+            for player in [player_1, player_2, player_3, player_4, player_5]:
+                session.add(
+                    QuizTicTacToeStatMilestonePlayer(
+                        milestone_key=definition.key,
+                        player_id=player.id,
+                    )
+                )
         session.commit()
     finally:
         session.close()
@@ -286,6 +303,7 @@ def ttt_axis_session(tmp_path: Path):
         start: date | None = None,
         end: date | None = None,
         pir: int | None = None,
+        is_champion: bool = False,
     ) -> PlayerSeasonTeam:
         stint = PlayerSeasonTeam(
             player_id=players[player_key].id,
@@ -293,6 +311,7 @@ def ttt_axis_session(tmp_path: Path):
             season_id=season.id,
             registration_start=start,
             registration_end=end,
+            is_champion=is_champion,
         )
         session.add(stint)
         session.flush()
@@ -330,6 +349,7 @@ def ttt_axis_session(tmp_path: Path):
         past_season,
         start=date(2023, 1, 1),
         end=date(2023, 6, 1),
+        is_champion=True,
     )
     add_stint(
         "past_teammate",
@@ -345,6 +365,14 @@ def ttt_axis_session(tmp_path: Path):
         start=date(2024, 7, 1),
         end=date(2024, 8, 1),
     )
+    for definition in SHIPPED_STAT_MILESTONE_DEFINITIONS:
+        for player_key in ("guard", "forward"):
+            session.add(
+                QuizTicTacToeStatMilestonePlayer(
+                    milestone_key=definition.key,
+                    player_id=players[player_key].id,
+                )
+            )
 
     session.commit()
     try:
@@ -398,16 +426,21 @@ def quick_match_effects(monkeypatch):
     return effects
 
 
-def test_tictactoe_axis_weights_preserve_existing_values_and_add_position():
+def test_tictactoe_axis_weights_include_achievements_and_sum_to_one():
     assert ttt_service.AXIS_WEIGHTS == {
         axis_type: definition.weight
         for axis_type, definition in ttt_service.AXIS_REGISTRY.items()
     }
-    assert ttt_service.AXIS_WEIGHTS["team"] == 0.58
-    assert ttt_service.AXIS_WEIGHTS["nationality"] == 0.12
-    assert ttt_service.AXIS_WEIGHTS["played_with"] == 0.20
-    assert ttt_service.AXIS_WEIGHTS["season"] == 0.10
-    assert ttt_service.AXIS_WEIGHTS["position"] == 0.05
+    assert sum(ttt_service.AXIS_WEIGHTS.values()) == pytest.approx(1.0)
+    assert ttt_service.AXIS_WEIGHTS == {
+        "team": 0.50,
+        "nationality": 0.11,
+        "played_with": 0.18,
+        "season": 0.08,
+        "position": 0.04,
+        "champion": 0.03,
+        "stat_milestone": 0.06,
+    }
 
 
 def test_tictactoe_cached_board_selection_matches_uncached_rng(ttt_axis_session):
@@ -480,12 +513,16 @@ def test_tictactoe_cached_validity_is_exhaustive_and_live_equivalent(
                 saw_duplicate_axis = True
 
     expected_type_pairs = {
+        ("champion", "season"),
+        ("champion", "team"),
         ("team", "team"),
         ("nationality", "team"),
         ("season", "team"),
         ("nationality", "season"),
         ("played_with", "season"),
         ("season", "season"),
+        ("season", "stat_milestone"),
+        ("stat_milestone", "team"),
     }
     assert expected_type_pairs <= seen_type_pairs
     assert saw_duplicate_axis
@@ -868,6 +905,100 @@ def test_tictactoe_position_provider_builder_and_matcher_exclude_missing(
     )
 
 
+def test_tictactoe_achievement_providers_builders_matchers_and_loose_cells(
+    ttt_axis_session,
+):
+    db, data = ttt_axis_session
+    players = data["players"]
+    current_season = data["current_season"]
+    team_b = data["teams"][1]
+    title_team = data["teams"][2]
+    team_f = data["teams"][5]
+
+    champion_candidates = ttt_service._get_champion_candidates(db)
+    assert champion_candidates == [
+        {
+            "axis_type": "champion",
+            "value": "euroleague_champion",
+            "display_label": "EuroLeague champion",
+        }
+    ]
+    champion_axis = champion_candidates[0]
+
+    stat_candidates = ttt_service._get_stat_milestone_candidates(db)
+    assert [candidate["value"] for candidate in stat_candidates] == [
+        definition.key for definition in SHIPPED_STAT_MILESTONE_DEFINITIONS
+    ]
+    assert [candidate["display_label"] for candidate in stat_candidates] == [
+        definition.display_label for definition in SHIPPED_STAT_MILESTONE_DEFINITIONS
+    ]
+    stat_axis = stat_candidates[0]
+
+    champion_players = ttt_service._get_player_set_for_axis(db, champion_axis)
+    assert players["star"].id in champion_players
+    assert players["guard"].id not in champion_players
+    assert ttt_service._player_matches_axis(db, players["star"].id, champion_axis)
+    assert not ttt_service._player_matches_axis(db, players["guard"].id, champion_axis)
+
+    stat_players = ttt_service._get_player_set_for_axis(db, stat_axis)
+    assert players["guard"].id in stat_players
+    assert players["star"].id not in stat_players
+    assert ttt_service._player_matches_axis(db, players["guard"].id, stat_axis)
+    assert not ttt_service._player_matches_axis(db, players["star"].id, stat_axis)
+
+    for axis in (champion_axis, stat_axis):
+        axis_players = ttt_service._get_player_set_for_axis(db, axis)
+        assert {
+            player.id
+            for player in players.values()
+            if ttt_service._player_matches_axis(db, player.id, axis)
+        } == axis_players
+
+    title_team_axis = {
+        "axis_type": "team",
+        "value": str(title_team.id),
+        "display_label": title_team.name,
+    }
+    other_team_axis = {
+        "axis_type": "team",
+        "value": str(team_b.id),
+        "display_label": team_b.name,
+    }
+    current_season_axis = {
+        "axis_type": "season",
+        "value": str(current_season.id),
+        "display_label": "2024/25",
+    }
+    milestone_team_axis = {
+        "axis_type": "team",
+        "value": str(team_f.id),
+        "display_label": team_f.name,
+    }
+
+    assert players["star"].id in ttt_service._get_player_set_for_cell(
+        db, champion_axis, title_team_axis
+    )
+    assert players["star"].id in ttt_service._get_player_set_for_cell(
+        db, champion_axis, other_team_axis
+    )
+    assert ttt_service._player_matches_cell(
+        db, players["star"].id, champion_axis, other_team_axis
+    )
+    assert players["star"].id in ttt_service._get_player_set_for_cell(
+        db, champion_axis, current_season_axis
+    )
+    assert ttt_service._player_matches_cell(
+        db, players["star"].id, champion_axis, current_season_axis
+    )
+
+    assert players["guard"].id in ttt_service._get_player_set_for_cell(
+        db, stat_axis, milestone_team_axis
+    )
+    assert ttt_service._player_matches_cell(
+        db, players["guard"].id, stat_axis, milestone_team_axis
+    )
+
+
 def test_tictactoe_board_generation_can_include_position_with_cap_and_answers(
     ttt_axis_session,
     monkeypatch,
@@ -882,6 +1013,58 @@ def test_tictactoe_board_generation_can_include_position_with_cap_and_answers(
     axes = ttt_service._select_board_axes(db)
 
     assert sum(axis["axis_type"] == "position" for axis in axes) == 1
+    row_axes = axes[:3]
+    col_axes = axes[3:]
+    for row_axis in row_axes:
+        for col_axis in col_axes:
+            assert ttt_service._get_player_set_for_cell(db, row_axis, col_axis)
+
+
+@pytest.mark.parametrize("chosen_type", ["champion", "stat_milestone"])
+def test_tictactoe_board_generation_can_include_achievement_with_cap_and_answers(
+    ttt_axis_session,
+    monkeypatch,
+    chosen_type,
+):
+    db, _ = ttt_axis_session
+
+    def choose_achievement(*args, **kwargs):
+        return [chosen_type]
+
+    monkeypatch.setattr(ttt_service.random, "choices", choose_achievement)
+
+    axes = ttt_service._select_board_axes(db)
+
+    assert sum(axis["axis_type"] == chosen_type for axis in axes) == 1
+    assert sum(
+        axis["axis_type"] in ttt_service.ACHIEVEMENT_LIMITED_AXIS_TYPES
+        for axis in axes
+    ) == 1
+    row_axes = axes[:3]
+    col_axes = axes[3:]
+    for row_axis in row_axes:
+        for col_axis in col_axes:
+            assert ttt_service._get_player_set_for_cell(db, row_axis, col_axis)
+
+
+def test_tictactoe_board_generation_rejects_second_achievement_axis(
+    ttt_axis_session,
+    monkeypatch,
+):
+    db, _ = ttt_axis_session
+    chosen_types = iter(["champion", "stat_milestone", "champion"])
+
+    def choose_mixed_achievements(*args, **kwargs):
+        return [next(chosen_types, "team")]
+
+    monkeypatch.setattr(ttt_service.random, "choices", choose_mixed_achievements)
+
+    axes = ttt_service._select_board_axes(db)
+
+    assert sum(
+        axis["axis_type"] in ttt_service.ACHIEVEMENT_LIMITED_AXIS_TYPES
+        for axis in axes
+    ) == 1
     row_axes = axes[:3]
     col_axes = axes[3:]
     for row_axis in row_axes:
@@ -1000,6 +1183,64 @@ def test_create_tictactoe_game_has_board(client: TestClient):
     assert len(payload["round"]["rows"]) == 3
     assert len(payload["round"]["columns"]) == 3
     assert len(payload["round"]["cells"]) == 9
+
+
+@pytest.mark.parametrize(
+    ("achievement_axis_type", "achievement_value", "achievement_label"),
+    [
+        ("champion", "euroleague_champion", "EuroLeague champion"),
+        (
+            "stat_milestone",
+            SHIPPED_STAT_MILESTONE_DEFINITIONS[0].key,
+            SHIPPED_STAT_MILESTONE_DEFINITIONS[0].display_label,
+        ),
+    ],
+)
+def test_tictactoe_create_serializes_achievement_axes_with_existing_shape(
+    client: TestClient,
+    monkeypatch,
+    achievement_axis_type,
+    achievement_value,
+    achievement_label,
+):
+    with client.session_local() as db:
+        teams = db.query(Team).order_by(Team.id).limit(5).all()
+
+    achievement_axis = {
+        "axis_type": achievement_axis_type,
+        "value": achievement_value,
+        "display_label": achievement_label,
+    }
+    forced_axes = [
+        achievement_axis,
+        *[
+            {
+                "axis_type": "team",
+                "value": str(team.id),
+                "display_label": team.short_name or team.name,
+            }
+            for team in teams
+        ],
+    ]
+    monkeypatch.setattr(ttt_service, "_select_board_axes", lambda db: forced_axes)
+
+    response = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "local_two_player",
+            "target_wins": 2,
+            "timer_mode": "15s",
+        },
+    )
+
+    assert response.status_code == 200
+    game = _action_payload(response)["game"]
+    row_axis = game["round"]["rows"][0]
+    cell_axis = _find_cell(game, 0, 0)["row_axis"]
+    assert row_axis == achievement_axis
+    assert cell_axis == achievement_axis
+    assert set(row_axis) == {"axis_type", "value", "display_label"}
+    assert set(cell_axis) == {"axis_type", "value", "display_label"}
 
 
 def test_tictactoe_timing_disabled_by_default_has_no_server_timing_header(
