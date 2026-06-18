@@ -523,6 +523,9 @@ class OnlineGameRealtimeModule:
                 or getattr(game, "status", None) != "active"
             ):
                 return
+            eligible_hook = getattr(self.adapter, "disconnect_forfeit_eligible", None)
+            if eligible_hook is not None and not eligible_hook(game):
+                return
         except GameActionError:
             logger.info(
                 "Skipping disconnect grace for missing game %s player %s",
@@ -564,6 +567,9 @@ class OnlineGameRealtimeModule:
                     getattr(game, "mode", None) != "online_friend"
                     or getattr(game, "status", None) != "active"
                 ):
+                    return GAME_ACTION_NOOP
+                eligible_hook = getattr(self.adapter, "disconnect_forfeit_eligible", None)
+                if eligible_hook is not None and not eligible_hook(game):
                     return GAME_ACTION_NOOP
                 return self.adapter.handle_player_forfeit(
                     db,

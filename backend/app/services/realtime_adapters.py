@@ -269,7 +269,7 @@ class TicTacToeRealtimeAdapter:
 
 
 class RosterGuessRealtimeAdapter:
-    disconnect_forfeit_enabled = False
+    disconnect_forfeit_enabled = True
     http_actions = {
         GameActionName.CREATE.value,
         GameActionName.JOIN.value,
@@ -287,6 +287,9 @@ class RosterGuessRealtimeAdapter:
 
     def __init__(self):
         pass
+
+    def disconnect_forfeit_eligible(self, game: Any) -> bool:
+        return bool(getattr(game, "is_race", False))
 
     def get_game(self, db: Session, game_id: int) -> Any:
         return roster_service.get_game_or_404(db, game_id)
@@ -539,17 +542,20 @@ class RosterGuessRealtimeAdapter:
 
     def handle_player_forfeit(
         self,
-        _db: Session,
-        _game: Any,
+        db: Session,
+        game: Any,
         *,
         forfeiting_player: int,
         result: RealtimeResult,
     ) -> Any:
-        return GAME_ACTION_NOOP
+        if not getattr(game, "is_race", False):
+            return GAME_ACTION_NOOP
+        roster_service.forfeit_online_game(db, game, forfeiting_player=forfeiting_player)
+        return game
 
 
 class CareerQuizRealtimeAdapter:
-    disconnect_forfeit_enabled = False
+    disconnect_forfeit_enabled = True
     http_actions = {
         GameActionName.CREATE.value,
         GameActionName.JOIN.value,
@@ -766,17 +772,18 @@ class CareerQuizRealtimeAdapter:
 
     def handle_player_forfeit(
         self,
-        _db: Session,
-        _game: Any,
+        db: Session,
+        game: Any,
         *,
         forfeiting_player: int,
         result: RealtimeResult,
     ) -> Any:
-        return GAME_ACTION_NOOP
+        career_service.forfeit_online_game(db, game, forfeiting_player=forfeiting_player)
+        return game
 
 
 class PhotoQuizRealtimeAdapter:
-    disconnect_forfeit_enabled = False
+    disconnect_forfeit_enabled = True
     http_actions = {
         GameActionName.CREATE.value,
         GameActionName.JOIN.value,
@@ -997,10 +1004,11 @@ class PhotoQuizRealtimeAdapter:
 
     def handle_player_forfeit(
         self,
-        _db: Session,
-        _game: Any,
+        db: Session,
+        game: Any,
         *,
         forfeiting_player: int,
         result: RealtimeResult,
     ) -> Any:
-        return GAME_ACTION_NOOP
+        photo_service.forfeit_online_game(db, game, forfeiting_player=forfeiting_player)
+        return game

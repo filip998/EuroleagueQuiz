@@ -15,8 +15,9 @@ from app.routers import photo_quiz as photo_quiz_router
 from app.schemas.realtime import RealtimeResult, RealtimeServerMessageAdapter
 from app.services import photo_quiz
 from app.services.realtime_adapters import PhotoQuizRealtimeAdapter
-from app.services.realtime import OnlineGameRealtimeModule, TurnTimerManager
+from app.services.realtime import DisconnectGraceTimerManager, OnlineGameRealtimeModule, TurnTimerManager
 from app.services.solo_round_token import create_solo_round_token, validate_solo_round_token
+
 
 
 def test_eligible_pool_requires_wikipedia_page_and_any_usable_image():
@@ -2259,3 +2260,62 @@ class _ControlledSleep:
 async def _drain_async_tasks(count: int = 5):
     for _ in range(count):
         await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_photo_disconnect_grace_forfeits_online_game(tmp_path: Path):
+    """Disconnecting player 1 from an active Photo Quiz game forfeits the match."""
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        for index in range(4):
+            _player(
+                setup,
+                "Forfeit",
+                f"Player{index}",
+                wikipedia_url=f"https://wiki/forfeit-{index}",
+                euroleague_image_url=f"https://cdn/forfeit-{index}.png",
+            )
+        setup.commit()
+
+        game = photo_quiz.create_game(setup, target_wins=3, player1_name="Host")
+        photo_quiz.join_game(setup, game.join_code, player_name="Joiner")
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    grace_sleep = _ControlledSleep()
+    module = OnlineGameRealtimeModule(
+        PhotoQuizRealtimeAdapter(),
+        session_factory=SessionLocal,
+        disconnect_grace_seconds=3,
+    )
+    module.disconnect_grace_timer = DisconnectGraceTimerManager(
+        module._expire_disconnect_grace,
+        sleep=grace_sleep,
+    )
+    leaving = _FakeWebSocket()
+    opponent = _FakeWebSocket()
+    await module.connections.connect(game_id, 1, leaving)
+    await module.connections.connect(game_id, 2, opponent)
+
+    module.disconnect(game_id, 1, leaving)
+    await grace_sleep.wait_for_call()
+    grace_sleep.release()
+    await _drain_async_tasks()
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(PhotoQuizGame, game_id)
+        assert stored.status == "finished"
+        assert stored.winner_player == 2
+    finally:
+        verify.close()
+
+    assert not module.disconnect_grace_timer.has_game_timer(game_id)
+    message = opponent.sent[-1]
+    RealtimeServerMessageAdapter.validate_python(message)
+    assert message["payload"]["result"] == "opponent_left"
+    assert message["payload"]["terminal"] is True
+    assert message["payload"]["game"]["winner_player"] == 2
