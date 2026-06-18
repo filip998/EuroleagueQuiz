@@ -13,6 +13,9 @@ from app.main import app
 from app.models import Player, PlayerSeasonTeam, Season, Team
 from app.models.roster_guess import RosterGuessGame, RosterGuessRound
 from app.services import roster_guess as roster_service
+from app.services.realtime import OnlineGameRealtimeModule, TurnTimerManager
+from app.services.realtime_adapters import RosterGuessRealtimeAdapter
+from tests.realtime_helpers import SleepController, drain_tasks
 
 
 @pytest.fixture(autouse=True)
@@ -384,6 +387,48 @@ def test_roster_race_claim_after_deadline_resolves_without_late_award(client: Te
     assert resolved["completed_round"]["player1_correct"] == 1
     assert resolved["completed_round"]["player2_correct"] == 0
     assert resolved["completed_round"]["guessed_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_roster_race_unattended_timeout_finishes_without_rearming(client: TestClient):
+    created = _create_roster_race(client, target_wins=2)
+    game = _join_roster_race(client, created["join_code"])
+    round_number = game["round_number"]
+
+    with client.session_local() as db:
+        stored = db.get(RosterGuessGame, game["id"])
+        active_round = (
+            db.query(RosterGuessRound)
+            .filter_by(game_id=game["id"], round_number=round_number)
+            .one()
+        )
+        active_round.created_at = datetime.utcnow() - timedelta(seconds=121)
+        db.commit()
+        state = roster_service.serialize_game_state(db, stored)
+
+    sleep = SleepController()
+    module = OnlineGameRealtimeModule(
+        RosterGuessRealtimeAdapter(),
+        session_factory=client.session_local,
+    )
+    module.timer = TurnTimerManager(module._expire_turn, sleep=sleep)
+
+    module.start_timer_from_state(state)
+    await sleep.wait_for_call()
+    sleep.release(0)
+    await drain_tasks()
+
+    assert len(sleep.calls) == 1
+    assert not module.timer.has_timer(game["id"])
+
+    with client.session_local() as db:
+        stored = db.get(RosterGuessGame, game["id"])
+        assert stored.status == "finished"
+        assert stored.winner_player is None
+        assert stored.round_number == round_number
+        assert stored.player1_score == 0
+        assert stored.player2_score == 0
+        assert [round_obj.status for round_obj in stored.rounds] == ["completed"]
 
 
 def test_roster_race_quick_match_pair_cancel_and_public_join_guard(client: TestClient):

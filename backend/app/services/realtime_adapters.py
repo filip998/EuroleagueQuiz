@@ -479,6 +479,29 @@ class RosterGuessRealtimeAdapter:
         )
         return game
 
+    def handle_unattended_time_expired(
+        self,
+        db: Session,
+        game: Any,
+        *,
+        expected_player: int,
+        expected_round: int,
+    ) -> Any:
+        if getattr(game, "is_race", False):
+            if not roster_service.handle_race_game_unattended_time_expired(
+                db,
+                game,
+                expected_round=expected_round,
+            ):
+                return GAME_ACTION_NOOP
+            return game
+        return self.handle_time_expired(
+            db,
+            game,
+            expected_player=expected_player,
+            expected_round=expected_round,
+        )
+
     def timer_state_from_game(self, game: Any) -> TurnTimerState | None:
         if getattr(game, "is_race", False):
             delay = roster_service.race_round_timer_delay_seconds(game)

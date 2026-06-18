@@ -1,6 +1,7 @@
 import random
 import string
 import threading
+import weakref
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -43,7 +44,7 @@ RosterGuessConflictError = ConflictGameActionError
 
 GUEST_ID_MAX_LENGTH = 64
 _race_locks_guard = threading.Lock()
-_race_locks: dict[int, threading.Lock] = {}
+_race_locks: weakref.WeakValueDictionary[int, Any] = weakref.WeakValueDictionary()
 
 
 def _clean_guest_id(guest_id: Optional[str]) -> Optional[str]:
@@ -946,6 +947,61 @@ def handle_race_round_time_expired(
             completed_at=datetime.utcnow(),
         )
         return result is not None
+
+
+def handle_race_game_unattended_time_expired(
+    db: Session,
+    game: RosterGuessGame,
+    *,
+    expected_round: int,
+) -> bool:
+    if not game.is_race:
+        return False
+
+    with _race_lock(game.id):
+        if game.status != "active" or game.round_number != expected_round:
+            return False
+        if _race_reveal_window_starts_at(game) is not None:
+            return False
+
+        deadline = _race_round_deadline_at(game)
+        if deadline is None or normalize_utc(_utc_now()) < deadline:
+            return False
+
+        try:
+            round_obj = get_active_round(db, game.id)
+        except RosterGuessConflictError:
+            return False
+
+        completed_at = datetime.utcnow()
+        updated = (
+            db.query(RosterGuessRound)
+            .filter(RosterGuessRound.id == round_obj.id)
+            .filter(RosterGuessRound.status == "active")
+            .update(
+                {
+                    "status": "completed",
+                    "completed_at": completed_at,
+                    "winner_player": None,
+                },
+                synchronize_session=False,
+            )
+        )
+        if updated != 1:
+            return False
+
+        round_obj.status = "completed"
+        round_obj.completed_at = completed_at
+        round_obj.winner_player = None
+        _sync_race_claim_counts(db, round_obj)
+
+        game.status = "finished"
+        game.winner_player = None
+        game.pending_end_from = None
+        game.pending_end_to = None
+        game.updated_at = completed_at
+        db.flush()
+        return True
 
 
 def handle_time_expired(
