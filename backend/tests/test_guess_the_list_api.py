@@ -181,7 +181,7 @@ class SyntheticSingleSeasonGenerator:
             team_code=None,
             team_name=None,
             season_year=2024,
-            slots=tuple(reversed(slots)),
+            slots=tuple(slots),
         )
 
 
@@ -259,8 +259,22 @@ def test_synthetic_generator_dispatch_ties_and_answer_hiding(client: TestClient)
             and slot["rank"] is None
             and slot["stat_value"] is None
             and slot["stat_value_label"] is None
+            and slot["jersey_number"] is None
+            and slot["position"] is None
+            and slot["nationality"] is None
+            and slot["height_cm"] is None
+            and "country_code" not in slot
             for slot in active_round["slots"]
         )
+
+        storage_rank_order = [
+            slot.rank
+            for slot in db.query(GuessTheListSlot)
+            .filter(GuessTheListSlot.round_id == round_obj.id)
+            .order_by(GuessTheListSlot.id.asc())
+            .all()
+        ]
+        assert storage_rank_order != [1, 2, 3, 4, 5, 5]
 
         claimed_slot = (
             db.query(GuessTheListSlot)
@@ -282,10 +296,17 @@ def test_synthetic_generator_dispatch_ties_and_answer_hiding(client: TestClient)
         assert claimed_payload["rank"] == 1
         assert claimed_payload["stat_value"] == 30.0
         assert claimed_payload["stat_value_label"] == "30 PTS"
+        assert claimed_payload["jersey_number"] == "1"
+        assert claimed_payload["position"] == "Guard"
+        assert claimed_payload["nationality"] == "CountryA"
         assert all(
             slot["rank"] is None
             and slot["stat_value"] is None
             and slot["player_name"] is None
+            and slot["jersey_number"] is None
+            and slot["position"] is None
+            and slot["nationality"] is None
+            and slot["height_cm"] is None
             for slot in claimed_state["round"]["slots"]
             if slot["id"] != claimed_slot.id
         )

@@ -605,7 +605,11 @@ def _create_next_round(
     db.add(round_obj)
     db.flush()
 
-    for slot_spec in round_spec.slots:
+    for slot_spec in _slot_specs_for_storage(
+        game.id,
+        next_round_number,
+        round_spec,
+    ):
         db.add(
             GuessTheListSlot(
                 round_id=round_obj.id,
@@ -1448,7 +1452,11 @@ def _serialize_round(round_obj: GuessTheListRound) -> dict:
         "guessed_count": guessed_count,
         "status": round_obj.status,
         "slots": [
-            _serialize_slot(slot, round_over)
+            _serialize_slot(
+                slot,
+                round_over,
+                category_type=_clean_category_type(round_obj.category_type),
+            )
             for slot in _slots_for_serialization(round_obj, slots, round_over)
         ],
     }
@@ -1485,6 +1493,39 @@ def _latest_completed_round_payload(
 from app.services.tictactoe import NATIONALITY_TO_COUNTRY_CODE
 
 
+def _slot_specs_for_storage(
+    game_id: int,
+    round_number: int,
+    round_spec: RoundSpec,
+) -> list[RoundSlotSpec]:
+    slots = list(round_spec.slots)
+    if _clean_category_type(round_spec.category_type) == CATEGORY_ROSTER:
+        return slots
+    return [
+        slot
+        for _, slot in sorted(
+            enumerate(slots),
+            key=lambda item: _slot_storage_order_key(
+                game_id,
+                round_number,
+                item[0],
+                item[1],
+            ),
+        )
+    ]
+
+
+def _slot_storage_order_key(
+    game_id: int,
+    round_number: int,
+    index: int,
+    slot: RoundSlotSpec,
+) -> str:
+    return hashlib.sha256(
+        f"{game_id}:{round_number}:{index}:{slot.player_id}".encode("ascii")
+    ).hexdigest()
+
+
 def _slots_for_serialization(
     round_obj: GuessTheListRound,
     slots: Sequence[GuessTheListSlot],
@@ -1505,14 +1546,15 @@ def _hidden_slot_order_key(round_id: int, slot_id: int) -> str:
     return hashlib.sha256(f"{round_id}:{slot_id}".encode("ascii")).hexdigest()
 
 
-def _serialize_slot(slot, round_over: bool) -> dict:
+def _serialize_slot(slot, round_over: bool, *, category_type: str) -> dict:
     show_answer = slot.guessed_by_player is not None or round_over
+    show_hints = show_answer or category_type == CATEGORY_ROSTER
     data = {
         "id": slot.id,
-        "jersey_number": slot.jersey_number,
-        "position": slot.position,
-        "nationality": slot.nationality,
-        "height_cm": slot.height_cm,
+        "jersey_number": slot.jersey_number if show_hints else None,
+        "position": slot.position if show_hints else None,
+        "nationality": slot.nationality if show_hints else None,
+        "height_cm": slot.height_cm if show_hints else None,
         "guessed_by_player": slot.guessed_by_player,
         "guessed_at": _utc_isoformat(slot.guessed_at),
         "player_name": slot.player_name if show_answer else None,
@@ -1525,7 +1567,7 @@ def _serialize_slot(slot, round_over: bool) -> dict:
         "stat_value_label": slot.stat_value_label if show_answer else None,
     }
     # Include country code for flag display
-    if slot.nationality:
+    if show_hints and slot.nationality:
         code = NATIONALITY_TO_COUNTRY_CODE.get(slot.nationality)
         if code:
             data["country_code"] = code
