@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.config import settings
 from app.services.tictactoe_stat_milestones import build_stat_milestone_eligibility
 from ingestion.aggregate_stats import aggregate_season_stats
+from ingestion.champions import enrich_champion_flags, format_champion_report
 from ingestion.fetch_boxscores import fetch_boxscores
 from ingestion.fetch_rosters import fetch_rosters
 from ingestion.fetch_seasons import fetch_season_data
@@ -37,6 +38,7 @@ def main():
             "boxscores",
             "aggregate",
             "stat-milestones",
+            "champions",
             "wikipedia-images",
         ],
         default="all",
@@ -136,6 +138,10 @@ def main():
         refresh_stat_milestone_eligibility(SessionFactory)
         return
 
+    if args.step == "champions":
+        refresh_champion_flags(SessionFactory, args.start_season, args.end_season)
+        return
+
     for year in range(args.start_season, args.end_season + 1):
         logger.info(f"Processing season {year}-{year + 1}")
         session = SessionFactory()
@@ -158,6 +164,8 @@ def main():
 
     if args.step in ("all", "aggregate") and not args.skip_boxscores:
         refresh_stat_milestone_eligibility(SessionFactory)
+    if args.step == "all":
+        refresh_champion_flags(SessionFactory, args.start_season, args.end_season)
 
 
 def refresh_stat_milestone_eligibility(SessionFactory) -> None:
@@ -172,6 +180,27 @@ def refresh_stat_milestone_eligibility(SessionFactory) -> None:
     except Exception:
         session.rollback()
         logger.exception("Error refreshing TicTacToe stat milestone eligibility")
+        raise
+    finally:
+        session.close()
+
+
+def refresh_champion_flags(SessionFactory, start_year: int, end_year: int) -> None:
+    session = SessionFactory()
+    try:
+        reports = enrich_champion_flags(
+            session,
+            start_year=start_year,
+            end_year=end_year,
+        )
+        session.commit()
+        logger.info(
+            "EuroLeague champion title-squad flags refreshed: %s",
+            format_champion_report(reports),
+        )
+    except Exception:
+        session.rollback()
+        logger.exception("Error refreshing EuroLeague champion title-squad flags")
         raise
     finally:
         session.close()
