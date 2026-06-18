@@ -85,6 +85,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [cancelling, setCancelling] = useState(false);
   const [roundTimerAnchor, setRoundTimerAnchor] = useState(null);
+  const [lastResult, setLastResult] = useState(null);
   const soloRoundTokenRef = useRef(soloInitialRound?.round_token || null);
 
   const solo = Boolean(soloRound);
@@ -178,6 +179,11 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   function handleRealtimeState(result) {
     if (!result?.state) return;
     setGame(result.state);
+
+    if (result.result === "opponent_left") {
+      setLastResult("opponent_left");
+      return;
+    }
 
     if (!result.result) {
       setMessage((currentMessage) => (
@@ -408,6 +414,11 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
             round={completedRound}
             countdownRemaining={revealCountdownRemaining}
           />
+          {lastResult === "opponent_left" && (
+            <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+              Your opponent left the game.
+            </p>
+          )}
           <div className="text-5xl mb-3">🏆</div>
           <h1 className="font-display text-4xl text-elq-dark mb-3">
             {finishedWinnerName ? `${finishedWinnerName} wins!` : "No winner"}

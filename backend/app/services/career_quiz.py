@@ -346,6 +346,45 @@ def public_round_timer_delay_seconds(
     return delay_seconds
 
 
+def forfeit_online_game(
+    db: Session,
+    game: CareerQuizGame,
+    *,
+    forfeiting_player: int,
+) -> None:
+    """Finish an online Career Quiz game because one player disconnected.
+
+    The forfeiting player loses; the remaining player wins.  The current
+    active round is closed as ``no_answer`` so the answer is revealed on
+    both sides.  Idempotent: a no-op if the game is already finished.
+    """
+    if game.mode != "online_friend":
+        raise ConflictGameActionError("Forfeit is only available in online games")
+    if game.status != "active":
+        return
+    if forfeiting_player not in (1, 2):
+        raise InvalidGameActionError("forfeiting_player must be 1 or 2")
+
+    winning_player = 2 if forfeiting_player == 1 else 1
+    now = datetime.utcnow()
+
+    try:
+        round_obj = _current_round(game)
+        if round_obj.status == "active":
+            round_obj.status = "no_answer"
+            round_obj.winner_player = None
+            round_obj.completed_at = now
+    except ConflictGameActionError:
+        pass
+
+    game.status = "finished"
+    game.winner_player = winning_player
+    game.pending_no_answer_from = None
+    game.pending_no_answer_to = None
+    game.updated_at = now
+    db.flush()
+
+
 def handle_public_round_time_expired(
     db: Session,
     *,

@@ -39,6 +39,7 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
   );
   const [completedRound, setCompletedRound] = useState(initialState?.latest_completed_round ?? null);
   const [cancelling, setCancelling] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
   const searchInputRef = useRef(null);
 
   const playerNumber = onlineInfo?.playerNumber ?? null;
@@ -101,6 +102,11 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
     if (!result?.state) return;
     setGame(result.state);
     if (!result.result) {
+      setMessage("");
+      return;
+    }
+    if (result.result === "opponent_left") {
+      setLastResult("opponent_left");
       setMessage("");
       return;
     }
@@ -217,6 +223,11 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
       <Shell onHome={onHome}>
         <div className="text-center">
           {completedRound && <CompletedRoundReveal round={completedRound} countdown={0} />}
+          {lastResult === "opponent_left" && (
+            <p className="mb-3 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+              Your opponent left the game.
+            </p>
+          )}
           <div className="text-5xl mb-3">🏆</div>
           <h1 className="font-display text-4xl text-elq-dark mb-3">
             {(game.winner_player === 1 ? game.player1_name : game.player2_name) || "Player"} wins!
