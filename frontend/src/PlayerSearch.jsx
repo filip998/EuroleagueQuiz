@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { autocompletePlayer, autocompleteRosterPlayer } from "./api";
+import { useListKeyboardNav } from "./useListKeyboardNav";
 
 export default function PlayerSearch({
   rowTeamCode,
@@ -38,11 +39,15 @@ export default function PlayerSearch({
     return () => clearTimeout(timer);
   }, [query, rowTeamCode, colTeamCode, rosterMode]);
 
+  const { activeIndex, activeItemRef, handleKeyDown: handleNavKeyDown } =
+    useListKeyboardNav(results, onSelect);
+
   function handleKeyDown(e) {
-    if (e.key === "Escape") onCancel();
-    if (e.key === "Enter" && results.length === 1) {
-      onSelect(results[0]);
+    if (e.key === "Escape") {
+      onCancel();
+      return;
     }
+    handleNavKeyDown(e);
   }
 
   return (
@@ -139,12 +144,16 @@ export default function PlayerSearch({
 
           {!loading && results.length > 0 && (
             <ul className="space-y-1">
-              {results.map((p) => (
+              {results.map((p, index) => (
                 <li key={p.player_id}>
                   <button
                     type="button"
+                    ref={index === activeIndex ? activeItemRef : undefined}
+                    aria-selected={index === activeIndex}
                     onClick={() => onSelect(p)}
-                    className="w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-elq-orange/5 hover:text-elq-orange transition-colors"
+                    className={`w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-elq-orange/5 hover:text-elq-orange transition-colors ${
+                      index === activeIndex ? "bg-elq-orange/5 text-elq-orange" : ""
+                    }`}
                   >
                     {p.full_name}
                   </button>
@@ -167,9 +176,13 @@ export default function PlayerSearch({
             Esc
           </kbd>{" "}
           to cancel
-          {results.length === 1 && (
+          {results.length > 0 && (
             <>
               {" "}&middot;{" "}
+              <kbd className="px-1.5 py-0.5 rounded bg-elq-bg border border-elq-border text-[10px] font-mono">
+                &uarr;&darr;
+              </kbd>{" "}
+              to navigate{" "}&middot;{" "}
               <kbd className="px-1.5 py-0.5 rounded bg-elq-bg border border-elq-border text-[10px] font-mono">
                 Enter
               </kbd>{" "}

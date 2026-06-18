@@ -1096,6 +1096,44 @@ describe("CareerQuizBoard search keyboard submit", () => {
     expect(submitCareerGuess).not.toHaveBeenCalled();
   });
 
+  it("highlights with ArrowDown and submits the highlighted career result on Enter", async () => {
+    autocompleteCareerPlayer.mockResolvedValue({
+      players: [
+        { id: 78, name: "First Match" },
+        { id: 79, name: "Second Match" },
+      ],
+    });
+    submitCareerGuess.mockResolvedValue({
+      state: activeCareerGame(),
+      result: "incorrect",
+    });
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type a player name...");
+    fireEvent.change(input, { target: { value: "match" } });
+
+    const first = await screen.findByRole("button", { name: "First Match" });
+    const second = screen.getByRole("button", { name: "Second Match" });
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(first).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(second).toHaveAttribute("aria-selected", "true");
+    expect(first).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(submitCareerGuess).toHaveBeenCalledWith(7, 1, 79, 1));
+  });
+
   it("clears the guess box query and autocomplete results when the online round changes", async () => {
     autocompleteCareerPlayer.mockResolvedValue({
       players: [{ id: 81, name: "Stale Match" }],

@@ -211,4 +211,73 @@ describe("PlayerSearch", () => {
       expect(screen.getByText("Nikola Mirotic")).toBeInTheDocument();
     });
   });
+
+  it("moves a highlight with ArrowDown and selects the highlighted player on Enter", async () => {
+    const players = [
+      { player_id: 1, full_name: "Luka Doncic" },
+      { player_id: 2, full_name: "Luka Samanic" },
+    ];
+    autocompletePlayer.mockResolvedValue({ players });
+
+    render(
+      <PlayerSearch
+        rowTeamCode="BAR"
+        colTeamCode="RMB"
+        onSelect={mockOnSelect}
+        onCancel={mockOnCancel}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type player name...");
+    await userEvent.type(input, "luka");
+    await waitFor(() =>
+      expect(screen.getByText("Luka Samanic")).toBeInTheDocument()
+    );
+
+    const first = screen.getByText("Luka Doncic").closest("button");
+    const second = screen.getByText("Luka Samanic").closest("button");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(second).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(second).toHaveAttribute("aria-selected", "true");
+    expect(first).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(mockOnSelect).toHaveBeenCalledWith(players[1]);
+  });
+
+  it("returns to the input on ArrowUp from the first row so Enter selects nothing", async () => {
+    const players = [
+      { player_id: 1, full_name: "Luka Doncic" },
+      { player_id: 2, full_name: "Luka Samanic" },
+    ];
+    autocompletePlayer.mockResolvedValue({ players });
+
+    render(
+      <PlayerSearch
+        rowTeamCode="BAR"
+        colTeamCode="RMB"
+        onSelect={mockOnSelect}
+        onCancel={mockOnCancel}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type player name...");
+    await userEvent.type(input, "luka");
+    await waitFor(() =>
+      expect(screen.getByText("Luka Samanic")).toBeInTheDocument()
+    );
+
+    fireEvent.keyDown(input, { key: "ArrowDown" }); // highlight row 0
+    fireEvent.keyDown(input, { key: "ArrowUp" }); // back to the input (-1)
+    fireEvent.keyDown(input, { key: "Enter" }); // multiple results, no highlight
+
+    expect(mockOnSelect).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("Luka Doncic").closest("button")
+    ).toHaveAttribute("aria-selected", "false");
+  });
 });

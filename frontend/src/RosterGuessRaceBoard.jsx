@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useListKeyboardNav } from "./useListKeyboardNav";
 import {
   autocompleteRosterPlayer,
   cancelRosterRaceQuickMatch,
@@ -189,15 +190,17 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
     }
   }
 
+  const { activeIndex, activeItemRef, handleKeyDown: handleNavKeyDown } =
+    useListKeyboardNav(searchResults, handlePlayerSelect);
+
   function handleSearchKeyDown(event) {
     if (event.key === "Escape") {
       setSearchQuery("");
       setSearchResults([]);
       searchInputRef.current?.blur();
+      return;
     }
-    if (event.key === "Enter" && searchResults.length === 1) {
-      handlePlayerSelect(searchResults[0]);
-    }
+    handleNavKeyDown(event);
   }
 
   if (game?.status === "waiting_for_opponent") {
@@ -306,13 +309,17 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
               {searchFocused && searchQuery.length >= 1 && (
                 <div className="absolute top-full left-0 right-0 mt-1 max-h-64 overflow-y-auto rounded-2xl border border-elq-border bg-white shadow-xl">
                   {searchLoading && <div className="px-4 py-3 text-sm text-elq-muted text-center">Searching...</div>}
-                  {!searchLoading && searchResults.map((player) => (
+                  {!searchLoading && searchResults.map((player, index) => (
                     <button
                       key={player.player_id}
                       type="button"
+                      ref={index === activeIndex ? activeItemRef : undefined}
+                      aria-selected={index === activeIndex}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => handlePlayerSelect(player)}
-                      className="w-full border-b border-elq-border/50 px-4 py-2 text-left text-sm last:border-0 hover:bg-elq-orange/5 hover:text-elq-orange"
+                      className={`w-full border-b border-elq-border/50 px-4 py-2 text-left text-sm last:border-0 hover:bg-elq-orange/5 hover:text-elq-orange ${
+                        index === activeIndex ? "bg-elq-orange/5 text-elq-orange" : ""
+                      }`}
                     >
                       {player.full_name}
                     </button>

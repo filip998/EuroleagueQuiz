@@ -110,6 +110,45 @@ describe("RosterGuessRaceBoard", () => {
     expect(pill.querySelector(".bg-elq-player1")).toBeTruthy();
   });
 
+  it("highlights Race claims with ArrowDown and submits the highlighted row on Enter", async () => {
+    autocompleteRosterPlayer.mockResolvedValue({
+      players: [
+        { player_id: 98, full_name: "Nikola Mirotic" },
+        { player_id: 99, full_name: "Luka Doncic" },
+      ],
+    });
+
+    render(
+      <RosterGuessRaceBoard
+        initialState={activeRaceGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onNewGame={vi.fn()}
+        onHome={vi.fn()}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type a player name to claim...");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "a" } });
+
+    const first = await screen.findByText("Nikola Mirotic");
+    const second = screen.getByText("Luka Doncic");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(first.closest("button")).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(second.closest("button")).toHaveAttribute("aria-selected", "true");
+    expect(first.closest("button")).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(sendActionMock).toHaveBeenCalledWith("guess", {
+      player_id: 99,
+      round_number: 4,
+    });
+  });
+
   it("renders public waiting Race games in the quick-match searching lobby and cancels them", async () => {
     cancelRosterRaceQuickMatch.mockResolvedValue({ state: { id: 30, status: "cancelled" } });
     const onNewGame = vi.fn();

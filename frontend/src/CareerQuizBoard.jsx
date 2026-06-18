@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useListKeyboardNav } from "./useListKeyboardNav";
 import {
   autocompleteCareerPlayer,
   cancelCareerQuickMatch,
@@ -944,11 +945,12 @@ function CareerGuessBox({ onGuess, disabled, roundKey }) {
     setPlayers([]);
   }
 
+  const { activeIndex, activeItemRef, handleKeyDown: handleNavKeyDown } =
+    useListKeyboardNav(players, selectPlayer);
+
   function handleKeyDown(event) {
     if (disabled) return;
-    if (event.key === "Enter" && players.length === 1) {
-      selectPlayer(players[0]);
-    }
+    handleNavKeyDown(event);
   }
 
   return (
@@ -963,11 +965,15 @@ function CareerGuessBox({ onGuess, disabled, roundKey }) {
       />
       {players.length > 0 && (
         <div className="mt-2 rounded-xl border border-elq-border overflow-hidden">
-          {players.map((player) => (
+          {players.map((player, index) => (
             <button
               key={player.id}
+              ref={index === activeIndex ? activeItemRef : undefined}
+              aria-selected={index === activeIndex}
               onClick={() => selectPlayer(player)}
-              className="block w-full text-left px-4 py-2 hover:bg-elq-orange/5"
+              className={`block w-full text-left px-4 py-2 hover:bg-elq-orange/5 ${
+                index === activeIndex ? "bg-elq-orange/5" : ""
+              }`}
             >
               {player.name}
             </button>
