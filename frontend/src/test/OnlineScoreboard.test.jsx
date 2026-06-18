@@ -71,6 +71,13 @@ describe("OnlineScoreboard", () => {
     expect(screen.getByText("4")).toBeInTheDocument();
   });
 
+  it("exposes the countdown as an accessible timer with remaining seconds", () => {
+    renderBoard({ timer: { seconds: 12, critical: false } });
+    const timer = screen.getByRole("timer");
+    expect(timer).toHaveTextContent("12");
+    expect(timer).toHaveAttribute("aria-label", "12 seconds left");
+  });
+
   it("hides the countdown when the timer has no seconds", () => {
     const { container } = renderBoard({ timer: { seconds: null, critical: true } });
     expect(container.querySelector(".animate-timer-critical")).toBeNull();

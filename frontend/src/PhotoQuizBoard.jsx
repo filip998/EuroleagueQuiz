@@ -447,6 +447,11 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
             game={game}
             playerNumber={playerNumber}
             roundNumber={currentRoundNumber}
+            timer={
+              showRoundTimer && timerRemaining != null
+                ? { seconds: timerRemaining, critical: timerRemaining <= 5 }
+                : null
+            }
           />
         )}
 
@@ -461,17 +466,13 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
           </div>
 
           <div>
-            {showRoundTimer && (
+            {showRoundTimer && timerRemaining <= 0 && (
               <div
                 data-testid="photo-round-timer"
                 className="mb-3 inline-flex items-center gap-2 rounded-full border border-elq-border bg-elq-bg px-3 py-1 text-sm font-semibold text-elq-text"
               >
-                <span
-                  className={`w-2 h-2 rounded-full animate-pulse ${
-                    timerRemaining > 0 ? "bg-emerald-500" : "bg-elq-warning"
-                  }`}
-                />
-                {timerRemaining > 0 ? `${timerRemaining}s left` : "Time's up — skipping…"}
+                <span className="w-2 h-2 rounded-full animate-pulse bg-elq-warning" />
+                Time&apos;s up — skipping…
               </div>
             )}
 
@@ -588,7 +589,7 @@ function PhotoFeedbackMessage({ message }) {
   );
 }
 
-function PhotoMultiplayerScoreboard({ game, playerNumber, roundNumber }) {
+function PhotoMultiplayerScoreboard({ game, playerNumber, roundNumber, timer = null }) {
   return (
     <OnlineScoreboard
       ariaLabel="Photo Quiz multiplayer scoreboard"
@@ -600,6 +601,7 @@ function PhotoMultiplayerScoreboard({ game, playerNumber, roundNumber }) {
       youPlayerNumber={playerNumber}
       roundNumber={roundNumber}
       targetWins={game?.target_wins ?? "-"}
+      timer={timer}
     />
   );
 }

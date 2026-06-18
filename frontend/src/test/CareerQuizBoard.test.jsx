@@ -214,7 +214,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(screen.getByText("Copy link")).toBeInTheDocument();
   });
 
-  it("shows a display-only 20s timer for public Quick Match active rounds", async () => {
+  it("shows a display-only 20s countdown in the shared scoreboard for public Quick Match active rounds", async () => {
     render(
       <CareerQuizBoard
         initialState={activeCareerGame({
@@ -227,8 +227,44 @@ describe("CareerQuizBoard multiplayer reveals", () => {
       />
     );
 
-    const timer = await screen.findByTestId("career-round-timer");
-    expect(timer).toHaveTextContent("20s left");
+    const timer = await screen.findByRole("timer");
+    expect(timer).toHaveTextContent("20");
+    expect(timer).toHaveAttribute("aria-label", "20 seconds left");
+    // The countdown lives inside the shared OnlineScoreboard, consistent with
+    // TicTacToe and Roster Race rather than a separate pill.
+    const scoreboard = screen.getByRole("group", {
+      name: "Career Quiz multiplayer scoreboard",
+    });
+    expect(within(scoreboard).getByRole("timer")).toBe(timer);
+    // The standalone "Time's up" affordance stays hidden during the countdown.
+    expect(screen.queryByTestId("career-round-timer")).not.toBeInTheDocument();
+  });
+
+  it("counts the scoreboard timer down to zero and reveals the auto-skip affordance at expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T16:00:00Z"));
+    getCareerGame.mockResolvedValue(
+      activeCareerGame({ is_public: true, preset: "standard" })
+    );
+
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({ is_public: true, preset: "standard" })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("timer")).toHaveTextContent("20");
+    expect(screen.queryByTestId("career-round-timer")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(21000);
+    });
+
+    expect(screen.getByRole("timer")).toHaveTextContent("0");
+    expect(screen.getByTestId("career-round-timer")).toHaveTextContent("Time's up");
   });
 
   it("hides cooperative no-answer controls in public Quick Match games", () => {
