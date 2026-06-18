@@ -225,88 +225,88 @@ export function connectTicTacToeRealtime({
 }
 
 // ---------------------------------------------------------------------------
-// Roster Guess API
+// Guess the List API
 // ---------------------------------------------------------------------------
 
-export function createRosterGame(payload) {
-  return actionRequest("POST", "/quiz/roster-guess/games", { ...payload, guest_id: getGuestId() });
+export function createGuessTheListGame(payload) {
+  return actionRequest("POST", "/quiz/guess-the-list/games", { ...payload, guest_id: getGuestId() });
 }
 
-export function getRosterGame(gameId) {
-  return request("GET", `/quiz/roster-guess/games/${gameId}`);
+export function getGuessTheListGame(gameId) {
+  return request("GET", `/quiz/guess-the-list/games/${gameId}`);
 }
 
-export function joinRosterGame(joinCode, playerName) {
-  return actionRequest("POST", "/quiz/roster-guess/games/join", {
+export function joinGuessTheListGame(joinCode, playerName) {
+  return actionRequest("POST", "/quiz/guess-the-list/games/join", {
     join_code: joinCode,
     player_name: playerName,
     guest_id: getGuestId(),
   });
 }
 
-export function createRosterRaceGame(payload) {
-  return actionRequest("POST", "/quiz/roster-guess/race/games", {
+export function createGuessTheListRaceGame(payload) {
+  return actionRequest("POST", "/quiz/guess-the-list/race/games", {
     ...payload,
     guest_id: getGuestId(),
   });
 }
 
-export function joinRosterRaceGame(joinCode, playerName) {
-  return actionRequest("POST", "/quiz/roster-guess/race/games/join", {
+export function joinGuessTheListRaceGame(joinCode, playerName) {
+  return actionRequest("POST", "/quiz/guess-the-list/race/games/join", {
     join_code: joinCode,
     player_name: playerName,
     guest_id: getGuestId(),
   });
 }
 
-export function quickMatchRosterRace(payload) {
-  return actionRequest("POST", "/quiz/roster-guess/quick-match", {
+export function quickMatchGuessTheListRace(payload) {
+  return actionRequest("POST", "/quiz/guess-the-list/quick-match", {
     ...payload,
     guest_id: getGuestId(),
   });
 }
 
-export function cancelRosterRaceQuickMatch(payload) {
-  return actionRequest("POST", "/quiz/roster-guess/quick-match/cancel", {
+export function cancelGuessTheListRaceQuickMatch(payload) {
+  return actionRequest("POST", "/quiz/guess-the-list/quick-match/cancel", {
     ...payload,
     guest_id: getGuestId(),
   });
 }
 
-export function getRosterRaceQuickMatchPools() {
-  return request("GET", "/quiz/roster-guess/quick-match/pools");
+export function getGuessTheListRaceQuickMatchPools() {
+  return request("GET", "/quiz/guess-the-list/quick-match/pools");
 }
 
-export function submitRosterGuess(gameId, playerId, roundNumber = null) {
+export function submitGuessTheList(gameId, playerId, roundNumber = null) {
   const body = { player_id: playerId };
   if (roundNumber != null) body.round_number = roundNumber;
-  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/guess`, body);
+  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/guess`, body);
 }
 
 export function offerEndRound(gameId) {
-  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/end-offer`);
+  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/end-offer`);
 }
 
 export function respondEndRound(gameId, accept) {
-  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/end-response`, {
+  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/end-response`, {
     accept,
   });
 }
 
-export function giveUpRosterRound(gameId) {
-  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/give-up`);
+export function giveUpGuessTheListRound(gameId) {
+  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/give-up`);
 }
 
-export function resignRosterRaceGame(gameId, player) {
-  return actionRequest("POST", `/quiz/roster-guess/games/${gameId}/give-up?player=${player}`);
+export function resignGuessTheListRaceGame(gameId, player) {
+  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/give-up?player=${player}`);
 }
 
-export function autocompleteRosterPlayer(q, limit = 15) {
+export function autocompleteGuessTheListPlayer(q, limit = 15) {
   const params = new URLSearchParams({ q, limit });
-  return request("GET", `/quiz/roster-guess/players/autocomplete?${params}`);
+  return request("GET", `/quiz/guess-the-list/players/autocomplete?${params}`);
 }
 
-export function connectRosterGuessRealtime({
+export function connectGuessTheListRealtime({
   gameId,
   playerNumber,
   onMessage,
@@ -315,7 +315,7 @@ export function connectRosterGuessRealtime({
   authToken,
 }) {
   return connectRealtimeWebSocket(
-    `/quiz/roster-guess/ws/${gameId}?player=${playerNumber}`,
+    `/quiz/guess-the-list/ws/${gameId}?player=${playerNumber}`,
     { onMessage, onClose, WebSocketImpl, authToken }
   );
 }

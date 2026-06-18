@@ -14,10 +14,10 @@ vi.mock("../GameSetup", () => ({
 vi.mock("../GameBoard", () => ({
   default: () => <div data-testid="game-board" />,
 }));
-vi.mock("../RosterGuessSetup", () => ({
+vi.mock("../GuessTheListSetup", () => ({
   default: ({ onBack, initialMode, initialOnlineGameType }) => (
     <div
-      data-testid="roster-setup"
+      data-testid="guess-the-list-setup"
       data-initial-mode={initialMode || ""}
       data-initial-online-game-type={initialOnlineGameType || ""}
     >
@@ -25,11 +25,11 @@ vi.mock("../RosterGuessSetup", () => ({
     </div>
   ),
 }));
-vi.mock("../RosterGuessBoard", () => ({
-  default: () => <div data-testid="roster-board" />,
+vi.mock("../GuessTheListBoard", () => ({
+  default: () => <div data-testid="guess-the-list-board" />,
 }));
-vi.mock("../RosterGuessRaceBoard", () => ({
-  default: () => <div data-testid="roster-race-board" />,
+vi.mock("../GuessTheListRaceBoard", () => ({
+  default: () => <div data-testid="guess-the-list-race-board" />,
 }));
 vi.mock("../HigherLowerSetup", () => ({
   default: ({ onBack }) => (
@@ -66,7 +66,7 @@ describe("App", () => {
   it("renders the game selection screen with all game modes", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     expect(screen.getByText("TICTACTOE")).toBeInTheDocument();
-    expect(screen.getByText("ROSTER GUESS")).toBeInTheDocument();
+    expect(screen.getByText("GUESS THE LIST")).toBeInTheDocument();
     expect(screen.getByText("HIGHER OR LOWER")).toBeInTheDocument();
     expect(screen.getByText("CAREER QUIZ")).toBeInTheDocument();
     expect(screen.getByText("PHOTO QUIZ")).toBeInTheDocument();
@@ -103,21 +103,33 @@ describe("App", () => {
     expect(setup).toHaveAttribute("data-initial-mode", "online");
   });
 
-  it("navigates to Roster Guess setup when clicking the card", () => {
+  it("navigates to Guess the List setup when clicking the card", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
-    fireEvent.click(screen.getByText("ROSTER GUESS"));
-    expect(screen.getByTestId("roster-setup")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("GUESS THE LIST"));
+    expect(screen.getByTestId("guess-the-list-setup")).toBeInTheDocument();
   });
 
-  it("renders a Quick Match CTA on the Roster Guess card that opens Race setup", () => {
+  it("renders a Quick Match CTA on the Guess the List card that opens Race setup", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     const cta = screen
       .getAllByTestId("home-quick-match-cta")
-      .find((el) => el.getAttribute("href") === "/roster?quick=1");
+      .find((el) => el.getAttribute("href") === "/list?quick=1");
     expect(cta).toBeDefined();
     expect(cta).toHaveTextContent("Quick Match");
     fireEvent.click(cta);
-    const setup = screen.getByTestId("roster-setup");
+    const setup = screen.getByTestId("guess-the-list-setup");
+    expect(setup).toBeInTheDocument();
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-online-game-type", "race");
+  });
+
+  it("redirects legacy /roster quick links to the Guess the List setup without losing the query", () => {
+    render(
+      <MemoryRouter initialEntries={["/roster?quick=1"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("guess-the-list-setup");
     expect(setup).toBeInTheDocument();
     expect(setup).toHaveAttribute("data-initial-mode", "online");
     expect(setup).toHaveAttribute("data-initial-online-game-type", "race");
@@ -163,7 +175,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByText("Back"));
     expect(screen.getByText("TICTACTOE")).toBeInTheDocument();
-    expect(screen.getByText("ROSTER GUESS")).toBeInTheDocument();
+    expect(screen.getByText("GUESS THE LIST")).toBeInTheDocument();
   });
 
   it("prefills the TicTacToe setup join code from a ?join= invite URL", () => {

@@ -123,7 +123,7 @@ Deep stats, harder to guess:
 - `HigherLowerSetup.jsx` — tier selector, season range, nickname input, leaderboard view
 - `HigherLowerBoard.jsx` — the game board with two cards, buttons, streak counter, result reveal
 
-**Accessed from the home page** alongside TicTacToe and Roster Guess.
+**Accessed from the home page** alongside TicTacToe and Guess the List.
 
 ### Pair Generation Strategy
 

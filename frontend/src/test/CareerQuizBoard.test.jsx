@@ -233,7 +233,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(timer).toHaveTextContent("20");
     expect(timer).toHaveAttribute("aria-label", "20 seconds left");
     // The countdown lives inside the shared OnlineScoreboard, consistent with
-    // TicTacToe and Roster Race rather than a separate pill.
+    // TicTacToe and Guess the List Race rather than a separate pill.
     const scoreboard = screen.getByRole("group", {
       name: "Career Quiz multiplayer scoreboard",
     });

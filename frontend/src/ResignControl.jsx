@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 // Shared online "Resign" affordance used by every online board (TicTacToe,
-// Career Quiz, Photo Quiz, Roster Guess Race). Renders a subtle "Resign" link
+// Career Quiz, Photo Quiz, Guess the List Race). Renders a subtle "Resign" link
 // that expands into a confirm card. `onResign` is invoked when the player
 // confirms; `disabled` freezes the buttons while the request is in flight.
 export default function ResignControl({ onResign, disabled = false }) {

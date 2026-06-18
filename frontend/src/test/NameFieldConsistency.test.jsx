@@ -5,7 +5,7 @@ import GameSetup from "../GameSetup";
 import HigherLowerSetup from "../HigherLowerSetup";
 import CareerQuizSetup from "../CareerQuizSetup";
 import PhotoQuizSetup from "../PhotoQuizSetup";
-import RosterGuessSetup from "../RosterGuessSetup";
+import GuessTheListSetup from "../GuessTheListSetup";
 
 // Mock every network + matchmaking-pool dependency so the five setup screens
 // mount without touching the network. Crucially we do NOT mock ../identity or
@@ -29,12 +29,12 @@ vi.mock("../api", () => ({
   createPhotoSoloRound: vi.fn(),
   joinPhotoGame: vi.fn(),
   photoQuickMatch: vi.fn(),
-  // Roster Guess
-  createRosterGame: vi.fn(),
-  createRosterRaceGame: vi.fn(),
-  joinRosterGame: vi.fn(),
-  joinRosterRaceGame: vi.fn(),
-  quickMatchRosterRace: vi.fn(),
+  // Guess the List
+  createGuessTheListGame: vi.fn(),
+  createGuessTheListRaceGame: vi.fn(),
+  joinGuessTheListGame: vi.fn(),
+  joinGuessTheListRaceGame: vi.fn(),
+  quickMatchGuessTheListRace: vi.fn(),
 }));
 
 const emptyPools = () => ({ pools: {}, error: false });
@@ -51,9 +51,9 @@ vi.mock("../photoQuickMatch", async () => ({
   ...(await vi.importActual("../photoQuickMatch")),
   usePhotoQuickMatchPools: () => emptyPools(),
 }));
-vi.mock("../rosterRaceQuickMatch", async () => ({
-  ...(await vi.importActual("../rosterRaceQuickMatch")),
-  useRosterRaceQuickMatchPools: () => emptyPools(),
+vi.mock("../guessTheListRaceQuickMatch", async () => ({
+  ...(await vi.importActual("../guessTheListRaceQuickMatch")),
+  useGuessTheListRaceQuickMatchPools: () => emptyPools(),
 }));
 
 vi.mock("../Logo", () => ({
@@ -102,9 +102,9 @@ const SETUPS = [
     ),
   },
   {
-    name: "Roster Guess",
+    name: "Guess the List",
     render: () => (
-      <RosterGuessSetup onGameCreated={noop} onBack={noop} initialMode="online" />
+      <GuessTheListSetup onGameCreated={noop} onBack={noop} initialMode="online" />
     ),
   },
 ];

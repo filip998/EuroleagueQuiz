@@ -12,7 +12,7 @@ from app.game_actions import (
 from app.schemas.realtime import RealtimeClientAction, RealtimeResult
 from app.services import career_quiz as career_service
 from app.services import photo_quiz as photo_service
-from app.services import roster_guess as roster_service
+from app.services import guess_the_list as guess_the_list_service
 from app.services import tictactoe as ttt_service
 from app.services.game_action_orchestration import (
     GameActionCommand,
@@ -28,7 +28,7 @@ from app.services.realtime import TurnTimerState
 
 
 _TICTACTOE_ROUND_RESULTS = {"round_won", "round_drawn", "match_won", "board_complete"}
-_ROSTER_ROUND_RESULTS = {"round_won", "round_complete", "match_won", "board_complete"}
+_GUESS_THE_LIST_ROUND_RESULTS = {"round_won", "round_complete", "match_won", "board_complete"}
 _CAREER_ROUND_RESULTS = {"round_won", "match_won"}
 _PHOTO_ROUND_RESULTS = {"round_won", "match_won"}
 
@@ -268,7 +268,7 @@ class TicTacToeRealtimeAdapter:
         return game
 
 
-class RosterGuessRealtimeAdapter:
+class GuessTheListRealtimeAdapter:
     disconnect_forfeit_enabled = True
     http_actions = {
         GameActionName.CREATE.value,
@@ -292,15 +292,15 @@ class RosterGuessRealtimeAdapter:
         return bool(getattr(game, "is_race", False))
 
     def get_game(self, db: Session, game_id: int) -> Any:
-        return roster_service.get_game_or_404(db, game_id)
+        return guess_the_list_service.get_game_or_404(db, game_id)
 
     def serialize_state(self, db: Session, game: Any) -> dict[str, Any]:
-        return roster_service.serialize_game_state(db, game)
+        return guess_the_list_service.serialize_game_state(db, game)
 
     def serialize_completed_round(
         self, db: Session, game_id: int, round_number: int
     ) -> dict[str, Any] | None:
-        return roster_service.serialize_completed_round(db, game_id, round_number)
+        return guess_the_list_service.serialize_completed_round(db, game_id, round_number)
 
     def handle_client_action(
         self,
@@ -321,7 +321,7 @@ class RosterGuessRealtimeAdapter:
         data = command.payload
         if command.action == GameActionName.CREATE:
             if data.get("is_race"):
-                game = roster_service.create_race_game(
+                game = guess_the_list_service.create_race_game(
                     db,
                     target_wins=data.get("target_wins", 2),
                     player1_name=data.get("player1_name"),
@@ -330,7 +330,7 @@ class RosterGuessRealtimeAdapter:
                     guest_id=data.get("guest_id"),
                 )
             else:
-                game = roster_service.create_game(
+                game = guess_the_list_service.create_game(
                     db,
                     mode=data.get("mode", "single_player"),
                     target_wins=data.get("target_wins", 3),
@@ -345,14 +345,14 @@ class RosterGuessRealtimeAdapter:
 
         if command.action == GameActionName.JOIN:
             if data.get("is_race"):
-                game = roster_service.join_race_game(
+                game = guess_the_list_service.join_race_game(
                     db,
                     _required_str(data, "join_code").upper(),
                     player_name=data.get("player_name"),
                     guest_id=data.get("guest_id"),
                 )
             else:
-                game = roster_service.join_game(
+                game = guess_the_list_service.join_game(
                     db,
                     _required_str(data, "join_code").upper(),
                     data.get("player_name"),
@@ -382,7 +382,7 @@ class RosterGuessRealtimeAdapter:
             acting_player = _online_actor(game, player)
             prev_round_number = game.round_number
             if getattr(game, "is_race", False):
-                result = roster_service.submit_race_claim(
+                result = guess_the_list_service.submit_race_claim(
                     db,
                     game=game,
                     player_id=_required_int(data, "player_id"),
@@ -390,7 +390,7 @@ class RosterGuessRealtimeAdapter:
                     round_number=_required_int(data, "round_number"),
                 )
             else:
-                result = roster_service.submit_guess(
+                result = guess_the_list_service.submit_guess(
                     db,
                     game=game,
                     player_id=_required_int(data, "player_id"),
@@ -400,10 +400,10 @@ class RosterGuessRealtimeAdapter:
                 game=game,
                 result=result,
                 completed_round_number=(
-                    prev_round_number if result in _ROSTER_ROUND_RESULTS else None
+                    prev_round_number if result in _GUESS_THE_LIST_ROUND_RESULTS else None
                 ),
                 schedule_timer=(
-                    result in _ROSTER_ROUND_RESULTS
+                    result in _GUESS_THE_LIST_ROUND_RESULTS
                     if getattr(game, "is_race", False)
                     else result != RealtimeResult.MATCH_WON
                 ),
@@ -414,7 +414,7 @@ class RosterGuessRealtimeAdapter:
             if getattr(game, "is_race", False):
                 raise InvalidGameActionError("End offers are not available in Race mode")
             acting_player = _online_actor(game, player)
-            roster_service.offer_end(db, game, acting_player=acting_player)
+            guess_the_list_service.offer_end(db, game, acting_player=acting_player)
             return RealtimeActionOutcome(
                 game=game,
                 result=RealtimeResult.END_OFFERED,
@@ -426,7 +426,7 @@ class RosterGuessRealtimeAdapter:
                 raise InvalidGameActionError("End offers are not available in Race mode")
             acting_player = _online_actor(game, player)
             prev_round_number = game.round_number
-            result = roster_service.respond_end(
+            result = guess_the_list_service.respond_end(
                 db,
                 game,
                 accept=_required_bool(data, "accept"),
@@ -436,7 +436,7 @@ class RosterGuessRealtimeAdapter:
                 game=game,
                 result=("end_declined" if result == "declined" else result),
                 completed_round_number=(
-                    prev_round_number if result in _ROSTER_ROUND_RESULTS else None
+                    prev_round_number if result in _GUESS_THE_LIST_ROUND_RESULTS else None
                 ),
                 schedule_timer=game.status == "active",
                 cancel_timer=game.status == "finished",
@@ -445,7 +445,7 @@ class RosterGuessRealtimeAdapter:
         if action == GameActionName.GIVE_UP:
             if getattr(game, "is_race", False):
                 acting_player = _online_actor(game, player)
-                forfeited = roster_service.forfeit_online_game(
+                forfeited = guess_the_list_service.forfeit_online_game(
                     db,
                     game,
                     forfeiting_player=acting_player,
@@ -457,7 +457,7 @@ class RosterGuessRealtimeAdapter:
                     result=RealtimeResult.RESIGNED,
                     cancel_timer=True,
                 )
-            given_up_round = roster_service.give_up(db, game)
+            given_up_round = guess_the_list_service.give_up(db, game)
             return RealtimeActionOutcome(
                 game=game,
                 result=RealtimeResult.GIVEN_UP,
@@ -465,7 +465,7 @@ class RosterGuessRealtimeAdapter:
                 broadcast=False,
             )
 
-        raise AssertionError(f"Unhandled Roster Guess game action: {action}")
+        raise AssertionError(f"Unhandled Guess the List game action: {action}")
 
     def handle_time_expired(
         self,
@@ -476,7 +476,7 @@ class RosterGuessRealtimeAdapter:
         expected_round: int,
     ) -> Any:
         if getattr(game, "is_race", False):
-            if not roster_service.handle_race_round_time_expired(
+            if not guess_the_list_service.handle_race_round_time_expired(
                 db,
                 game,
                 expected_round=expected_round,
@@ -489,7 +489,7 @@ class RosterGuessRealtimeAdapter:
             or game.round_number != expected_round
         ):
             return GAME_ACTION_NOOP
-        roster_service.handle_time_expired(
+        guess_the_list_service.handle_time_expired(
             db,
             game,
             expected_player=expected_player,
@@ -506,7 +506,7 @@ class RosterGuessRealtimeAdapter:
         expected_round: int,
     ) -> Any:
         if getattr(game, "is_race", False):
-            if not roster_service.handle_race_game_unattended_time_expired(
+            if not guess_the_list_service.handle_race_game_unattended_time_expired(
                 db,
                 game,
                 expected_round=expected_round,
@@ -522,7 +522,7 @@ class RosterGuessRealtimeAdapter:
 
     def timer_state_from_game(self, game: Any) -> TurnTimerState | None:
         if getattr(game, "is_race", False):
-            delay = roster_service.race_round_timer_delay_seconds(game)
+            delay = guess_the_list_service.race_round_timer_delay_seconds(game)
             if delay is None:
                 return None
             return TurnTimerState(
@@ -538,7 +538,7 @@ class RosterGuessRealtimeAdapter:
 
     def timer_state_from_state(self, game_state: dict[str, Any]) -> TurnTimerState | None:
         if game_state.get("is_race"):
-            delay = roster_service.race_round_timer_delay_seconds_from_state(game_state)
+            delay = guess_the_list_service.race_round_timer_delay_seconds_from_state(game_state)
             if delay is None:
                 return None
             return TurnTimerState(
@@ -562,7 +562,7 @@ class RosterGuessRealtimeAdapter:
     ) -> Any:
         if not getattr(game, "is_race", False):
             return GAME_ACTION_NOOP
-        roster_service.forfeit_online_game(db, game, forfeiting_player=forfeiting_player)
+        guess_the_list_service.forfeit_online_game(db, game, forfeiting_player=forfeiting_player)
         return game
 
 

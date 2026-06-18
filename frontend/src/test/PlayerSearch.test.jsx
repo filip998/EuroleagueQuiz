@@ -5,10 +5,10 @@ import PlayerSearch from "../PlayerSearch";
 
 vi.mock("../api", () => ({
   autocompletePlayer: vi.fn(),
-  autocompleteRosterPlayer: vi.fn(),
+  autocompleteGuessTheListPlayer: vi.fn(),
 }));
 
-import { autocompletePlayer, autocompleteRosterPlayer } from "../api";
+import { autocompletePlayer, autocompleteGuessTheListPlayer } from "../api";
 
 describe("PlayerSearch", () => {
   const mockOnSelect = vi.fn();
@@ -17,7 +17,7 @@ describe("PlayerSearch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     autocompletePlayer.mockResolvedValue({ players: [] });
-    autocompleteRosterPlayer.mockResolvedValue({ players: [] });
+    autocompleteGuessTheListPlayer.mockResolvedValue({ players: [] });
   });
 
   it("renders the search modal with input", () => {
@@ -34,7 +34,7 @@ describe("PlayerSearch", () => {
     expect(screen.getByPlaceholderText("Type player name...")).toBeInTheDocument();
   });
 
-  it("shows team codes in description for non-roster mode", () => {
+  it("shows team codes in description for standard search mode", () => {
     render(
       <PlayerSearch
         rowTeamCode="BAR"
@@ -48,14 +48,14 @@ describe("PlayerSearch", () => {
     expect(screen.getByText("RMB")).toBeInTheDocument();
   });
 
-  it("shows roster mode description when rosterMode is true", () => {
+  it("shows Guess the List description when guessTheListMode is true", () => {
     render(
       <PlayerSearch
         rowTeamCode="BAR"
         colTeamCode="RMB"
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
-        rosterMode={true}
+        guessTheListMode={true}
       />
     );
 
@@ -188,8 +188,8 @@ describe("PlayerSearch", () => {
     });
   });
 
-  it("uses autocompleteRosterPlayer in roster mode", async () => {
-    autocompleteRosterPlayer.mockResolvedValue({
+  it("uses autocompleteGuessTheListPlayer in Guess the List mode", async () => {
+    autocompleteGuessTheListPlayer.mockResolvedValue({
       players: [{ player_id: 3, full_name: "Nikola Mirotic" }],
     });
 
@@ -199,7 +199,7 @@ describe("PlayerSearch", () => {
         colTeamCode="RMB"
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
-        rosterMode={true}
+        guessTheListMode={true}
       />
     );
 
@@ -207,7 +207,7 @@ describe("PlayerSearch", () => {
     await userEvent.type(input, "mirotic");
 
     await waitFor(() => {
-      expect(autocompleteRosterPlayer).toHaveBeenCalled();
+      expect(autocompleteGuessTheListPlayer).toHaveBeenCalled();
       expect(screen.getByText("Nikola Mirotic")).toBeInTheDocument();
     });
   });
