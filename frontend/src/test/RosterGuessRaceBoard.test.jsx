@@ -48,6 +48,7 @@ import RosterGuessRaceBoard from "../RosterGuessRaceBoard";
 import { autocompleteRosterPlayer, cancelRosterRaceQuickMatch } from "../api";
 import { clearOnlineInfo } from "../onlineRecovery";
 import { forgetQuickMatchSeat } from "../quickMatchSeats";
+import { buildInviteUrl } from "../inviteLink";
 
 describe("RosterGuessRaceBoard", () => {
   beforeEach(() => {
@@ -112,6 +113,8 @@ describe("RosterGuessRaceBoard", () => {
       "data-preset",
       "modern-standard"
     );
+    // Public quick-match games hide the join code, so no invite link must leak.
+    expect(screen.queryByText("Copy link")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Cancel search"));
 
     await waitFor(() => expect(onNewGame).toHaveBeenCalled());
@@ -121,6 +124,28 @@ describe("RosterGuessRaceBoard", () => {
     });
     expect(clearOnlineInfo).toHaveBeenCalledWith(30);
     expect(forgetQuickMatchSeat).toHaveBeenCalledWith("roster-race:30");
+  });
+
+  it("shows a shareable invite link in the private friend waiting lobby", () => {
+    render(
+      <RosterGuessRaceBoard
+        initialState={{
+          ...activeRaceGame(),
+          status: "waiting_for_opponent",
+          join_code: "ABC123",
+        }}
+        onlineInfo={{ playerNumber: 1 }}
+        onNewGame={vi.fn()}
+        onHome={vi.fn()}
+      />
+    );
+
+    const inviteUrl = buildInviteUrl("ABC123", "/roster");
+    expect(inviteUrl).toContain("/roster?join=ABC123");
+    expect(screen.queryByTestId("searching-lobby")).not.toBeInTheDocument();
+    expect(screen.getByText("ABC123")).toBeInTheDocument();
+    expect(screen.getByText(inviteUrl)).toBeInTheDocument();
+    expect(screen.getByText("Copy link")).toBeInTheDocument();
   });
 });
 

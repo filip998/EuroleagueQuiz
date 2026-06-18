@@ -33,6 +33,7 @@ import {
   submitCareerGuess,
   submitCareerSoloGuess,
 } from "../api";
+import { buildInviteUrl } from "../inviteLink";
 
 let careerRealtimeConnections = [];
 
@@ -180,6 +181,8 @@ describe("CareerQuizBoard multiplayer reveals", () => {
 
     expect(screen.getByText("SEARCHING THE POOL…")).toBeInTheDocument();
     expect(screen.getByText("First to 3")).toBeInTheDocument();
+    // Public quick-match games hide the join code, so no invite link must leak.
+    expect(screen.queryByText("Copy link")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Cancel search"));
 
@@ -188,6 +191,26 @@ describe("CareerQuizBoard multiplayer reveals", () => {
       game_id: 7,
     }));
     expect(onNewGame).toHaveBeenCalled();
+  });
+
+  it("shows a shareable invite link in the private friend waiting lobby", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame({
+          status: "waiting_for_opponent",
+          current_round: null,
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const inviteUrl = buildInviteUrl("ABC123", "/career");
+    expect(inviteUrl).toContain("/career?join=ABC123");
+    expect(screen.getByText("ABC123")).toBeInTheDocument();
+    expect(screen.getByText(inviteUrl)).toBeInTheDocument();
+    expect(screen.getByText("Copy link")).toBeInTheDocument();
   });
 
   it("shows a display-only 20s timer for public Quick Match active rounds", async () => {
