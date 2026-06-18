@@ -138,3 +138,19 @@ class QuizTicTacToeAxis(Base):
     )
 
     round = relationship("QuizTicTacToeRound", back_populates="axes")
+
+
+class QuizTicTacToeStatMilestonePlayer(Base):
+    __tablename__ = "quiz_ttt_stat_milestone_players"
+
+    milestone_key = Column(String(64), primary_key=True)
+    player_id = Column(Integer, ForeignKey("players.id"), primary_key=True)
+
+    __table_args__ = (
+        Index(
+            "ix_quiz_ttt_stat_milestone_players_player_id",
+            "player_id",
+        ),
+    )
+
+    player = relationship("Player")

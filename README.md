@@ -115,7 +115,13 @@ uvicorn app.main:app --reload
 ```bash
 cd backend
 python -m ingestion.ingest --start-season 2000 --end-season 2025
+python -m ingestion.ingest --step stat-milestones
 ```
+
+The aggregate ingestion path refreshes TicTacToe stat-milestone eligibility after
+season stats are rebuilt. `--step stat-milestones` reruns only that derived-table
+precompute when raw `player_season_stats` / `game_player_stats` data already
+exists.
 
 ### Run Wikipedia Career Ingestion
 
@@ -164,6 +170,16 @@ using a first-wins unique `guest_id` rule and delete-orphan cascade from
 Mutating quiz operations use a **Game action** seam in `backend/app/game_actions.py`.
 Routers, WebSocket handlers, and timer jobs run game actions through this helper so the
 application layer owns commit/rollback and game modules stay HTTP-agnostic.
+
+TicTacToe stat-milestone clue eligibility is precomputed in
+`quiz_ttt_stat_milestone_players` by
+`backend/app/services/tictactoe_stat_milestones.py` and refreshed from ingestion
+after aggregate stats, or directly with `python -m ingestion.ingest --step
+stat-milestones`. Shipped thresholds are EuroLeague-calibrated and must keep at
+least 40 eligible players: 15+ PPG, 6+ RPG, 5+ APG, and 15+ PIR season averages
+with a 10-game minimum, plus 30+ points in one game and 1,000+ EuroLeague career
+points summed from `player_season_stats`. The 3,000-point legend tier is defined
+for future use but not shipped as an axis because its pool is below the guard.
 
 Online TicTacToe, Roster Guess, Career Quiz, and Photo Quiz share an **Online Game Realtime Module**. The backend
 Module in `backend/app/services/realtime.py` owns WebSocket connection cleanup,
