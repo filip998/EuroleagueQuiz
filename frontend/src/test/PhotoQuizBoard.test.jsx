@@ -53,6 +53,7 @@ import {
 } from "../api";
 import { clearOnlineInfo } from "../onlineRecovery";
 import { forgetQuickMatchSeat } from "../quickMatchSeats";
+import { buildInviteUrl } from "../inviteLink";
 
 let photoRealtimeConnections = [];
 
@@ -743,6 +744,8 @@ describe("PhotoQuizBoard Quick Match", () => {
     );
 
     expect(screen.getByTestId("searching-lobby")).toHaveAttribute("data-preset", "standard");
+    // Public quick-match games hide the join code, so no invite link must leak.
+    expect(screen.queryByText("Copy link")).not.toBeInTheDocument();
   });
 
   it("renders the private WaitingLobby (not the searching lobby) for friend games", () => {
@@ -757,6 +760,29 @@ describe("PhotoQuizBoard Quick Match", () => {
 
     expect(screen.queryByTestId("searching-lobby")).not.toBeInTheDocument();
     expect(screen.getByText("ABC123")).toBeInTheDocument();
+  });
+
+  it("renders and copies a shareable invite link in the private friend lobby", async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.assign(navigator, { clipboard: { writeText } });
+    const inviteUrl = buildInviteUrl("ABC123", "/photo");
+
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame({ status: "waiting_for_opponent" })}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(inviteUrl).toContain("/photo?join=ABC123");
+    expect(screen.getByText("ABC123")).toBeInTheDocument();
+    expect(screen.getByText(inviteUrl)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Copy link"));
+    expect(writeText).toHaveBeenCalledWith(inviteUrl);
+    expect(await screen.findByText("Link copied!")).toBeInTheDocument();
   });
 
   it("cancels a quick match search via the cancel endpoint and clears recovery data", async () => {

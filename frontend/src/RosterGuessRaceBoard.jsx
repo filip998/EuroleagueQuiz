@@ -10,6 +10,7 @@ import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import WaitingLobby from "./WaitingLobby";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
+import { buildInviteUrl } from "./inviteLink";
 import { clearOnlineInfo } from "./onlineRecovery";
 import { forgetQuickMatchSeat } from "./quickMatchSeats";
 import {
@@ -205,7 +206,13 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
         />
       );
     }
-    return <WaitingLobby joinCode={game.join_code} onCancel={onNewGame} />;
+    return (
+      <WaitingLobby
+        joinCode={game.join_code}
+        inviteUrl={buildInviteUrl(game.join_code, "/roster")}
+        onCancel={onNewGame}
+      />
+    );
   }
 
   if (!game || !displayRound) {
