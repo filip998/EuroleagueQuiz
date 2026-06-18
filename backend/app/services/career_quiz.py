@@ -264,6 +264,81 @@ def submit_guess(
     return "round_won"
 
 
+def forfeit_online_game(
+    db: Session,
+    game: CareerQuizGame,
+    *,
+    forfeiting_player: int,
+) -> bool:
+    if game.mode != "online_friend":
+        raise ConflictGameActionError("Forfeit is only available in online games")
+    if forfeiting_player not in (1, 2):
+        raise ConflictGameActionError("Online game actions require player identity")
+    if game.status != "active":
+        return False
+
+    try:
+        round_obj = _current_round(game)
+    except ConflictGameActionError:
+        return False
+    if round_obj.status != "active":
+        return False
+
+    winning_player = 2 if forfeiting_player == 1 else 1
+    completed_at = datetime.utcnow()
+    updated_round = (
+        db.query(CareerQuizRound)
+        .filter(CareerQuizRound.id == round_obj.id)
+        .filter(CareerQuizRound.status == "active")
+        .filter(
+            CareerQuizRound.game.has(
+                (CareerQuizGame.id == game.id)
+                & (CareerQuizGame.status == "active")
+                & (CareerQuizGame.round_number == round_obj.round_number)
+            )
+        )
+        .update(
+            {
+                "status": "completed",
+                "winner_player": winning_player,
+                "completed_at": completed_at,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated_round != 1:
+        return False
+
+    updated_game = (
+        db.query(CareerQuizGame)
+        .filter(CareerQuizGame.id == game.id)
+        .filter(CareerQuizGame.status == "active")
+        .filter(CareerQuizGame.round_number == round_obj.round_number)
+        .update(
+            {
+                "status": "finished",
+                "winner_player": winning_player,
+                "pending_no_answer_from": None,
+                "pending_no_answer_to": None,
+                "updated_at": completed_at,
+            },
+            synchronize_session=False,
+        )
+    )
+    if updated_game != 1:
+        raise ConflictGameActionError("Game is not active")
+
+    round_obj.status = "completed"
+    round_obj.winner_player = winning_player
+    round_obj.completed_at = completed_at
+    game.status = "finished"
+    game.winner_player = winning_player
+    game.pending_no_answer_from = None
+    game.pending_no_answer_to = None
+    game.updated_at = completed_at
+    return True
+
+
 def offer_no_answer(
     db: Session,
     *,

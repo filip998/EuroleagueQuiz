@@ -29,6 +29,7 @@ function posRank(position) {
 export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGame, onHome }) {
   const [game, setGame] = useState(initialState);
   const [message, setMessage] = useState("");
+  const [lastResult, setLastResult] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -100,6 +101,15 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
   function handleRealtimeState(result) {
     if (!result?.state) return;
     setGame(result.state);
+    if (result.result === "opponent_left") {
+      setLastResult(result.result);
+      setMessage("");
+      if (result.completedRound) {
+        setCompletedRound(result.completedRound);
+        setLastRevealedRoundNumber(result.completedRound.round_number);
+      }
+      return;
+    }
     if (!result.result) {
       setMessage("");
       return;
@@ -222,6 +232,9 @@ export default function RosterGuessRaceBoard({ initialState, onlineInfo, onNewGa
             {(game.winner_player === 1 ? game.player1_name : game.player2_name) || "Player"} wins!
           </h1>
           <p className="text-elq-muted mb-6">{game.player1_score} - {game.player2_score}</p>
+          {lastResult === "opponent_left" && (
+            <p className="text-elq-muted mb-6">Your opponent left the game.</p>
+          )}
           <button onClick={onNewGame} className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl">
             Play Again
           </button>

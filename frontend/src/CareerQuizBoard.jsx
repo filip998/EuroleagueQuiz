@@ -85,6 +85,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [cancelling, setCancelling] = useState(false);
   const [roundTimerAnchor, setRoundTimerAnchor] = useState(null);
+  const [lastResult, setLastResult] = useState(null);
   const soloRoundTokenRef = useRef(soloInitialRound?.round_token || null);
 
   const solo = Boolean(soloRound);
@@ -178,6 +179,12 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   function handleRealtimeState(result) {
     if (!result?.state) return;
     setGame(result.state);
+    if (result.result === "opponent_left") {
+      setLastResult(result.result);
+      setNoAnswerOfferMessageRoundNumber(null);
+      setMessage("");
+      return;
+    }
 
     if (!result.result) {
       setMessage((currentMessage) => (
@@ -413,6 +420,9 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
             {finishedWinnerName ? `${finishedWinnerName} wins!` : "No winner"}
           </h1>
           <p className="text-elq-muted mb-6">{game.player1_score} - {game.player2_score}</p>
+          {lastResult === "opponent_left" && (
+            <p className="text-elq-muted mb-6">Your opponent left the game.</p>
+          )}
           <button onClick={onNewGame} className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl">
             Play Again
           </button>

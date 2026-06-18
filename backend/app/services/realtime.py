@@ -518,10 +518,7 @@ class OnlineGameRealtimeModule:
         try:
             db = self.session_factory()
             game = self.adapter.get_game(db, game_id)
-            if (
-                getattr(game, "mode", None) != "online_friend"
-                or getattr(game, "status", None) != "active"
-            ):
+            if not self._disconnect_forfeit_eligible(game):
                 return
         except GameActionError:
             logger.info(
@@ -560,17 +557,17 @@ class OnlineGameRealtimeModule:
                     game = self.adapter.get_game(db, game_id)
                 except GameActionError:
                     return GAME_ACTION_NOOP
-                if (
-                    getattr(game, "mode", None) != "online_friend"
-                    or getattr(game, "status", None) != "active"
-                ):
+                if not self._disconnect_forfeit_eligible(game):
                     return GAME_ACTION_NOOP
-                return self.adapter.handle_player_forfeit(
-                    db,
-                    game,
-                    forfeiting_player=player,
-                    result=RealtimeResult.OPPONENT_LEFT,
-                )
+                try:
+                    return self.adapter.handle_player_forfeit(
+                        db,
+                        game,
+                        forfeiting_player=player,
+                        result=RealtimeResult.OPPONENT_LEFT,
+                    )
+                except GameActionError:
+                    return GAME_ACTION_NOOP
 
             game = run_game_action(db, action)
             if game is GAME_ACTION_NOOP:
@@ -594,6 +591,17 @@ class OnlineGameRealtimeModule:
             game_id,
             state,
             result=RealtimeResult.OPPONENT_LEFT,
+        )
+
+    def _disconnect_forfeit_eligible(self, game: Any) -> bool:
+        if not getattr(self.adapter, "disconnect_forfeit_enabled", False):
+            return False
+        hook = getattr(self.adapter, "disconnect_forfeit_eligible", None)
+        if hook is not None:
+            return bool(hook(game))
+        return (
+            getattr(game, "mode", None) == "online_friend"
+            and getattr(game, "status", None) == "active"
         )
 
     async def _expire_turn(

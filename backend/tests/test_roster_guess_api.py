@@ -12,10 +12,15 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import Player, PlayerSeasonTeam, Season, Team
 from app.models.roster_guess import RosterGuessGame, RosterGuessRound
+from app.schemas.realtime import RealtimeServerMessageAdapter
 from app.services import roster_guess as roster_service
-from app.services.realtime import OnlineGameRealtimeModule, TurnTimerManager
+from app.services.realtime import (
+    DisconnectGraceTimerManager,
+    OnlineGameRealtimeModule,
+    TurnTimerManager,
+)
 from app.services.realtime_adapters import RosterGuessRealtimeAdapter
-from tests.realtime_helpers import SleepController, drain_tasks
+from tests.realtime_helpers import FakeWebSocket, SleepController, drain_tasks
 
 
 @pytest.fixture(autouse=True)
@@ -387,6 +392,103 @@ def test_roster_race_claim_after_deadline_resolves_without_late_award(client: Te
     assert resolved["completed_round"]["player1_correct"] == 1
     assert resolved["completed_round"]["player2_correct"] == 0
     assert resolved["completed_round"]["guessed_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_roster_race_disconnect_grace_forfeits_real_quick_match_game(
+    client: TestClient,
+):
+    first = client.post(
+        "/quiz/roster-guess/quick-match",
+        json={
+            "preset": "modern-standard",
+            "player_name": "Host",
+            "guest_id": "host-guest",
+        },
+    )
+    assert first.status_code == 200
+    second = client.post(
+        "/quiz/roster-guess/quick-match",
+        json={
+            "preset": "modern-standard",
+            "player_name": "Joiner",
+            "guest_id": "joiner-guest",
+        },
+    )
+    assert second.status_code == 200
+    game = second.json()["payload"]["game"]
+    game_id = game["id"]
+
+    grace_sleep = SleepController()
+    module = OnlineGameRealtimeModule(
+        RosterGuessRealtimeAdapter(),
+        session_factory=client.session_local,
+        disconnect_grace_seconds=3,
+    )
+    module.disconnect_grace_timer = DisconnectGraceTimerManager(
+        module._expire_disconnect_grace,
+        sleep=grace_sleep,
+    )
+    leaving = FakeWebSocket()
+    opponent = FakeWebSocket()
+    await module.connections.connect(game_id, 1, leaving)
+    await module.connections.connect(game_id, 2, opponent)
+
+    module.disconnect(game_id, 1, leaving)
+    await grace_sleep.wait_for_call()
+    grace_sleep.release()
+    await drain_tasks(5)
+
+    with client.session_local() as db:
+        stored = db.get(RosterGuessGame, game_id)
+        assert stored.status == "finished"
+        assert stored.winner_player == 2
+        assert stored.pending_end_from is None
+        assert stored.pending_end_to is None
+
+    assert not module.disconnect_grace_timer.has_game_timer(game_id)
+    message = opponent.sent[-1]
+    RealtimeServerMessageAdapter.validate_python(message)
+    assert message["payload"]["result"] == "opponent_left"
+    assert message["payload"]["terminal"] is True
+    assert message["payload"]["game"]["winner_player"] == 2
+
+
+@pytest.mark.asyncio
+async def test_classic_online_roster_disconnect_does_not_start_forfeit_grace(
+    client: TestClient,
+):
+    game = _create_roster_game(client, mode="online_friend")
+    join = client.post(
+        "/quiz/roster-guess/games/join",
+        json={"join_code": game["join_code"], "player_name": "Joiner"},
+    )
+    assert join.status_code == 200
+
+    grace_sleep = SleepController()
+    module = OnlineGameRealtimeModule(
+        RosterGuessRealtimeAdapter(),
+        session_factory=client.session_local,
+        disconnect_grace_seconds=3,
+    )
+    module.disconnect_grace_timer = DisconnectGraceTimerManager(
+        module._expire_disconnect_grace,
+        sleep=grace_sleep,
+    )
+    leaving = FakeWebSocket()
+    opponent = FakeWebSocket()
+    await module.connections.connect(game["id"], 1, leaving)
+    await module.connections.connect(game["id"], 2, opponent)
+
+    module.disconnect(game["id"], 1, leaving)
+    await drain_tasks()
+
+    assert grace_sleep.calls == []
+    assert not module.disconnect_grace_timer.has_game_timer(game["id"])
+    with client.session_local() as db:
+        stored = db.get(RosterGuessGame, game["id"])
+        assert stored.status == "active"
+        assert stored.winner_player is None
 
 
 @pytest.mark.asyncio

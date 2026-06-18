@@ -299,6 +299,56 @@ def submit_guess(
     return "round_won"
 
 
+def forfeit_online_game(
+    db: Session,
+    game: PhotoQuizGame,
+    *,
+    forfeiting_player: int,
+) -> bool:
+    if game.mode != "online_friend":
+        raise ConflictGameActionError("Forfeit is only available in online games")
+    if forfeiting_player not in (1, 2):
+        raise ConflictGameActionError("Online game actions require player identity")
+    if game.status != "active":
+        return False
+
+    try:
+        round_obj = _current_round(game)
+    except ConflictGameActionError:
+        return False
+    if round_obj.status != "active":
+        return False
+
+    winning_player = 2 if forfeiting_player == 1 else 1
+    try:
+        _claim_active_round(
+            db,
+            round_obj,
+            status="completed",
+            winner_player=winning_player,
+            completed_at=datetime.utcnow(),
+        )
+    except ConflictGameActionError:
+        return False
+
+    _update_active_game_round(
+        db,
+        game,
+        round_obj.round_number,
+        {
+            "status": "finished",
+            "winner_player": winning_player,
+            "pending_no_answer_from": None,
+            "pending_no_answer_to": None,
+        },
+    )
+    game.status = "finished"
+    game.winner_player = winning_player
+    game.pending_no_answer_from = None
+    game.pending_no_answer_to = None
+    return True
+
+
 def offer_no_answer(
     db: Session,
     *,

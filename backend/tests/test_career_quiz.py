@@ -20,7 +20,11 @@ from app.models import (
 from app.routers import career_quiz as career_quiz_router
 from app.schemas.realtime import RealtimeServerMessageAdapter
 from app.services import career_quiz
-from app.services.realtime import OnlineGameRealtimeModule, TurnTimerManager
+from app.services.realtime import (
+    DisconnectGraceTimerManager,
+    OnlineGameRealtimeModule,
+    TurnTimerManager,
+)
 from app.services.realtime_adapters import CareerQuizRealtimeAdapter
 from app.services.solo_round_token import create_solo_round_token
 
@@ -1214,6 +1218,68 @@ def test_career_realtime_adapter_rejects_public_no_answer_offer():
             )
     finally:
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_career_disconnect_grace_forfeits_real_quick_match_game(tmp_path: Path):
+    SessionLocal = _file_session_factory(tmp_path)
+    setup = SessionLocal()
+    try:
+        for index in range(3):
+            _eligible_player(setup, "Disconnect", f"Player{index}")
+        _active_revision(setup)
+        setup.commit()
+
+        game = career_quiz.create_game(setup, target_wins=3, player1_name="Host")
+        game.is_public = True
+        game.preset = "standard"
+        career_quiz.join_game(
+            setup,
+            game.join_code,
+            player_name="Joiner",
+            allow_public=True,
+        )
+        game_id = game.id
+        setup.commit()
+    finally:
+        setup.close()
+
+    grace_sleep = _ControlledSleep()
+    module = OnlineGameRealtimeModule(
+        CareerQuizRealtimeAdapter(),
+        session_factory=SessionLocal,
+        disconnect_grace_seconds=3,
+    )
+    module.disconnect_grace_timer = DisconnectGraceTimerManager(
+        module._expire_disconnect_grace,
+        sleep=grace_sleep,
+    )
+    leaving = _FakeWebSocket()
+    opponent = _FakeWebSocket()
+    await module.connections.connect(game_id, 1, leaving)
+    await module.connections.connect(game_id, 2, opponent)
+
+    module.disconnect(game_id, 1, leaving)
+    await grace_sleep.wait_for_call()
+    grace_sleep.release()
+    await _drain_async_tasks()
+
+    verify = SessionLocal()
+    try:
+        stored = verify.get(CareerQuizGame, game_id)
+        assert stored.status == "finished"
+        assert stored.winner_player == 2
+        assert stored.pending_no_answer_from is None
+        assert stored.pending_no_answer_to is None
+    finally:
+        verify.close()
+
+    assert not module.disconnect_grace_timer.has_game_timer(game_id)
+    message = opponent.sent[-1]
+    RealtimeServerMessageAdapter.validate_python(message)
+    assert message["payload"]["result"] == "opponent_left"
+    assert message["payload"]["terminal"] is True
+    assert message["payload"]["game"]["winner_player"] == 2
 
 
 @pytest.mark.asyncio
