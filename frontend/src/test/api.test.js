@@ -398,14 +398,14 @@ describe("Guess the List API", () => {
       mockJsonResponse(stateEnvelope({ id: 14, status: "waiting_for_opponent" }))
     );
 
-    const result = await quickMatchGuessTheListRace({ preset: "modern-standard", player_name: "Ace" });
+    const result = await quickMatchGuessTheListRace({ preset: "standard", player_name: "Ace" });
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/guess-the-list/quick-match",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          preset: "modern-standard",
+          preset: "standard",
           player_name: "Ace",
           guest_id: "test-guest-id",
         }),
@@ -417,7 +417,7 @@ describe("Guess the List API", () => {
   it("cancelGuessTheListRaceQuickMatch posts game_id, preset and guest_id", async () => {
     mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 14, status: "cancelled" })));
 
-    await cancelGuessTheListRaceQuickMatch({ game_id: 14, preset: "modern-standard" });
+    await cancelGuessTheListRaceQuickMatch({ game_id: 14, preset: "standard" });
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/guess-the-list/quick-match/cancel",
@@ -425,7 +425,7 @@ describe("Guess the List API", () => {
         method: "POST",
         body: JSON.stringify({
           game_id: 14,
-          preset: "modern-standard",
+          preset: "standard",
           guest_id: "test-guest-id",
         }),
       })
@@ -435,7 +435,7 @@ describe("Guess the List API", () => {
   it("getGuessTheListRaceQuickMatchPools fetches public Race pool counts", async () => {
     mockFetch.mockReturnValue(
       mockJsonResponse({
-        pools: { "modern-standard": { searching: 1, in_progress: 2 } },
+        pools: { standard: { searching: 1, in_progress: 2 } },
         poll_interval_seconds: 5,
       })
     );
@@ -446,7 +446,7 @@ describe("Guess the List API", () => {
       "http://localhost:8000/quiz/guess-the-list/quick-match/pools",
       expect.objectContaining({ method: "GET" })
     );
-    expect(result.pools["modern-standard"].in_progress).toBe(2);
+    expect(result.pools.standard.in_progress).toBe(2);
   });
 
   it("autocompleteGuessTheListPlayer sends query", async () => {

@@ -270,7 +270,9 @@ counting only public searches and active public matches. Guess the List Race
 does the same under `GET /quiz/guess-the-list/quick-match/pools`; public Race entries
 are created with `POST /quiz/guess-the-list/quick-match`, cancelled with
 `POST /quiz/guess-the-list/quick-match/cancel`, and use presets
-`full|modern|nostalgia|recent` × `quick|standard|long`.
+`quick`, `standard`, and `long` (first-to-1/2/3). Those length-only pools
+intentionally remove era selection; each public Race round randomizes among
+roster, all-time leaderboard, and single-season leaderboard lists.
 
 Mutating TicTacToe, Guess the List, Career Quiz, and Photo Quiz HTTP endpoints now use the same realtime
 message envelopes as WebSocket broadcasts: successful actions return
@@ -365,11 +367,13 @@ shared-component code is required.
 
 Guess the List keeps Solo, Local 1v1, and Online as its top-level setup choices. Inside
 Online, players choose **Classic** (the existing turn-based Create/Join flow) or **Race**.
-Race is online-only: both players see the same team-season roster and claim players
-simultaneously, with each roster member awarded to the first player to name them. The
-round ends when the 120-second timer expires or the full roster is claimed; higher claim
-count wins the round, ties award no point, and non-terminal rounds reveal the full roster
-for 12 seconds before the next one unlocks.
+Race is online-only: both players see the same list and claim players simultaneously,
+with each player awarded to the first competitor to name them. Friend races use roster
+lists from the selected season range; public Quick Match races use length-only pools
+and randomize each round among roster, all-time leaderboard, and single-season
+leaderboard lists. The round ends when the 120-second timer expires or the full list is
+claimed; higher claim count wins the round, ties award no point, and non-terminal rounds
+reveal the full list for 12 seconds before the next one unlocks.
 
 Race reuses the shared Quick Match components: `/list?quick=1` opens Online → Race →
 Quick Match, the home card has a Quick Match CTA, and the board uses
