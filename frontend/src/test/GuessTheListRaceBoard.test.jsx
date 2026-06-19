@@ -382,3 +382,110 @@ describe("GuessTheListRaceBoard header navigation", () => {
     expect(onNewGame).not.toHaveBeenCalled();
   });
 });
+
+describe("GuessTheListRaceBoard leaderboard rounds", () => {
+  it("renders the scope label and a claimed slot's rank and stat value", () => {
+    render(
+      <GuessTheListRaceBoard
+        initialState={activeRaceGame({
+          round: {
+            id: 55,
+            round_number: 4,
+            status: "active",
+            category_type: "single_season",
+            scope_label: "2015 assists per-game leaders",
+            team_code: null,
+            team_name: null,
+            season_year: 2015,
+            player1_correct: 1,
+            player2_correct: 0,
+            guessed_count: 1,
+            total_slots: 2,
+            slots: [
+              {
+                id: 1,
+                player_name: "Vasilije Micic",
+                position: "Guard",
+                nationality: "Serbia",
+                jersey_number: null,
+                image_url: null,
+                guessed_by_player: 1,
+                rank: 1,
+                stat_value: 7.2,
+                stat_value_label: "7.2 apg",
+              },
+              {
+                id: 2,
+                player_name: null,
+                position: null,
+                nationality: null,
+                jersey_number: null,
+                image_url: null,
+                guessed_by_player: null,
+                rank: null,
+                stat_value: null,
+                stat_value_label: null,
+              },
+            ],
+          },
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onNewGame={vi.fn()}
+        onHome={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("2015 assists per-game leaders")).toBeInTheDocument();
+    expect(screen.getByText("Vasilije Micic")).toBeInTheDocument();
+    expect(screen.getByText("#1")).toBeInTheDocument();
+    expect(screen.getByText("7.2 apg")).toBeInTheDocument();
+    expect(screen.queryByTestId("club-logo")).not.toBeInTheDocument();
+  });
+
+  it("does not reveal rank or stat for an unclaimed leaderboard slot", () => {
+    render(
+      <GuessTheListRaceBoard
+        initialState={activeRaceGame({
+          round: {
+            id: 56,
+            round_number: 4,
+            status: "active",
+            category_type: "all_time",
+            scope_label: "All-time points leaders (2000-2025)",
+            team_code: null,
+            team_name: null,
+            season_year: null,
+            player1_correct: 0,
+            player2_correct: 0,
+            guessed_count: 0,
+            total_slots: 1,
+            slots: [
+              {
+                id: 1,
+                player_name: null,
+                position: null,
+                nationality: null,
+                jersey_number: null,
+                image_url: null,
+                guessed_by_player: null,
+                // Non-null rank/stat prove the board masks them until the slot
+                // is actually claimed/revealed, rather than trusting backend nulls.
+                rank: 2,
+                stat_value: 3500,
+                stat_value_label: "3,500 pts",
+              },
+            ],
+          },
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onNewGame={vi.fn()}
+        onHome={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("All-time points leaders (2000-2025)")).toBeInTheDocument();
+    expect(screen.getByText("???")).toBeInTheDocument();
+    expect(screen.queryByText(/^#\d/)).not.toBeInTheDocument();
+    expect(screen.queryByText("3,500 pts")).not.toBeInTheDocument();
+  });
+});

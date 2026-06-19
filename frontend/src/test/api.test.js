@@ -308,6 +308,44 @@ describe("Guess the List API", () => {
     expect(result.state.id).toBe(10);
   });
 
+  it("createGuessTheListGame forwards category_type for leaderboard lists", async () => {
+    const payload = {
+      mode: "single_player",
+      category_type: "all_time",
+      season_range_start: 2000,
+      season_range_end: 2025,
+    };
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 15 })));
+    await createGuessTheListGame(payload);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/guess-the-list/games",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ...payload, guest_id: "test-guest-id" }),
+      })
+    );
+  });
+
+  it("createGuessTheListRaceGame forwards category_type", async () => {
+    const payload = {
+      mode: "race",
+      category_type: "single_season",
+      season_range_start: 2015,
+      season_range_end: 2015,
+    };
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 16 })));
+    await createGuessTheListRaceGame(payload);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/guess-the-list/race/games",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ ...payload, guest_id: "test-guest-id" }),
+      })
+    );
+  });
+
   it("joinGuessTheListGame sends join_code, player_name and guest_id", async () => {
     mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 11 })));
     const result = await joinGuessTheListGame("XYZ789", "Guesser");

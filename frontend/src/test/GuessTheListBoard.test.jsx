@@ -152,3 +152,70 @@ describe("GuessTheListBoard solo / local never goes online from a stale seat (is
     expect(realtimeHolder.opts.enabled).toBe(false);
   });
 });
+
+describe("GuessTheListBoard leaderboard rounds", () => {
+  function allTimeSoloGame(overrides = {}) {
+    return activeSoloGame({
+      round: {
+        status: "in_progress",
+        category_type: "all_time",
+        scope_label: "All-time points leaders (2000-2025)",
+        team_code: null,
+        team_name: null,
+        season_year: null,
+        guessed_count: 1,
+        total_slots: 2,
+        slots: [
+          {
+            id: 1,
+            position: "Guard",
+            nationality: "Spain",
+            guessed_by_player: 1,
+            player_name: "Sergio Llull",
+            rank: 1,
+            stat_value: 4812,
+            stat_value_label: "4,812 pts",
+          },
+          {
+            id: 2,
+            position: null,
+            nationality: null,
+            guessed_by_player: null,
+            player_name: null,
+            // The backend nulls rank/stat until reveal; we send non-null values
+            // here to prove the frontend itself still masks them for an
+            // unclaimed slot (defense-in-depth, not trusting backend nulls).
+            rank: 2,
+            stat_value: 3500,
+            stat_value_label: "3,500 pts",
+          },
+        ],
+      },
+      ...overrides,
+    });
+  }
+
+  it("renders the scope label header and a claimed slot's rank and stat value", () => {
+    render(
+      <GuessTheListBoard initialState={allTimeSoloGame()} onNewGame={() => {}} onHome={() => {}} />
+    );
+
+    expect(screen.getByText("All-time points leaders (2000-2025)")).toBeInTheDocument();
+    expect(screen.getByText("Sergio Llull")).toBeInTheDocument();
+    expect(screen.getByText("#1")).toBeInTheDocument();
+    expect(screen.getByText("4,812 pts")).toBeInTheDocument();
+    // Leaderboard rounds drop the team logo + season chrome.
+    expect(screen.queryByTestId("club-logo")).not.toBeInTheDocument();
+  });
+
+  it("hides rank and stat value for an unclaimed leaderboard slot", () => {
+    render(
+      <GuessTheListBoard initialState={allTimeSoloGame()} onNewGame={() => {}} onHome={() => {}} />
+    );
+
+    // The hidden slot stays masked: no rank badge, no stat value leaked.
+    expect(screen.getByText("???")).toBeInTheDocument();
+    expect(screen.queryByText("#2")).not.toBeInTheDocument();
+    expect(screen.queryByText("3,500 pts")).not.toBeInTheDocument();
+  });
+});

@@ -101,7 +101,7 @@ function HomePage() {
                 </div>
                 <h2 className="font-display text-2xl text-elq-dark tracking-wide mb-2">GUESS THE LIST</h2>
                 <p className="text-sm text-elq-muted leading-relaxed">
-                  Guess the full roster of a EuroLeague team from a specific season using hints.
+                  Name a EuroLeague team&apos;s roster, the all-time stat leaders, or a single season&apos;s top performers.
                 </p>
               </Link>
               <HomeQuickMatchCta to="/list?quick=1" />
