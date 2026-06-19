@@ -1,10 +1,12 @@
 # App Service SKU experiment for issue #187
 
-Captured: 2026-06-18 UTC  
-App: `euroleague-quiz-backend-app`  
-Plan: `euroleague-quiz-plan` in `euroleague-quiz-rg`  
-Region: Austria East (`austriaeast`)  
-Subscription used for measurement: `1da9f61a-0317-4368-bc96-d2371dc650a1`
+| Field | Value |
+| --- | --- |
+| Captured | 2026-06-18 UTC |
+| App | `euroleague-quiz-backend-app` |
+| Plan | `euroleague-quiz-plan` in `euroleague-quiz-rg` |
+| Region | Austria East (`austriaeast`) |
+| Subscription used for measurement | `1da9f61a-0317-4368-bc96-d2371dc650a1` |
 
 ## Recommendation
 
