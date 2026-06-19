@@ -185,4 +185,75 @@ describe("GuessTheListSetup", () => {
       { playerNumber: 2, isOnline: true, gameId: 22 }
     );
   });
+
+  it("defaults the Solo list type to roster", async () => {
+    createGuessTheListGame.mockResolvedValue({ id: 30, status: "active" });
+
+    renderSetup();
+    expect(screen.getByLabelText("List type")).toHaveValue("roster");
+    fireEvent.click(screen.getByText("Start Game"));
+
+    await waitFor(() => expect(onGameCreated).toHaveBeenCalled());
+    expect(createGuessTheListGame).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "single_player", category_type: "roster" })
+    );
+  });
+
+  it("sends category_type and the full season range for an All-Time solo list", async () => {
+    createGuessTheListGame.mockResolvedValue({ id: 31, status: "active" });
+
+    renderSetup();
+    fireEvent.change(screen.getByLabelText("List type"), {
+      target: { value: "all_time" },
+    });
+    fireEvent.click(screen.getByText("Start Game"));
+
+    await waitFor(() => expect(onGameCreated).toHaveBeenCalled());
+    expect(createGuessTheListGame).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "single_player",
+        category_type: "all_time",
+        season_range_start: 2000,
+        season_range_end: 2025,
+      })
+    );
+  });
+
+  it("hides the season range for All-Time and shows it for Roster and Single-Season", () => {
+    renderSetup();
+    // Roster (default) shows the season range.
+    expect(screen.getByText("Season Range")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("List type"), {
+      target: { value: "all_time" },
+    });
+    expect(screen.queryByText("Season Range")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("List type"), {
+      target: { value: "single_season" },
+    });
+    expect(screen.getByText("Season Range")).toBeInTheDocument();
+  });
+
+  it("sends category_type for a Single-Season Race friend create", async () => {
+    createGuessTheListRaceGame.mockResolvedValue({ state: { id: 32, status: "waiting_for_opponent" } });
+
+    renderSetup({ initialMode: "online", initialOnlineGameType: "race" });
+    fireEvent.click(screen.getByText("Play a Friend"));
+    fireEvent.change(screen.getByLabelText("List type"), {
+      target: { value: "single_season" },
+    });
+    fireEvent.click(screen.getByText("Create Online Game"));
+
+    await waitFor(() => expect(onGameCreated).toHaveBeenCalled());
+    expect(createGuessTheListRaceGame).toHaveBeenCalledWith(
+      expect.objectContaining({ category_type: "single_season" })
+    );
+  });
+
+  it("does not show the List Type picker on Classic join", () => {
+    renderSetup({ initialMode: "online" });
+    fireEvent.click(screen.getByText("Join"));
+    expect(screen.queryByLabelText("List type")).not.toBeInTheDocument();
+  });
 });

@@ -189,7 +189,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
     handleNavKeyDown(e);
   }
 
-  const resultMessages = { correct: "\u2705 Correct!", incorrect: "\u274c Wrong player.", round_won: "\ud83c\udfc6 Round over!", round_complete: "\ud83c\udfc6 Round over!", match_won: "\ud83c\udf89 Match won!", board_complete: "\u2705 Roster complete!", end_offered: "\ud83e\udd1d End offered.", end_accepted: "\ud83e\udd1d Round ended!", end_declined: "Declined.", time_expired: "\u23f0 Time\u2019s up!", given_up: "\ud83c\udff3\ufe0f Gave up \u2014 full roster revealed." };
+  const resultMessages = { correct: "\u2705 Correct!", incorrect: "\u274c Wrong player.", round_won: "\ud83c\udfc6 Round over!", round_complete: "\ud83c\udfc6 Round over!", match_won: "\ud83c\udf89 Match won!", board_complete: "\u2705 List complete!", end_offered: "\ud83e\udd1d End offered.", end_accepted: "\ud83e\udd1d Round ended!", end_declined: "Declined.", time_expired: "\u23f0 Time\u2019s up!", given_up: "\ud83c\udff3\ufe0f Gave up \u2014 full list revealed." };
 
   if (game?.status === "waiting_for_opponent") {
     return (<div className="min-h-screen flex flex-col"><div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" /><div className="flex-1 flex items-center justify-center p-4"><div className="text-center animate-fade-in-up"><div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-elq-orange/10 mb-6 animate-pulse-ring"><svg className="w-8 h-8 text-elq-orange animate-spin-slow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg></div><h2 className="font-display text-4xl text-elq-dark mb-3">WAITING FOR OPPONENT</h2><p className="text-elq-muted mb-6">Share this code</p><div className="inline-block bg-elq-bg border-2 border-dashed border-elq-orange/30 rounded-2xl px-10 py-6 mb-6 select-all"><span className="font-mono text-5xl tracking-[0.3em] text-elq-dark font-bold">{game.join_code}</span></div><p className="text-sm text-elq-muted mb-8">Game starts when they join.</p><button onClick={onHome || onNewGame} className="text-sm text-elq-muted hover:text-elq-orange transition-colors underline underline-offset-2">Cancel</button></div></div></div>);
@@ -200,7 +200,10 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
   }
 
   const displayRound = (inTransition && roundTransition.completedRound) ? roundTransition.completedRound : round;
-  const sortedSlots = [...displayRound.slots].sort((a, b) => posRank(a.position) - posRank(b.position));
+  const isLeaderboard = displayRound.category_type === "all_time" || displayRound.category_type === "single_season";
+  const sortedSlots = isLeaderboard
+    ? [...displayRound.slots]
+    : [...displayRound.slots].sort((a, b) => posRank(a.position) - posRank(b.position));
   const displayRoundOver = displayRound.status === "completed" || displayRound.status === "given_up";
   const canGuess = game.status === "active" && !inTransition && !isRevealing && !game.pending_end && isMyTurn && !roundOver;
 
@@ -244,7 +247,17 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
       )}
       <div className="bg-elq-dark flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2.5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0"><ClubLogo code={displayRound.team_code} size={28} className="flex-shrink-0" /><span className="font-display text-xl sm:text-2xl text-white tracking-wide truncate">{displayRound.team_name}</span><span className="text-elq-orange font-semibold text-sm whitespace-nowrap">{displayRound.season_year}/{String(displayRound.season_year + 1).slice(2)}</span></div>
+          <div className="flex items-center gap-2 min-w-0">
+            {isLeaderboard ? (
+              <span className="font-display text-xl sm:text-2xl text-white tracking-wide truncate">{displayRound.scope_label}</span>
+            ) : (
+              <>
+                <ClubLogo code={displayRound.team_code} size={28} className="flex-shrink-0" />
+                <span className="font-display text-xl sm:text-2xl text-white tracking-wide truncate">{displayRound.team_name}</span>
+                <span className="text-elq-orange font-semibold text-sm whitespace-nowrap">{displayRound.season_year}/{String(displayRound.season_year + 1).slice(2)}</span>
+              </>
+            )}
+          </div>
           <div className="flex items-center gap-3 text-[11px] text-white/60 whitespace-nowrap">
             <span>{displayRound.guessed_count}/{displayRound.total_slots}</span>
             {!isSolo && (displayRound.player1_correct > 0 || displayRound.player2_correct > 0) && (<span><span className="text-blue-300">{displayRound.player1_correct}</span> &ndash; <span className="text-red-300">{displayRound.player2_correct}</span></span>)}
@@ -269,7 +282,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
           </div>
         </div>
       )}
-      {(lastResult || error) && (<div className="flex-shrink-0 px-3 pt-2 max-w-5xl mx-auto w-full">{lastResult && (<div className={`px-3 py-1.5 rounded-lg text-center text-xs font-medium animate-slide-down ${["round_won","match_won","round_complete","board_complete"].includes(lastResult) ? "bg-elq-orange/10 text-elq-orange" : lastResult === "correct" ? "bg-emerald-50 text-emerald-700" : lastResult === "incorrect" || lastResult === "time_expired" ? "bg-red-50 text-red-600" : lastResult === "given_up" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{resultMessages[lastResult] || lastResult}{inTransition && roundTransition.countdown !== null && <span className="ml-2 font-bold">{isSolo ? `Next roster in ${roundTransition.countdown}...` : `Next in ${roundTransition.countdown}...`}</span>}</div>)}{inTransition && roundTransition.countdown === null && (<div className="text-center mt-3"><button onClick={() => { setRoundTransition(null); setLastResult(null); }} className="px-6 py-2.5 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all">Start New Round</button></div>)}{error && <div className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs text-center mt-1">{error}</div>}</div>)}
+      {(lastResult || error) && (<div className="flex-shrink-0 px-3 pt-2 max-w-5xl mx-auto w-full">{lastResult && (<div className={`px-3 py-1.5 rounded-lg text-center text-xs font-medium animate-slide-down ${["round_won","match_won","round_complete","board_complete"].includes(lastResult) ? "bg-elq-orange/10 text-elq-orange" : lastResult === "correct" ? "bg-emerald-50 text-emerald-700" : lastResult === "incorrect" || lastResult === "time_expired" ? "bg-red-50 text-red-600" : lastResult === "given_up" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{resultMessages[lastResult] || lastResult}{inTransition && roundTransition.countdown !== null && <span className="ml-2 font-bold">{isSolo ? `Next list in ${roundTransition.countdown}...` : `Next in ${roundTransition.countdown}...`}</span>}</div>)}{inTransition && roundTransition.countdown === null && (<div className="text-center mt-3"><button onClick={() => { setRoundTransition(null); setLastResult(null); }} className="px-6 py-2.5 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all">Start New Round</button></div>)}{error && <div className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs text-center mt-1">{error}</div>}</div>)}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-3 py-3">
           <div className="grid gap-1.5">
@@ -310,11 +323,13 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
                     </svg>
                   </div>
 
-                  {/* Jersey number */}
+                  {/* Jersey number (roster) or leaderboard rank */}
                   <span className={`flex-shrink-0 w-8 text-center font-mono font-bold text-sm ${
                     p1 ? "text-elq-player1" : p2 ? "text-elq-player2" : "text-slate-400"
                   }`}>
-                    {slot.jersey_number || "?"}
+                    {isLeaderboard
+                      ? (showPlayer && slot.rank != null ? `#${slot.rank}` : "?")
+                      : (slot.jersey_number || "?")}
                   </span>
 
                   {/* Player name or mystery */}
@@ -359,10 +374,16 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
                     )}
                   </div>
 
-                  {/* Height */}
-                  <span className="flex-shrink-0 w-10 text-right text-[11px] text-slate-400 tabular-nums hidden sm:block">
-                    {slot.height_cm ? `${slot.height_cm}` : "\u2014"}
-                  </span>
+                  {/* Height (roster) or revealed stat value (leaderboard) */}
+                  {isLeaderboard ? (
+                    <span className="flex-shrink-0 text-right text-xs font-bold tabular-nums text-elq-dark whitespace-nowrap min-w-[3.5rem]">
+                      {showPlayer && slot.stat_value_label ? slot.stat_value_label : ""}
+                    </span>
+                  ) : (
+                    <span className="flex-shrink-0 w-10 text-right text-[11px] text-slate-400 tabular-nums hidden sm:block">
+                      {slot.height_cm ? `${slot.height_cm}` : "\u2014"}
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -379,7 +400,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
               </>)}
             </>
           )}
-          {isRevealing && !inTransition && (<span className="text-xs text-elq-muted">Reviewing roster... <strong className="text-elq-orange">{revealCountdown}s</strong></span>)}
+          {isRevealing && !inTransition && (<span className="text-xs text-elq-muted">Reviewing list... <strong className="text-elq-orange">{revealCountdown}s</strong></span>)}
         </div>
       </div>
     </div>

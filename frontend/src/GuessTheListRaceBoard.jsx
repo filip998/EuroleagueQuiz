@@ -281,14 +281,17 @@ export default function GuessTheListRaceBoard({ initialState, onlineInfo, onNewG
     );
   }
 
-  const sortedSlots = [...(displayRound.slots || [])].sort((a, b) => posRank(a.position) - posRank(b.position));
+  const isLeaderboard = displayRound.category_type === "all_time" || displayRound.category_type === "single_season";
+  const sortedSlots = isLeaderboard
+    ? [...(displayRound.slots || [])]
+    : [...(displayRound.slots || [])].sort((a, b) => posRank(a.position) - posRank(b.position));
 
   return (
     <Shell onHome={onHome}>
       <div className="w-full max-w-5xl">
         <div className="mb-4">
           <h1 className="font-display text-4xl text-elq-dark">GUESS THE LIST RACE</h1>
-          <p className="text-sm text-elq-muted">Claim roster members before your opponent does.</p>
+          <p className="text-sm text-elq-muted">Claim players before your opponent does.</p>
         </div>
 
         <RaceScoreboard
@@ -303,11 +306,17 @@ export default function GuessTheListRaceBoard({ initialState, onlineInfo, onNewG
         <section className="mb-4 rounded-3xl border border-elq-border bg-elq-dark text-white shadow-sm overflow-hidden">
           <div className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3 min-w-0">
-              <ClubLogo code={displayRound.team_code} size={36} className="flex-shrink-0" />
-              <div className="min-w-0">
-                <h2 className="font-display text-2xl truncate">{displayRound.team_name}</h2>
-                <p className="text-sm text-white/60">{displayRound.season_year}/{String(displayRound.season_year + 1).slice(2)}</p>
-              </div>
+              {isLeaderboard ? (
+                <h2 className="font-display text-2xl truncate">{displayRound.scope_label}</h2>
+              ) : (
+                <>
+                  <ClubLogo code={displayRound.team_code} size={36} className="flex-shrink-0" />
+                  <div className="min-w-0">
+                    <h2 className="font-display text-2xl truncate">{displayRound.team_name}</h2>
+                    <p className="text-sm text-white/60">{displayRound.season_year}/{String(displayRound.season_year + 1).slice(2)}</p>
+                  </div>
+                </>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.14em]">
               <span className="rounded-full bg-white/10 px-2 py-1">
@@ -370,7 +379,7 @@ export default function GuessTheListRaceBoard({ initialState, onlineInfo, onNewG
 
         <div className="grid gap-2">
           {sortedSlots.map((slot) => (
-            <RaceSlot key={slot.id} slot={slot} />
+            <RaceSlot key={slot.id} slot={slot} isLeaderboard={isLeaderboard} />
           ))}
         </div>
         {isOnline && playerNumber && game?.status === "active" && !roundLocked && (
@@ -409,10 +418,11 @@ function RaceScoreboard({ game, round, timerRemaining, playerNumber }) {
   );
 }
 
-function RaceSlot({ slot }) {
+function RaceSlot({ slot, isLeaderboard = false }) {
   const [imageFailed, setImageFailed] = useState(false);
   const claimedBy = slot.guessed_by_player;
   const claimed = claimedBy === 1 || claimedBy === 2;
+  const revealed = Boolean(slot.player_name);
   const classes = claimedBy === 1
     ? "border-elq-player1/30 bg-elq-player1-bg"
     : claimedBy === 2
@@ -435,11 +445,20 @@ function RaceSlot({ slot }) {
           <span className="text-slate-300 font-bold">?</span>
         )}
       </div>
-      <div className="w-8 text-center font-mono text-sm font-bold text-slate-500">{slot.jersey_number || "?"}</div>
+      <div className="w-8 text-center font-mono text-sm font-bold text-slate-500">
+        {isLeaderboard
+          ? (revealed && slot.rank != null ? `#${slot.rank}` : "?")
+          : (slot.jersey_number || "?")}
+      </div>
       <div className="flex-1 min-w-0">
         <div className="truncate text-sm font-semibold text-elq-dark">{slot.player_name || "???"}</div>
         <div className="text-xs text-elq-muted">{[slot.position, slot.nationality].filter(Boolean).join(" · ")}</div>
       </div>
+      {isLeaderboard && revealed && slot.stat_value_label && (
+        <div className="flex-shrink-0 text-right text-xs font-bold tabular-nums text-elq-dark whitespace-nowrap">
+          {slot.stat_value_label}
+        </div>
+      )}
       {claimed && (
         <div className={`rounded-full px-2 py-1 text-xs font-bold ${claimedBy === 1 ? "bg-elq-player1 text-white" : "bg-elq-player2 text-white"}`}>
           P{claimedBy}
@@ -459,7 +478,7 @@ function CompletedRoundReveal({ round, countdown }) {
             {round.winner_player ? `Player ${round.winner_player} wins the round` : "Tie round"}
           </div>
           <div className="text-sm text-elq-muted">
-            {round.player1_correct} - {round.player2_correct} · Full roster revealed
+            {round.player1_correct} - {round.player2_correct} · Full list revealed
           </div>
         </div>
         {countdown > 0 && (

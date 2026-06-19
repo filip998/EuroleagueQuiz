@@ -54,7 +54,20 @@ const RACE_LENGTHS = [
   { targetWins: 2, label: "Best of 3" },
   { targetWins: 3, label: "Best of 5" },
 ];
+const CATEGORY_TYPES = [
+  ["roster", "Roster"],
+  ["all_time", "All-Time Leaders"],
+  ["single_season", "Single-Season Leaders"],
+];
 const SEASONS = Array.from({ length: 26 }, (_, i) => 2000 + i);
+const FULL_SEASON_RANGE = { start: SEASONS[0], end: SEASONS[SEASONS.length - 1] };
+
+// All-Time leaders span every season, so its season range is hidden and we
+// always submit the full configured range regardless of any prior selection.
+function effectiveSeasonRange(categoryType, seasonStart, seasonEnd) {
+  if (categoryType === "all_time") return FULL_SEASON_RANGE;
+  return { start: seasonStart, end: seasonEnd };
+}
 
 export default function GuessTheListSetup({
   onGameCreated,
@@ -72,6 +85,7 @@ export default function GuessTheListSetup({
   const [targetWins, setTargetWins] = useState(3);
   const [raceTargetWins, setRaceTargetWins] = useState(2);
   const [timerMode, setTimerMode] = useState("40s");
+  const [categoryType, setCategoryType] = useState("roster");
   const [seasonStart, setSeasonStart] = useState(2000);
   const [seasonEnd, setSeasonEnd] = useState(2025);
   const [player1Name, setPlayer1Name] = useClerkPrefilledName(getDisplayName);
@@ -150,22 +164,26 @@ export default function GuessTheListSetup({
         const resp = await joinGuessTheListRaceGame(raceCode, player1Name || null);
         onGameCreated(resp, { playerNumber: 2, isOnline: true, gameId: resp.state.id });
       } else if (isRaceFriend) {
+        const range = effectiveSeasonRange(categoryType, seasonStart, seasonEnd);
         const resp = await createGuessTheListRaceGame({
           target_wins: raceTargetWins,
+          category_type: categoryType,
           player1_name: player1Name || null,
-          season_range_start: seasonStart,
-          season_range_end: seasonEnd,
+          season_range_start: range.start,
+          season_range_end: range.end,
         });
         onGameCreated(resp, { playerNumber: 1, isOnline: true });
       } else {
+        const range = effectiveSeasonRange(categoryType, seasonStart, seasonEnd);
         const resp = await createGuessTheListGame({
           mode: BACKEND_MODE[mode],
           target_wins: targetWins,
           timer_mode: mode === "solo" ? "unlimited" : timerMode,
+          category_type: categoryType,
           player1_name: player1Name || null,
           player2_name: isLocal ? player2Name || null : null,
-          season_range_start: seasonStart,
-          season_range_end: seasonEnd,
+          season_range_start: range.start,
+          season_range_end: range.end,
         });
         if (isOnline) {
           onGameCreated(resp, { playerNumber: 1, isOnline: true });
@@ -200,7 +218,7 @@ export default function GuessTheListSetup({
       accent="player2"
       icon={HEADER_ICON}
       title="GUESS THE LIST"
-      tagline="Name every player on the roster."
+      tagline="Name rosters, all-time leaders, or single-season leaders."
       onHome={onBack}
       error={error}
     >
@@ -267,12 +285,19 @@ export default function GuessTheListSetup({
                   onChange={handlePlayer1NameChange}
                   label="Your Name"
                 />
-                <SeasonRange
-                  seasonStart={seasonStart}
-                  seasonEnd={seasonEnd}
-                  setSeasonStart={setSeasonStart}
-                  setSeasonEnd={setSeasonEnd}
+                <ListTypePicker
+                  value={categoryType}
+                  onChange={setCategoryType}
+                  disabled={loading}
                 />
+                {categoryType !== "all_time" && (
+                  <SeasonRange
+                    seasonStart={seasonStart}
+                    seasonEnd={seasonEnd}
+                    setSeasonStart={setSeasonStart}
+                    setSeasonEnd={setSeasonEnd}
+                  />
+                )}
                 <SectionCaption>Race length</SectionCaption>
                 <select
                   value={raceTargetWins}
@@ -325,12 +350,20 @@ export default function GuessTheListSetup({
                   )}
                 </div>
 
-                <SeasonRange
-                  seasonStart={seasonStart}
-                  seasonEnd={seasonEnd}
-                  setSeasonStart={setSeasonStart}
-                  setSeasonEnd={setSeasonEnd}
+                <ListTypePicker
+                  value={categoryType}
+                  onChange={setCategoryType}
+                  disabled={loading}
                 />
+
+                {categoryType !== "all_time" && (
+                  <SeasonRange
+                    seasonStart={seasonStart}
+                    seasonEnd={seasonEnd}
+                    setSeasonStart={setSeasonStart}
+                    setSeasonEnd={setSeasonEnd}
+                  />
+                )}
 
                 {showClassicMatchSettings && (
                   <ClassicSettings
@@ -379,6 +412,27 @@ function SegmentedToggle({ value, onChange, options, disabled = false }) {
         </button>
       ))}
     </div>
+  );
+}
+
+function ListTypePicker({ value, onChange, disabled = false }) {
+  return (
+    <>
+      <SectionCaption>List Type</SectionCaption>
+      <select
+        aria-label="List type"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer mb-6 disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {CATEGORY_TYPES.map(([optionValue, label]) => (
+          <option key={optionValue} value={optionValue}>
+            {label}
+          </option>
+        ))}
+      </select>
+    </>
   );
 }
 
