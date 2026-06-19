@@ -468,9 +468,11 @@ describe("GuessTheListRaceBoard leaderboard rounds", () => {
                 jersey_number: null,
                 image_url: null,
                 guessed_by_player: null,
-                rank: null,
-                stat_value: null,
-                stat_value_label: null,
+                // Non-null rank/stat prove the board masks them until the slot
+                // is actually claimed/revealed, rather than trusting backend nulls.
+                rank: 2,
+                stat_value: 3500,
+                stat_value_label: "3,500 pts",
               },
             ],
           },
@@ -484,5 +486,6 @@ describe("GuessTheListRaceBoard leaderboard rounds", () => {
     expect(screen.getByText("All-time points leaders (2000-2025)")).toBeInTheDocument();
     expect(screen.getByText("???")).toBeInTheDocument();
     expect(screen.queryByText(/^#\d/)).not.toBeInTheDocument();
+    expect(screen.queryByText("3,500 pts")).not.toBeInTheDocument();
   });
 });

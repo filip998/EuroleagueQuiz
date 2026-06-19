@@ -182,9 +182,12 @@ describe("GuessTheListBoard leaderboard rounds", () => {
             nationality: null,
             guessed_by_player: null,
             player_name: null,
-            rank: null,
-            stat_value: null,
-            stat_value_label: null,
+            // The backend nulls rank/stat until reveal; we send non-null values
+            // here to prove the frontend itself still masks them for an
+            // unclaimed slot (defense-in-depth, not trusting backend nulls).
+            rank: 2,
+            stat_value: 3500,
+            stat_value_label: "3,500 pts",
           },
         ],
       },
@@ -213,5 +216,6 @@ describe("GuessTheListBoard leaderboard rounds", () => {
     // The hidden slot stays masked: no rank badge, no stat value leaked.
     expect(screen.getByText("???")).toBeInTheDocument();
     expect(screen.queryByText("#2")).not.toBeInTheDocument();
+    expect(screen.queryByText("3,500 pts")).not.toBeInTheDocument();
   });
 });
