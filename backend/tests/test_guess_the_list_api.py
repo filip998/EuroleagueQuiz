@@ -1177,7 +1177,7 @@ def _seed_all_euroleague_fixture(session):
                 euroleague_code=f"AET{season_year}{index:02}",
                 first_name=f"Award{season_year}{index:02}",
                 last_name="Player",
-                nationality="CountryA",
+                nationality="Greece",
                 position="Guard" if index <= 5 else "Forward",
                 height_cm=190 + index,
             )
@@ -1281,9 +1281,13 @@ def test_all_euroleague_category_is_registered_and_hides_active_answers(
     assert all(
         slot["player_name"] is None
         and slot["rank"] is None
+        and slot["stat_value"] is None
         and slot["stat_value_label"] is None
         and slot["jersey_number"] is None
         and slot["position"] is None
+        and slot["height_cm"] is None
+        and slot["nationality"] == "Greece"
+        and slot["country_code"] == "GR"
         for slot in active_round["slots"]
     )
 

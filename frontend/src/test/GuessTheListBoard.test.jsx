@@ -552,9 +552,10 @@ describe("GuessTheListBoard All-EuroLeague rounds", () => {
           {
             id: 2,
             position: null,
-            nationality: null,
+            nationality: "Serbia",
+            country_code: "RS",
             guessed_by_player: null,
-            player_name: null,
+            player_name: "Hidden Second Teamer",
             rank: 2,
             stat_value_label: "Second Team",
           },
@@ -581,6 +582,9 @@ describe("GuessTheListBoard All-EuroLeague rounds", () => {
     );
 
     expect(screen.getByText("???")).toBeInTheDocument();
+    expect(screen.getByAltText("Serbia")).toBeInTheDocument();
+    expect(screen.getByText("RS")).toBeInTheDocument();
+    expect(screen.queryByText("Hidden Second Teamer")).not.toBeInTheDocument();
     expect(screen.queryByText("2nd")).not.toBeInTheDocument();
     expect(screen.queryByText("Second Team")).not.toBeInTheDocument();
   });
