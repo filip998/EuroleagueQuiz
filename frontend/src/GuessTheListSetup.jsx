@@ -8,6 +8,7 @@ import {
 } from "./api";
 import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
+import { normalizeJoinCode } from "./inviteLink";
 import GameSetupShell, { SectionCaption } from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 import NameField from "./NameField";
@@ -77,14 +78,15 @@ export default function GuessTheListSetup({
   onBack,
   initialMode = "solo",
   initialOnlineGameType = "classic",
+  initialJoinCode = "",
 }) {
+  const prefillCode = normalizeJoinCode(initialJoinCode);
+  const startRace = initialOnlineGameType === "race";
   const [mode, setMode] = useState(initialMode === "online" ? "online" : "solo");
-  const [onlineGameType, setOnlineGameType] = useState(
-    initialOnlineGameType === "race" ? "race" : "classic"
-  );
-  const [classicSub, setClassicSub] = useState("create");
-  const [raceSub, setRaceSub] = useState("quick");
-  const [friendSub, setFriendSub] = useState("create");
+  const [onlineGameType, setOnlineGameType] = useState(startRace ? "race" : "classic");
+  const [classicSub, setClassicSub] = useState(prefillCode && !startRace ? "join" : "create");
+  const [raceSub, setRaceSub] = useState(prefillCode && startRace ? "friend" : "quick");
+  const [friendSub, setFriendSub] = useState(prefillCode && startRace ? "join" : "create");
   const [targetWins, setTargetWins] = useState(3);
   const [raceTargetWins, setRaceTargetWins] = useState(2);
   const [timerMode, setTimerMode] = useState("40s");
@@ -93,8 +95,8 @@ export default function GuessTheListSetup({
   const [seasonEnd, setSeasonEnd] = useState(2025);
   const [player1Name, setPlayer1Name] = useClerkPrefilledName(getDisplayName);
   const [player2Name, setPlayer2Name] = useState("");
-  const [joinCode, setJoinCode] = useState("");
-  const [raceJoinCode, setRaceJoinCode] = useState("");
+  const [joinCode, setJoinCode] = useState(startRace ? "" : prefillCode);
+  const [raceJoinCode, setRaceJoinCode] = useState(startRace ? prefillCode : "");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [pendingPreset, setPendingPreset] = useState(null);

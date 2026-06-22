@@ -209,8 +209,11 @@ describe("GuessTheListRaceBoard", () => {
       />
     );
 
-    const inviteUrl = buildInviteUrl("ABC123", "/list");
-    expect(inviteUrl).toContain("/list?join=ABC123");
+    const inviteUrl = buildInviteUrl("ABC123", "/list", undefined, { mode: "race" });
+    const url = new URL(inviteUrl);
+    expect(url.pathname).toBe("/list");
+    expect(url.searchParams.get("join")).toBe("ABC123");
+    expect(url.searchParams.get("mode")).toBe("race");
     expect(screen.queryByTestId("searching-lobby")).not.toBeInTheDocument();
     expect(screen.getByText("ABC123")).toBeInTheDocument();
     expect(screen.getByText(inviteUrl)).toBeInTheDocument();
