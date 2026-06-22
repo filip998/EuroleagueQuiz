@@ -210,8 +210,9 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
   }
 
   const displayRound = (inTransition && roundTransition.completedRound) ? roundTransition.completedRound : round;
-  const usesScopeLabelDetails = ["all_time", "single_season", "all_euroleague", "award_winners"].includes(displayRound.category_type);
-  const sortedSlots = usesScopeLabelDetails
+  const usesRankedDetails = ["all_time", "single_season", "all_euroleague", "award_winners"].includes(displayRound.category_type);
+  const usesScopeLabelHeader = usesRankedDetails || displayRound.category_type === "champions";
+  const sortedSlots = usesRankedDetails
     ? [...displayRound.slots]
     : [...displayRound.slots].sort((a, b) => posRank(a.position) - posRank(b.position));
   const displayRoundOver = displayRound.status === "completed" || displayRound.status === "given_up";
@@ -258,7 +259,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
       <div className="bg-elq-dark flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2.5 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            {usesScopeLabelDetails ? (
+            {usesScopeLabelHeader ? (
               <span className="font-display text-xl sm:text-2xl text-white tracking-wide truncate">{displayRound.scope_label}</span>
             ) : (
               <>
@@ -337,7 +338,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
                   <span className={`flex-shrink-0 w-8 text-center font-mono font-bold text-sm ${
                     p1 ? "text-elq-player1" : p2 ? "text-elq-player2" : "text-slate-400"
                   }`}>
-                    {usesScopeLabelDetails
+                    {usesRankedDetails
                       ? (showPlayer ? detailRankLabel(displayRound, slot) : "?")
                       : (slot.jersey_number || "?")}
                   </span>
@@ -385,7 +386,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
                   </div>
 
                   {/* Height (roster) or revealed stat value (leaderboard) */}
-                  {usesScopeLabelDetails ? (
+                  {usesRankedDetails ? (
                     <span className="flex-shrink-0 text-right text-xs font-bold tabular-nums text-elq-dark whitespace-nowrap min-w-[3.5rem]">
                       {showPlayer && slot.stat_value_label ? slot.stat_value_label : ""}
                     </span>

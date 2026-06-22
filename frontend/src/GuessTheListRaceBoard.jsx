@@ -281,8 +281,9 @@ export default function GuessTheListRaceBoard({ initialState, onlineInfo, onNewG
     );
   }
 
-  const isLeaderboard = displayRound.category_type === "all_time" || displayRound.category_type === "single_season";
-  const sortedSlots = isLeaderboard
+  const usesDetailRows = ["all_time", "single_season", "all_euroleague", "award_winners"].includes(displayRound.category_type);
+  const usesScopeLabelHeader = usesDetailRows || displayRound.category_type === "champions";
+  const sortedSlots = usesDetailRows
     ? [...(displayRound.slots || [])]
     : [...(displayRound.slots || [])].sort((a, b) => posRank(a.position) - posRank(b.position));
 
@@ -306,7 +307,7 @@ export default function GuessTheListRaceBoard({ initialState, onlineInfo, onNewG
         <section className="mb-4 rounded-3xl border border-elq-border bg-elq-dark text-white shadow-sm overflow-hidden">
           <div className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3 min-w-0">
-              {isLeaderboard ? (
+              {usesScopeLabelHeader ? (
                 <h2 className="font-display text-2xl truncate">{displayRound.scope_label}</h2>
               ) : (
                 <>
@@ -379,7 +380,7 @@ export default function GuessTheListRaceBoard({ initialState, onlineInfo, onNewG
 
         <div className="grid gap-2">
           {sortedSlots.map((slot) => (
-            <RaceSlot key={slot.id} slot={slot} isLeaderboard={isLeaderboard} />
+            <RaceSlot key={slot.id} slot={slot} usesDetailRows={usesDetailRows} />
           ))}
         </div>
         {isOnline && playerNumber && game?.status === "active" && !roundLocked && (
@@ -418,7 +419,7 @@ function RaceScoreboard({ game, round, timerRemaining, playerNumber }) {
   );
 }
 
-function RaceSlot({ slot, isLeaderboard = false }) {
+function RaceSlot({ slot, usesDetailRows = false }) {
   const [imageFailed, setImageFailed] = useState(false);
   const claimedBy = slot.guessed_by_player;
   const claimed = claimedBy === 1 || claimedBy === 2;
@@ -446,7 +447,7 @@ function RaceSlot({ slot, isLeaderboard = false }) {
         )}
       </div>
       <div className="w-8 text-center font-mono text-sm font-bold text-slate-500">
-        {isLeaderboard
+        {usesDetailRows
           ? (revealed && slot.rank != null ? `#${slot.rank}` : "?")
           : (slot.jersey_number || "?")}
       </div>
@@ -454,7 +455,7 @@ function RaceSlot({ slot, isLeaderboard = false }) {
         <div className="truncate text-sm font-semibold text-elq-dark">{slot.player_name || "???"}</div>
         <div className="text-xs text-elq-muted">{[slot.position, slot.nationality].filter(Boolean).join(" · ")}</div>
       </div>
-      {isLeaderboard && revealed && slot.stat_value_label && (
+      {usesDetailRows && revealed && slot.stat_value_label && (
         <div className="flex-shrink-0 text-right text-xs font-bold tabular-nums text-elq-dark whitespace-nowrap">
           {slot.stat_value_label}
         </div>

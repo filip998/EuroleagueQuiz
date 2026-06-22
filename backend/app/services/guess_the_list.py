@@ -60,7 +60,13 @@ CATEGORY_ALL_TIME = "all_time"
 CATEGORY_SINGLE_SEASON = "single_season"
 CATEGORY_ALL_EUROLEAGUE = "all_euroleague"
 CATEGORY_AWARD_WINNERS = "award_winners"
+CATEGORY_CHAMPIONS = "champions"
+CATEGORY_CHAMPION_ROSTER_ALIAS = "champion_roster"
 DEFAULT_CATEGORY_TYPE = CATEGORY_ROSTER
+_CATEGORY_ALIASES = {
+    CATEGORY_CHAMPION_ROSTER_ALIAS: CATEGORY_CHAMPIONS,
+}
+ROSTER_LIKE_CATEGORY_TYPES = frozenset({CATEGORY_ROSTER, CATEGORY_CHAMPIONS})
 LEADERBOARD_METRICS = ("points", "rebounds", "assists", "pir")
 QUICK_MATCH_CATEGORY_TYPES = (
     CATEGORY_ROSTER,
@@ -303,7 +309,11 @@ def _clean_guest_id(guest_id: Optional[str]) -> Optional[str]:
 
 def _clean_category_type(category_type: str | None) -> str:
     cleaned = (category_type or DEFAULT_CATEGORY_TYPE).strip().lower()
-    return cleaned or DEFAULT_CATEGORY_TYPE
+    return _CATEGORY_ALIASES.get(cleaned, cleaned) or DEFAULT_CATEGORY_TYPE
+
+
+def _is_roster_like_category(category_type: str | None) -> bool:
+    return _clean_category_type(category_type) in ROSTER_LIKE_CATEGORY_TYPES
 
 
 # ---------------------------------------------------------------------------
@@ -418,21 +428,11 @@ class RosterGenerator:
         team_code = team.euroleague_code if team else "UNK"
         season_year = season.year if season else 0
 
-        team_season = (
-            db.query(TeamSeason)
-            .filter(
-                TeamSeason.team_id == chosen_team_id,
-                TeamSeason.season_id == chosen_season_id,
-            )
-            .first()
-        )
-        team_name = (
-            (
-                team_season.team_name_that_season
-                if team_season and team_season.team_name_that_season
-                else None
-            )
-            or (team.name if team else "Unknown")
+        team_name = _team_name_for_season(
+            db,
+            team_id=chosen_team_id,
+            season_id=chosen_season_id,
+            fallback=team.name if team else "Unknown",
         )
 
         slots = []
@@ -461,6 +461,144 @@ class RosterGenerator:
             season_year=season_year,
             slots=tuple(slots),
         )
+
+
+class ChampionRosterGenerator:
+    def build_round(
+        self,
+        db: Session,
+        game: GuessTheListGame,
+        round_number: int,
+    ) -> RoundSpec:
+        eligible_seasons = (
+            db.query(
+                Season.id.label("season_id"),
+                Season.year.label("season_year"),
+                Team.id.label("team_id"),
+                Team.euroleague_code.label("team_code"),
+                Team.name.label("team_name"),
+            )
+            .join(Team, Team.id == Season.champion_team_id)
+            .join(
+                PlayerSeasonTeam,
+                and_(
+                    PlayerSeasonTeam.season_id == Season.id,
+                    PlayerSeasonTeam.team_id == Season.champion_team_id,
+                    PlayerSeasonTeam.is_champion.is_(True),
+                ),
+            )
+            .filter(Season.champion_team_id.isnot(None))
+            .filter(Season.year >= game.season_range_start)
+            .filter(Season.year <= game.season_range_end)
+            .group_by(
+                Season.id,
+                Season.year,
+                Team.id,
+                Team.euroleague_code,
+                Team.name,
+            )
+            .having(func.count(PlayerSeasonTeam.id) >= MIN_ROSTER_SIZE)
+            .order_by(Season.year.asc())
+            .all()
+        )
+
+        if not eligible_seasons:
+            raise GuessTheListError(
+                "No champion roster with enough players was found in the selected range"
+            )
+
+        used_years = _used_champion_roster_seasons(
+            db,
+            game_id=game.id,
+            next_round_number=round_number,
+        )
+        unused_seasons = [
+            row for row in eligible_seasons if int(row.season_year) not in used_years
+        ]
+        chosen = random.choice(unused_seasons or eligible_seasons)
+
+        rows = (
+            db.query(
+                PlayerSeasonTeam.id.label("pst_id"),
+                PlayerSeasonTeam.player_id,
+                PlayerSeasonTeam.jersey_number,
+                Player.first_name,
+                Player.last_name,
+                Player.position,
+                Player.nationality,
+                Player.height_cm,
+            )
+            .join(Player, Player.id == PlayerSeasonTeam.player_id)
+            .filter(PlayerSeasonTeam.season_id == chosen.season_id)
+            .filter(PlayerSeasonTeam.team_id == chosen.team_id)
+            .filter(PlayerSeasonTeam.is_champion.is_(True))
+            .order_by(PlayerSeasonTeam.id.asc())
+            .all()
+        )
+        if len(rows) < MIN_ROSTER_SIZE:
+            raise GuessTheListError(
+                "No champion roster with enough players was found in the selected range"
+            )
+
+        team_name = _team_name_for_season(
+            db,
+            team_id=chosen.team_id,
+            season_id=chosen.season_id,
+            fallback=chosen.team_name or "Unknown",
+        )
+        slots = []
+        for row in rows:
+            full_name = f"{row.first_name or ''} {row.last_name or ''}".strip()
+            slots.append(
+                RoundSlotSpec(
+                    player_season_team_id=row.pst_id,
+                    player_id=row.player_id,
+                    jersey_number=row.jersey_number,
+                    position=row.position,
+                    nationality=row.nationality,
+                    height_cm=row.height_cm,
+                    player_name=full_name or "Unknown",
+                )
+            )
+
+        season_year = int(chosen.season_year)
+        return RoundSpec(
+            category_type=CATEGORY_CHAMPIONS,
+            metric=None,
+            scope_label=f"Champions · {_season_label(season_year)} · {team_name}",
+            team_id=chosen.team_id,
+            season_id=chosen.season_id,
+            team_code=chosen.team_code,
+            team_name=team_name,
+            season_year=season_year,
+            slots=tuple(slots),
+        )
+
+
+def _team_name_for_season(
+    db: Session,
+    *,
+    team_id: int,
+    season_id: int,
+    fallback: str,
+) -> str:
+    team_season = (
+        db.query(TeamSeason)
+        .filter(
+            TeamSeason.team_id == team_id,
+            TeamSeason.season_id == season_id,
+        )
+        .first()
+    )
+    return (
+        (
+            team_season.team_name_that_season
+            if team_season and team_season.team_name_that_season
+            else None
+        )
+        or fallback
+        or "Unknown"
+    )
 
 
 class AllTimeLeadersGenerator:
@@ -1292,6 +1430,25 @@ def _used_all_euroleague_seasons(
     return {int(year) for (year,) in rows if year is not None}
 
 
+def _used_champion_roster_seasons(
+    db: Session,
+    *,
+    game_id: int,
+    next_round_number: int,
+) -> set[int]:
+    if next_round_number <= 1:
+        return set()
+    rows = (
+        db.query(GuessTheListRound.season_year)
+        .filter(GuessTheListRound.game_id == game_id)
+        .filter(GuessTheListRound.category_type == CATEGORY_CHAMPIONS)
+        .filter(GuessTheListRound.round_number < next_round_number)
+        .filter(GuessTheListRound.season_year.isnot(None))
+        .all()
+    )
+    return {int(year) for (year,) in rows if year is not None}
+
+
 def _award_player_season_team(
     db: Session,
     selection: PlayerAwardSelection,
@@ -1321,6 +1478,7 @@ ROUND_GENERATOR_REGISTRY: dict[str, GuessTheListRoundGenerator] = {
     CATEGORY_ALL_EUROLEAGUE: AllEuroLeagueGenerator(),
     CATEGORY_ALL_TIME: AllTimeLeadersGenerator(),
     CATEGORY_AWARD_WINNERS: AwardWinnersGenerator(),
+    CATEGORY_CHAMPIONS: ChampionRosterGenerator(),
     CATEGORY_ROSTER: RosterGenerator(),
     CATEGORY_SINGLE_SEASON: SingleSeasonLeadersGenerator(),
 }
@@ -2567,7 +2725,7 @@ def _slot_specs_for_storage(
     round_spec: RoundSpec,
 ) -> list[RoundSlotSpec]:
     slots = list(round_spec.slots)
-    if _clean_category_type(round_spec.category_type) == CATEGORY_ROSTER:
+    if _is_roster_like_category(round_spec.category_type):
         return slots
     return [
         slot
@@ -2599,7 +2757,7 @@ def _slots_for_serialization(
     slots: Sequence[GuessTheListSlot],
     round_over: bool,
 ) -> list[GuessTheListSlot]:
-    if _clean_category_type(round_obj.category_type) == CATEGORY_ROSTER:
+    if _is_roster_like_category(round_obj.category_type):
         return list(slots)
     if round_over:
         return sorted(slots, key=_revealed_slot_order_key)
@@ -2622,7 +2780,7 @@ def _hidden_slot_order_key(round_id: int, slot_id: int) -> str:
 
 def _serialize_slot(slot, round_over: bool, *, category_type: str) -> dict:
     show_answer = slot.guessed_by_player is not None or round_over
-    show_hints = show_answer or category_type == CATEGORY_ROSTER
+    show_hints = show_answer or _is_roster_like_category(category_type)
     data = {
         "id": slot.id,
         "jersey_number": slot.jersey_number if show_hints else None,
