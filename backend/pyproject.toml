@@ -31,6 +31,7 @@ dev = [
 [project.scripts]
 ingest = "ingestion.ingest:main"
 ingest-all-euroleague = "ingestion.all_euroleague:main"
+ingest-player-awards = "ingestion.player_awards:main"
 ingest-wikipedia-careers = "ingestion.wikipedia_careers:main"
 ingest-wikipedia-images = "ingestion.wikipedia_images:main"
 

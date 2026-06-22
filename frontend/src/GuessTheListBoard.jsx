@@ -25,6 +25,9 @@ function detailRankLabel(round, slot) {
     if (slot.rank === 1) return "1st";
     if (slot.rank === 2) return "2nd";
   }
+  if (round.category_type === "award_winners") {
+    return round.metric === "final_four_mvp" ? "F4" : "MVP";
+  }
   return slot.rank != null ? `#${slot.rank}` : "?";
 }
 
@@ -207,7 +210,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
   }
 
   const displayRound = (inTransition && roundTransition.completedRound) ? roundTransition.completedRound : round;
-  const usesScopeLabelDetails = ["all_time", "single_season", "all_euroleague"].includes(displayRound.category_type);
+  const usesScopeLabelDetails = ["all_time", "single_season", "all_euroleague", "award_winners"].includes(displayRound.category_type);
   const sortedSlots = usesScopeLabelDetails
     ? [...displayRound.slots]
     : [...displayRound.slots].sort((a, b) => posRank(a.position) - posRank(b.position));

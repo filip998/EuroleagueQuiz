@@ -59,6 +59,7 @@ CATEGORY_ROSTER = "roster"
 CATEGORY_ALL_TIME = "all_time"
 CATEGORY_SINGLE_SEASON = "single_season"
 CATEGORY_ALL_EUROLEAGUE = "all_euroleague"
+CATEGORY_AWARD_WINNERS = "award_winners"
 DEFAULT_CATEGORY_TYPE = CATEGORY_ROSTER
 LEADERBOARD_METRICS = ("points", "rebounds", "assists", "pir")
 QUICK_MATCH_CATEGORY_TYPES = (
@@ -209,6 +210,47 @@ ALL_EUROLEAGUE_TIER_LABELS = {
 ALL_EUROLEAGUE_TIER_RANKS = {
     ALL_EUROLEAGUE_METRIC_FIRST: 1,
     ALL_EUROLEAGUE_METRIC_SECOND: 2,
+}
+
+AWARD_WINNER_REGULAR_SEASON_MVP = "regular_season_mvp"
+AWARD_WINNER_FINAL_FOUR_MVP = "final_four_mvp"
+
+
+@dataclass(frozen=True)
+class AwardWinnerMetricConfig:
+    award_key: str
+    scope_label: str
+    stat_label: str
+    window_size: int
+    min_unique_winners: int
+
+
+@dataclass(frozen=True)
+class AwardWinnerWindow:
+    metric: str
+    config: AwardWinnerMetricConfig
+    season_years: tuple[int, ...]
+    rows_by_player_id: tuple[
+        tuple[int, tuple[tuple[PlayerAwardSelection, Player, Season], ...]],
+        ...,
+    ]
+
+
+AWARD_WINNER_METRIC_CONFIGS: Mapping[str, AwardWinnerMetricConfig] = {
+    AWARD_WINNER_REGULAR_SEASON_MVP: AwardWinnerMetricConfig(
+        award_key=AWARD_WINNER_REGULAR_SEASON_MVP,
+        scope_label="EuroLeague MVPs",
+        stat_label="MVP",
+        window_size=7,
+        min_unique_winners=5,
+    ),
+    AWARD_WINNER_FINAL_FOUR_MVP: AwardWinnerMetricConfig(
+        award_key=AWARD_WINNER_FINAL_FOUR_MVP,
+        scope_label="Final Four MVPs",
+        stat_label="F4 MVP",
+        window_size=10,
+        min_unique_winners=6,
+    ),
 }
 
 
@@ -989,6 +1031,228 @@ class AllEuroLeagueGenerator:
         )
 
 
+class AwardWinnersGenerator:
+    def __init__(self, metric: str | None = None):
+        if metric is not None and metric not in AWARD_WINNER_METRIC_CONFIGS:
+            raise GuessTheListError(f"Unsupported award winners metric: {metric}")
+        self._metric = metric
+
+    def build_round(
+        self,
+        db: Session,
+        game: GuessTheListGame,
+        round_number: int,
+    ) -> RoundSpec:
+        candidates_by_metric = self._candidate_windows(db, game)
+        if self._metric is not None:
+            windows = candidates_by_metric.get(self._metric, [])
+            if not windows:
+                raise GuessTheListError(
+                    "No MVP / Awards window with enough unique winners was found "
+                    "in the selected range"
+                )
+            candidate_metrics = (self._metric,)
+        else:
+            candidate_metrics = tuple(
+                metric for metric, windows in candidates_by_metric.items() if windows
+            )
+            if not candidate_metrics:
+                raise GuessTheListError(
+                    "No MVP / Awards window with enough unique winners was found "
+                    "in the selected range"
+                )
+
+        preferred: dict[str, list[AwardWinnerWindow]] = {}
+        fallback: dict[str, list[AwardWinnerWindow]] = {}
+        for metric in candidate_metrics:
+            windows = candidates_by_metric[metric]
+            used_starts = _used_award_window_starts(
+                db,
+                game_id=game.id,
+                next_round_number=round_number,
+                metric=metric,
+            )
+            unused = [window for window in windows if window.season_years[0] not in used_starts]
+            if unused:
+                preferred[metric] = unused
+            fallback[metric] = windows
+
+        choices_by_metric = preferred or fallback
+        metric = self._metric or random.choice(tuple(choices_by_metric))
+        chosen_window = random.choice(choices_by_metric[metric])
+        return self._round_from_window(db, chosen_window)
+
+    def _candidate_windows(
+        self,
+        db: Session,
+        game: GuessTheListGame,
+    ) -> dict[str, list[AwardWinnerWindow]]:
+        metrics = (
+            (self._metric,)
+            if self._metric is not None
+            else tuple(AWARD_WINNER_METRIC_CONFIGS)
+        )
+        candidates = {}
+        for metric in metrics:
+            config = AWARD_WINNER_METRIC_CONFIGS[metric]
+            revision = _active_award_winner_revision(db, config.award_key)
+            if revision is None:
+                candidates[metric] = []
+                continue
+            rows = (
+                db.query(PlayerAwardSelection, Player, Season)
+                .join(Player, Player.id == PlayerAwardSelection.local_player_id)
+                .join(Season, Season.id == PlayerAwardSelection.season_id)
+                .filter(PlayerAwardSelection.revision_id == revision.id)
+                .filter(PlayerAwardSelection.award_key == config.award_key)
+                .filter(PlayerAwardSelection.award_metric == metric)
+                .filter(PlayerAwardSelection.status == "accepted")
+                .filter(PlayerAwardSelection.local_player_id.isnot(None))
+                .filter(Season.year >= game.season_range_start)
+                .filter(Season.year <= game.season_range_end)
+                .order_by(Season.year.asc(), PlayerAwardSelection.source_order.asc())
+                .all()
+            )
+            candidates[metric] = _award_winner_windows_for_rows(
+                rows,
+                metric=metric,
+                config=config,
+            )
+        return candidates
+
+    def _round_from_window(
+        self,
+        db: Session,
+        window: AwardWinnerWindow,
+    ) -> RoundSpec:
+        slots = []
+        for rank, (_player_id, winner_rows) in enumerate(
+            window.rows_by_player_id,
+            start=1,
+        ):
+            selection, player, _season = winner_rows[0]
+            player_season_team = _award_player_season_team(db, selection)
+            player_name = f"{player.first_name or ''} {player.last_name or ''}".strip()
+            season_labels = ", ".join(
+                _season_label(season.year)
+                for _selection, _player, season in winner_rows
+            )
+            slots.append(
+                RoundSlotSpec(
+                    player_season_team_id=(
+                        player_season_team.id if player_season_team is not None else None
+                    ),
+                    player_id=player.id,
+                    jersey_number=(
+                        player_season_team.jersey_number
+                        if player_season_team is not None
+                        else None
+                    ),
+                    position=player.position,
+                    nationality=player.nationality,
+                    height_cm=player.height_cm,
+                    player_name=player_name or selection.source_player_label,
+                    rank=rank,
+                    stat_value=float(winner_rows[0][2].year),
+                    stat_value_label=f"{window.config.stat_label}: {season_labels}",
+                )
+            )
+
+        return RoundSpec(
+            category_type=CATEGORY_AWARD_WINNERS,
+            metric=window.metric,
+            scope_label=(
+                f"{window.config.scope_label} · "
+                f"{_season_label(window.season_years[0])}-"
+                f"{_season_label(window.season_years[-1])}"
+            ),
+            team_id=None,
+            season_id=None,
+            team_code=None,
+            team_name=None,
+            season_year=window.season_years[0],
+            slots=tuple(slots),
+        )
+
+
+def _active_award_winner_revision(
+    db: Session,
+    award_key: str,
+) -> AwardDataRevision | None:
+    return (
+        db.query(AwardDataRevision)
+        .filter(AwardDataRevision.award_key == award_key)
+        .filter(AwardDataRevision.is_active.is_(True))
+        .filter(AwardDataRevision.threshold_passed.is_(True))
+        .order_by(AwardDataRevision.created_at.desc(), AwardDataRevision.id.desc())
+        .first()
+    )
+
+
+def _award_winner_windows_for_rows(
+    rows: Sequence[tuple[PlayerAwardSelection, Player, Season]],
+    *,
+    metric: str,
+    config: AwardWinnerMetricConfig,
+) -> list[AwardWinnerWindow]:
+    rows_by_year: dict[int, tuple[PlayerAwardSelection, Player, Season]] = {}
+    for selection, player, season in rows:
+        rows_by_year.setdefault(season.year, (selection, player, season))
+
+    season_years = sorted(rows_by_year)
+    windows = []
+    for index in range(0, len(season_years) - config.window_size + 1):
+        window_years = tuple(season_years[index : index + config.window_size])
+        grouped: dict[int, list[tuple[PlayerAwardSelection, Player, Season]]] = {}
+        for year in window_years:
+            selection, player, season = rows_by_year[year]
+            grouped.setdefault(player.id, []).append((selection, player, season))
+        if len(grouped) < config.min_unique_winners:
+            continue
+        rows_by_player_id = tuple(
+            (player_id, tuple(grouped_rows))
+            for player_id, grouped_rows in sorted(
+                grouped.items(),
+                key=lambda item: (
+                    item[1][0][2].year,
+                    item[1][0][1].last_name or "",
+                    item[1][0][1].first_name or "",
+                    item[0],
+                ),
+            )
+        )
+        windows.append(
+            AwardWinnerWindow(
+                metric=metric,
+                config=config,
+                season_years=window_years,
+                rows_by_player_id=rows_by_player_id,
+            )
+        )
+    return windows
+
+
+def _used_award_window_starts(
+    db: Session,
+    *,
+    game_id: int,
+    next_round_number: int,
+    metric: str,
+) -> set[int]:
+    if next_round_number <= 1:
+        return set()
+    rows = (
+        db.query(GuessTheListRound.season_year)
+        .filter(GuessTheListRound.game_id == game_id)
+        .filter(GuessTheListRound.category_type == CATEGORY_AWARD_WINNERS)
+        .filter(GuessTheListRound.metric == metric)
+        .filter(GuessTheListRound.round_number < next_round_number)
+        .filter(GuessTheListRound.season_year.isnot(None))
+        .all()
+    )
+    return {int(year) for (year,) in rows if year is not None}
+
+
 def _active_all_euroleague_revision(db: Session) -> AwardDataRevision:
     revision = (
         db.query(AwardDataRevision)
@@ -1056,6 +1320,7 @@ def _season_label(season_year: int) -> str:
 ROUND_GENERATOR_REGISTRY: dict[str, GuessTheListRoundGenerator] = {
     CATEGORY_ALL_EUROLEAGUE: AllEuroLeagueGenerator(),
     CATEGORY_ALL_TIME: AllTimeLeadersGenerator(),
+    CATEGORY_AWARD_WINNERS: AwardWinnersGenerator(),
     CATEGORY_ROSTER: RosterGenerator(),
     CATEGORY_SINGLE_SEASON: SingleSeasonLeadersGenerator(),
 }
