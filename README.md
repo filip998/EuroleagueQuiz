@@ -27,7 +27,7 @@ Then open `http://localhost:5173` to play.
 ## Games
 
 - **TicTacToe** — Claim cells on a 3×3 board by naming players who match both the row and column clue. Clues go beyond teams: shared teammates, nationality, season, position (Guard/Forward/Center), EuroLeague champions, and stat milestones (e.g. 15+ PPG). Solo, local 1v1, and online modes. Opening `/tictactoe` lands on online **Quick Match** — a near-one-click, lichess-style pool grid — with Solo, Local 1v1, and Play-a-Friend one tap away.
-- **Guess the List** — Guess the full roster of a EuroLeague team from a specific season. Solo, local/online Classic, plus online-only Race with public Quick Match and private Play-a-Friend.
+- **Guess the List** — Guess rosters, all-time leaders, single-season leaders, and All-EuroLeague First+Second Teams by season. Solo, local/online Classic, plus online-only Race with public Quick Match and private Play-a-Friend.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice, 2-player online friend races, and public Quick Match races.
 - **Photo Quiz** — Guess the player from a headshot. Solo practice, 2-player online friend races, and public Quick Match races, drawn from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
@@ -139,12 +139,22 @@ The initial local baseline is recorded in
 cd backend
 python -m ingestion.ingest --start-season 2000 --end-season 2025
 python -m ingestion.ingest --step stat-milestones
+python -m ingestion.ingest --step all-euroleague --start-season 2000 --end-season 2025
 ```
 
 The aggregate ingestion path refreshes TicTacToe stat-milestone eligibility after
 season stats are rebuilt. `--step stat-milestones` reruns only that derived-table
 precompute when raw `player_season_stats` / `game_player_stats` data already
 exists.
+
+`--step all-euroleague` refreshes review-gated All-EuroLeague Team selections
+from the Wikipedia API into `award_data_revisions` and
+`player_award_selections`. Reviewed player/team aliases live in
+`backend/ingestion/all_euroleague_overrides.json`; the active tracked database
+ships First+Second Team rounds for 25 awarded seasons (2000-2025, excluding the
+unawarded 2019-20 season). After running this ingestion or any migration
+locally, include the intentional `backend/data/euroleague.db` change in the PR
+and upload it to Azure before deploying.
 
 ### Run Wikipedia Career Ingestion
 

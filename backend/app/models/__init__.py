@@ -15,6 +15,7 @@ from app.models.guess_the_list import (
     GuessTheListRound,
     GuessTheListSlot,
 )
+from app.models.awards import AwardDataRevision, PlayerAwardSelection
 from app.models.higher_lower import (
     HigherLowerGame,
     HigherLowerScore,
@@ -50,6 +51,8 @@ __all__ = [
     "GuessTheListGame",
     "GuessTheListRound",
     "GuessTheListSlot",
+    "AwardDataRevision",
+    "PlayerAwardSelection",
     "HigherLowerGame",
     "HigherLowerScore",
     "CareerDataRevision",
