@@ -23,6 +23,7 @@ from app.models import (
     TeamSeason,
 )
 from app.models.guess_the_list import GuessTheListGame, GuessTheListRound, GuessTheListSlot
+from app.routers import guess_the_list as guess_the_list_router
 from app.schemas.realtime import RealtimeServerMessageAdapter
 from app.services import guess_the_list as guess_the_list_service
 from app.services.realtime import DisconnectGraceTimerManager, OnlineGameRealtimeModule, TurnTimerManager
@@ -2118,6 +2119,87 @@ def test_guess_the_list_race_resign_finishes_match_for_opponent(client: TestClie
         stored = db.get(GuessTheListGame, game["id"])
         assert stored.status == "finished"
         assert stored.winner_player == 2
+
+
+def test_guess_the_list_classic_resign_finishes_match_for_opponent_off_turn(
+    client: TestClient,
+):
+    game = _create_joined_guess_the_list_classic(client, target_wins=2)
+
+    resign = client.post(
+        f"/quiz/guess-the-list/games/{game['id']}/give-up?player=2",
+    )
+    assert resign.status_code == 200
+    payload = _action_payload(resign)
+    assert payload["result"] == "resigned"
+    assert payload["terminal"] is True
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] == 1
+
+    with client.session_local() as db:
+        stored = db.get(GuessTheListGame, game["id"])
+        assert stored.status == "finished"
+        assert stored.winner_player == 1
+
+
+def test_guess_the_list_classic_resign_requires_player_identity(client: TestClient):
+    game = _create_joined_guess_the_list_classic(client, target_wins=2)
+
+    missing = client.post(f"/quiz/guess-the-list/games/{game['id']}/give-up")
+    assert missing.status_code == 400
+    assert missing.json()["type"] == "error"
+    assert missing.json()["payload"] == {
+        "code": "invalid_input",
+        "message": "Online game actions require player identity",
+    }
+
+
+def test_guess_the_list_classic_double_resign_does_not_flip_winner(
+    client: TestClient,
+):
+    game = _create_joined_guess_the_list_classic(client, target_wins=2)
+
+    first = client.post(f"/quiz/guess-the-list/games/{game['id']}/give-up?player=1")
+    assert first.status_code == 200
+    assert _action_payload(first)["game"]["winner_player"] == 2
+
+    second = client.post(f"/quiz/guess-the-list/games/{game['id']}/give-up?player=2")
+    assert second.status_code == 200
+    payload = _action_payload(second)
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] == 2
+    assert "result" not in payload
+
+
+@pytest.mark.asyncio
+async def test_guess_the_list_classic_resign_http_broadcasts_terminal_to_opponent(
+    client: TestClient,
+):
+    game = _create_joined_guess_the_list_classic(client, target_wins=2)
+    module = guess_the_list_router.guess_the_list_realtime
+    player_one = FakeWebSocket()
+    player_two = FakeWebSocket()
+    await module.connections.connect(game["id"], 1, player_one)
+    await module.connections.connect(game["id"], 2, player_two)
+
+    try:
+        response = client.post(
+            f"/quiz/guess-the-list/games/{game['id']}/give-up?player=1"
+        )
+        assert response.status_code == 200
+        payload = _action_payload(response)
+        assert payload["result"] == "resigned"
+        assert payload["terminal"] is True
+
+        message = player_two.sent[-1]
+        RealtimeServerMessageAdapter.validate_python(message)
+        assert message["payload"]["result"] == "resigned"
+        assert message["payload"]["terminal"] is True
+        assert message["payload"]["game"]["status"] == "finished"
+        assert message["payload"]["game"]["winner_player"] == 2
+    finally:
+        module.connections.disconnect(game["id"], 1, player_one)
+        module.connections.disconnect(game["id"], 2, player_two)
 
 
 def test_guess_the_list_race_resign_requires_player_identity(client: TestClient):

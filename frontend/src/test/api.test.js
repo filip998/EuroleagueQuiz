@@ -22,6 +22,7 @@ import {
   respondEndRound,
   autocompleteGuessTheListPlayer,
   connectGuessTheListRealtime,
+  resignGuessTheListGame,
   resignGuessTheListRaceGame,
   createHigherLowerGame,
   submitHigherLowerAnswer,
@@ -1072,6 +1073,22 @@ describe("Online resign endpoints", () => {
 
     expect(mockFetch).toHaveBeenCalledWith(
       "http://localhost:8000/quiz/guess-the-list/games/30/give-up?player=1",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(result.result).toBe("resigned");
+  });
+
+  it("resignGuessTheListGame POSTs the classic give-up endpoint with the player query", async () => {
+    mockFetch.mockReturnValue(
+      mockJsonResponse(
+        stateEnvelope({ id: 31, status: "finished", winner_player: 1 }, "resigned")
+      )
+    );
+
+    const result = await resignGuessTheListGame(31, 2);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/guess-the-list/games/31/give-up?player=2",
       expect.objectContaining({ method: "POST" })
     );
     expect(result.result).toBe("resigned");

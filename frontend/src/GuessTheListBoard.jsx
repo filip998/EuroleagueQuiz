@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { useListKeyboardNav } from "./useListKeyboardNav";
-import { getGuessTheListGame, submitGuessTheList, offerEndRound, respondEndRound, connectGuessTheListRealtime, autocompleteGuessTheListPlayer, giveUpGuessTheListRound } from "./api";
+import { getGuessTheListGame, submitGuessTheList, offerEndRound, respondEndRound, connectGuessTheListRealtime, autocompleteGuessTheListPlayer, giveUpGuessTheListRound, resignGuessTheListGame } from "./api";
 import { optimizeHeadshot, handleHeadshotError, HEADSHOT_WIDTHS } from "./imageUrl";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import BoardHeaderNav from "./BoardHeaderNav";
 import ClubLogo from "./ClubLogo";
 import GameResult from "./GameResult";
+import ResignControl from "./ResignControl";
 import { winnerDisplayName } from "./winnerName";
 
 const POSITION_ORDER = { "Guard": 0, "Guard-Forward": 1, "Forward": 2, "Forward-Center": 3, "Center": 4 };
@@ -49,6 +50,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
+  const [resigning, setResigning] = useState(false);
   const searchInputRef = useRef(null);
 
   const isSolo = game?.mode === "single_player";
@@ -176,6 +178,18 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
 
+  async function handleResign() {
+    setResigning(true); setError(null);
+    try {
+      if (myPlayer == null) {
+        setError(onlineSeatMissingMessage);
+        return;
+      }
+      const res = await resignGuessTheListGame(game.id, myPlayer);
+      handleRealtimeState(res);
+    } catch (e) { setError(e.message); } finally { setResigning(false); }
+  }
+
   async function handleOfferEnd() {
     setLoading(true); setError(null);
     try {
@@ -255,7 +269,9 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
   const isMissingOnlineSeat = isOnlineGame && myPlayer == null;
   const iWon = isOnline && myPlayer != null && game.winner_player === myPlayer;
   let finishedReason = null;
-  if (lastResult === "opponent_left") {
+  if (lastResult === "resigned") {
+    finishedReason = iWon ? "Your opponent resigned." : "You resigned.";
+  } else if (lastResult === "opponent_left") {
     finishedReason = iWon ? "Your opponent left the game." : "You left the game.";
   }
 
@@ -472,6 +488,9 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
                 {game.mode === "single_player" && (<button onClick={handleGiveUp} disabled={loading} className="text-xs text-red-400 hover:text-red-600 transition-colors font-medium">Give Up</button>)}
               </>)}
             </>
+          )}
+          {isOnline && game.status === "active" && !inTransition && !isRevealing && (
+            <ResignControl onResign={handleResign} disabled={resigning} />
           )}
           {isRevealing && !inTransition && (<span className="text-xs text-elq-muted">Reviewing list... <strong className="text-elq-orange">{revealCountdown}s</strong></span>)}
         </div>
