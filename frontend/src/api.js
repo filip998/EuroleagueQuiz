@@ -103,6 +103,10 @@ function measure(name, startMark, endMark) {
   }
 }
 
+function playerQuery(player) {
+  return player === 1 || player === 2 ? `?${new URLSearchParams({ player })}` : "";
+}
+
 // ---------------------------------------------------------------------------
 // Auth (additive — only meaningful when signed in via Clerk)
 // ---------------------------------------------------------------------------
@@ -283,12 +287,12 @@ export function submitGuessTheList(gameId, playerId, roundNumber = null) {
   return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/guess`, body);
 }
 
-export function offerEndRound(gameId) {
-  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/end-offer`);
+export function offerEndRound(gameId, player = null) {
+  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/end-offer${playerQuery(player)}`);
 }
 
-export function respondEndRound(gameId, accept) {
-  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/end-response`, {
+export function respondEndRound(gameId, accept, player = null) {
+  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/end-response${playerQuery(player)}`, {
     accept,
   });
 }

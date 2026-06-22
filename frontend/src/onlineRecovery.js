@@ -15,11 +15,12 @@ import {
 } from "./guessTheListRaceQuickMatch";
 
 export function saveOnlineInfo(gameId, online) {
-  if (!online) return;
+  const normalized = normalizeOnlineInfo(online);
+  if (!normalized) return;
   try {
     sessionStorage.setItem(
       `elq_game_${gameId}`,
-      JSON.stringify({ playerNumber: online.playerNumber, isOnline: true })
+      JSON.stringify(normalized)
     );
   } catch {
     // Storage may be unavailable (private mode, quota); recovery degrades to the
@@ -30,7 +31,7 @@ export function saveOnlineInfo(gameId, online) {
 export function loadOnlineInfo(gameId) {
   try {
     const stored = sessionStorage.getItem(`elq_game_${gameId}`);
-    return stored ? JSON.parse(stored) : null;
+    return stored ? normalizeOnlineInfo(JSON.parse(stored)) : null;
   } catch {
     return null;
   }
@@ -42,6 +43,23 @@ export function clearOnlineInfo(gameId) {
   } catch {
     // Nothing to clean up if storage is unavailable.
   }
+}
+
+function normalizePlayerNumber(value) {
+  const parsed = typeof value === "string" ? Number(value) : value;
+  return parsed === 1 || parsed === 2 ? parsed : null;
+}
+
+function normalizeOnlineInfo(online) {
+  if (!online || online.isOnline !== true) return null;
+  const playerNumber = normalizePlayerNumber(online.playerNumber);
+  if (playerNumber == null) return null;
+  return { playerNumber, isOnline: true };
+}
+
+function onlineInfoFromSeat(seat) {
+  const playerNumber = normalizePlayerNumber(seat);
+  return playerNumber == null ? null : { playerNumber, isOnline: true };
 }
 
 // Only an actually-online game (`mode === "online_friend"`) is ever recovered as
@@ -56,9 +74,7 @@ export function recoverOnlineInfo(gameId, game) {
   if (game?.mode !== "online_friend") return null;
   const stored = loadOnlineInfo(gameId);
   if (stored) return stored;
-  const seat = recallQuickMatchSeat(gameId);
-  if (seat) return { playerNumber: seat, isOnline: true };
-  return null;
+  return onlineInfoFromSeat(recallQuickMatchSeat(gameId));
 }
 
 // Photo Quiz recovery. Per-tab sessionStorage is authoritative; only public
@@ -70,8 +86,7 @@ export function recoverPhotoOnlineInfo(gameId, game) {
   const stored = loadOnlineInfo(gameId);
   if (stored) return stored;
   if (game?.is_public && game?.preset) {
-    const seat = recallQuickMatchSeat(photoSeatKey(gameId));
-    if (seat) return { playerNumber: seat, isOnline: true };
+    return onlineInfoFromSeat(recallQuickMatchSeat(photoSeatKey(gameId)));
   }
   return null;
 }
@@ -81,8 +96,7 @@ export function recoverCareerOnlineInfo(gameId, game) {
   const stored = loadOnlineInfo(gameId);
   if (stored) return stored;
   if (game?.is_public && game?.preset) {
-    const seat = recallQuickMatchSeat(careerSeatKey(gameId));
-    if (seat) return { playerNumber: seat, isOnline: true };
+    return onlineInfoFromSeat(recallQuickMatchSeat(careerSeatKey(gameId)));
   }
   return null;
 }
@@ -95,7 +109,7 @@ export function recoverGuessTheListOnlineInfo(gameId, game) {
     const seat =
       recallQuickMatchSeat(guessTheListRaceSeatKey(gameId))
       ?? recallQuickMatchSeat(legacyGuessTheListRaceSeatKey(gameId));
-    if (seat) return { playerNumber: seat, isOnline: true };
+    return onlineInfoFromSeat(seat);
   }
   return null;
 }

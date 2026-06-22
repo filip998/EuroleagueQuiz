@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 vi.mock("../api", () => ({
   getGuessTheListGame: vi.fn(),
@@ -11,11 +11,11 @@ vi.mock("../api", () => ({
   giveUpGuessTheListRound: vi.fn(),
 }));
 
-const realtimeHolder = vi.hoisted(() => ({ opts: null }));
+const realtimeHolder = vi.hoisted(() => ({ opts: null, sendAction: vi.fn() }));
 vi.mock("../useOnlineGameRealtime", () => ({
   useOnlineGameRealtime: (opts) => {
     realtimeHolder.opts = opts;
-    return { sendAction: vi.fn() };
+    return { sendAction: realtimeHolder.sendAction };
   },
 }));
 
@@ -24,10 +24,12 @@ vi.mock("../ClubLogo", () => ({
 }));
 
 import GuessTheListBoard from "../GuessTheListBoard";
+import { offerEndRound, respondEndRound } from "../api";
 
 beforeEach(() => {
   vi.clearAllMocks();
   realtimeHolder.opts = null;
+  realtimeHolder.sendAction = vi.fn(() => true);
 });
 
 function activeSoloGame(overrides = {}) {
@@ -53,6 +55,42 @@ function activeSoloGame(overrides = {}) {
     },
     ...overrides,
   };
+}
+
+function onlineClassicGame(overrides = {}) {
+  const baseRound = {
+    status: "in_progress",
+    team_code: "MAD",
+    team_name: "Real Madrid",
+    season_year: 2020,
+    guessed_count: 0,
+    total_slots: 1,
+    slots: [{ id: 1, position: "Guard", guessed_by_player: null }],
+  };
+
+  return activeSoloGame({
+    id: 99,
+    mode: "online_friend",
+    status: "active",
+    player1_name: "Alice",
+    player2_name: "Bob",
+    player1_score: 0,
+    player2_score: 0,
+    current_player: 1,
+    target_wins: 2,
+    pending_end: null,
+    ...overrides,
+    round: {
+      ...baseRound,
+      ...(overrides.round || {}),
+    },
+  });
+}
+
+function getSpanByTextContent(text) {
+  return screen.getByText((_, element) =>
+    element?.tagName?.toLowerCase() === "span" && element.textContent.includes(text)
+  );
 }
 
 describe("GuessTheListBoard header navigation", () => {
@@ -112,6 +150,126 @@ describe("GuessTheListBoard end-of-game result", () => {
     // winnerDisplayName helper renders a neutral "No winner" headline.
     expect(screen.getByRole("heading", { name: "No winner" })).toBeInTheDocument();
     expect(screen.queryByText("Bob WINS!")).not.toBeInTheDocument();
+  });
+});
+
+describe("GuessTheListBoard online pending end offers", () => {
+  it.each([
+    {
+      label: "Player 1 to Player 2",
+      pendingEnd: { offered_by: 1, respond_to: 2 },
+      currentPlayer: 2,
+      viewer: "2",
+      offererName: "Alice",
+    },
+    {
+      label: "Player 2 to Player 1",
+      pendingEnd: { offered_by: 2, respond_to: 1 },
+      currentPlayer: 1,
+      viewer: 1,
+      offererName: "Bob",
+    },
+  ])("shows enabled recipient controls for $label", ({ pendingEnd, currentPlayer, viewer, offererName }) => {
+    render(
+      <GuessTheListBoard
+        initialState={onlineClassicGame({ current_player: currentPlayer, pending_end: pendingEnd })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: viewer }}
+      />
+    );
+
+    expect(getSpanByTextContent(`${offererName} wants to end.`)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Accept" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Decline" })).toBeEnabled();
+    expect(screen.queryByPlaceholderText("Type a player name to guess...")).not.toBeInTheDocument();
+  });
+
+  it("shows a waiting state without response controls to the sender", () => {
+    render(
+      <GuessTheListBoard
+        initialState={onlineClassicGame({
+          current_player: 2,
+          pending_end: { offered_by: 1, respond_to: 2 },
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    expect(getSpanByTextContent("Waiting for Bob to respond.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Decline" })).not.toBeInTheDocument();
+  });
+
+  it("declines via HTTP fallback during websocket reconnect and restores recipient guessing", async () => {
+    realtimeHolder.sendAction = vi.fn(() => false);
+    respondEndRound.mockResolvedValue({
+      state: onlineClassicGame({ current_player: 2, pending_end: null }),
+      result: "end_declined",
+    });
+
+    render(
+      <GuessTheListBoard
+        initialState={onlineClassicGame({
+          current_player: 2,
+          pending_end: { offered_by: 1, respond_to: 2 },
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 2 }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+
+    await waitFor(() => expect(respondEndRound).toHaveBeenCalledWith(99, false, 2));
+    expect(await screen.findByPlaceholderText("Type a player name to guess...")).toBeInTheDocument();
+    expect(screen.queryByText(/wants to end/)).not.toBeInTheDocument();
+  });
+
+  it("offers via HTTP fallback with the online player when websocket is reconnecting", async () => {
+    realtimeHolder.sendAction = vi.fn(() => false);
+    offerEndRound.mockResolvedValue({
+      state: onlineClassicGame({
+        current_player: 2,
+        pending_end: { offered_by: 1, respond_to: 2 },
+      }),
+      result: "end_offered",
+    });
+
+    render(
+      <GuessTheListBoard
+        initialState={onlineClassicGame({ current_player: 1 })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "End Round" }));
+
+    await waitFor(() => expect(offerEndRound).toHaveBeenCalledWith(99, 1));
+    expect(getSpanByTextContent("Waiting for Bob to respond.")).toBeInTheDocument();
+  });
+
+  it("does not expose broken controls when an online seat is missing", () => {
+    render(
+      <GuessTheListBoard
+        initialState={onlineClassicGame({
+          current_player: 2,
+          pending_end: { offered_by: 1, respond_to: 2 },
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+      />
+    );
+
+    expect(screen.getByText(/online seat was not recovered/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Decline" })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Type a player name to guess...")).not.toBeInTheDocument();
   });
 });
 

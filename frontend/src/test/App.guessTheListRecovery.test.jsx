@@ -17,12 +17,20 @@ vi.mock("../api", () => ({
 // recoverGuessTheListOnlineInfo + the App call-site (no raw loadOnlineInfo fallback) run.
 vi.mock("../GuessTheListBoard", () => ({
   default: ({ onlineInfo }) => (
-    <div data-testid="guess-the-list-board" data-online={onlineInfo ? "online" : "null"} />
+    <div
+      data-testid="guess-the-list-board"
+      data-online={onlineInfo ? "online" : "null"}
+      data-player={onlineInfo?.playerNumber ?? ""}
+    />
   ),
 }));
 vi.mock("../GuessTheListRaceBoard", () => ({
   default: ({ onlineInfo }) => (
-    <div data-testid="guess-the-list-race-board" data-online={onlineInfo ? "online" : "null"} />
+    <div
+      data-testid="guess-the-list-race-board"
+      data-online={onlineInfo ? "online" : "null"}
+      data-player={onlineInfo?.playerNumber ?? ""}
+    />
   ),
 }));
 // Stub the remaining setups/boards to keep the test focused on GuessTheListGamePage.
@@ -86,5 +94,6 @@ describe("GuessTheListGamePage stale online-seat recovery (issue #150)", () => {
 
     const board = await screen.findByTestId("guess-the-list-board");
     expect(board).toHaveAttribute("data-online", "online");
+    expect(board).toHaveAttribute("data-player", "2");
   });
 });
