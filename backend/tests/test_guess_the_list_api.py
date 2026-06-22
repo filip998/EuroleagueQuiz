@@ -13,7 +13,9 @@ from app.main import app
 from app.models import (
     Game,
     GamePlayerStats,
+    AwardDataRevision,
     Player,
+    PlayerAwardSelection,
     PlayerSeasonTeam,
     PlayerSeasonStats,
     Season,
@@ -1086,6 +1088,194 @@ def test_single_season_leaders_category_is_registered_and_hides_active_answers(
     assert [slot["rank"] for slot in completed_round["slots"]][-2:] == [10, 10]
     assert completed_round["slots"][0]["player_name"] == "Post01 Alpha"
     assert completed_round["slots"][0]["stat_value_label"] == "20.0 ppg"
+
+
+@pytest.fixture()
+def all_euroleague_db():
+    engine = create_engine("sqlite:///:memory:")
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    session = TestingSessionLocal()
+    try:
+        _seed_all_euroleague_fixture(session)
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def _seed_all_euroleague_fixture(session):
+    team = Team(euroleague_code="AET", name="Awards Team", short_name="Awards")
+    seasons = {
+        year: Season(year=year, name=f"{year}-{year + 1}")
+        for year in (2023, 2024)
+    }
+    session.add(team)
+    session.add_all(seasons.values())
+    session.flush()
+
+    revision = AwardDataRevision(
+        award_key=guess_the_list_service.ALL_EUROLEAGUE_AWARD_KEY,
+        source_name="test",
+        source_url="https://example.test/all-euroleague",
+        source_revision_id="test-revision",
+        source_retrieved_at=datetime.utcnow(),
+        content_hash="hash",
+        status="active",
+        enabled_metric=guess_the_list_service.ALL_EUROLEAGUE_METRIC_FIRST_SECOND,
+        eligible_row_count=20,
+        accepted_row_count=20,
+        eligible_round_count=2,
+        threshold_round_count=2,
+        threshold_passed=True,
+        is_active=True,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    session.add(revision)
+    session.flush()
+
+    for season_year, season in seasons.items():
+        for index in range(1, 11):
+            metric = (
+                guess_the_list_service.ALL_EUROLEAGUE_METRIC_FIRST
+                if index <= 5
+                else guess_the_list_service.ALL_EUROLEAGUE_METRIC_SECOND
+            )
+            player = Player(
+                euroleague_code=f"AET{season_year}{index:02}",
+                first_name=f"Award{season_year}{index:02}",
+                last_name="Player",
+                nationality="CountryA",
+                position="Guard" if index <= 5 else "Forward",
+                height_cm=190 + index,
+            )
+            session.add(player)
+            session.flush()
+            stint = PlayerSeasonTeam(
+                player_id=player.id,
+                team_id=team.id,
+                season_id=season.id,
+                jersey_number=str(index),
+            )
+            session.add(stint)
+            session.flush()
+            session.add(
+                PlayerAwardSelection(
+                    revision_id=revision.id,
+                    award_key=guess_the_list_service.ALL_EUROLEAGUE_AWARD_KEY,
+                    award_metric=metric,
+                    season_id=season.id,
+                    season_year=season_year,
+                    source_row_key=f"{season_year}:{metric}:{index}",
+                    source_order=(season_year * 100) + index,
+                    source_position="G" if index <= 5 else "F",
+                    source_player_label=f"Award{season_year}{index:02} Player",
+                    source_player_url=None,
+                    local_player_id=player.id,
+                    source_team_label="Awards Team",
+                    source_team_url=None,
+                    local_team_id=team.id,
+                    status="accepted",
+                    match_method="fixture",
+                    reviewed=True,
+                    candidate_count=1,
+                    candidates_json="[]",
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                )
+            )
+    session.commit()
+
+
+def _new_all_euroleague_game(start_year=2023, end_year=2024):
+    game = _new_single_season_game(start_year, end_year)
+    game.category_type = guess_the_list_service.CATEGORY_ALL_EUROLEAGUE
+    return game
+
+
+def test_all_euroleague_generator_uses_active_revision_and_tier_details(
+    all_euroleague_db,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        guess_the_list_service.random,
+        "choice",
+        lambda years: max(years),
+    )
+
+    spec = guess_the_list_service.AllEuroLeagueGenerator().build_round(
+        all_euroleague_db,
+        _new_all_euroleague_game(),
+        1,
+    )
+
+    assert spec.category_type == guess_the_list_service.CATEGORY_ALL_EUROLEAGUE
+    assert spec.metric == guess_the_list_service.ALL_EUROLEAGUE_METRIC_FIRST_SECOND
+    assert spec.scope_label == "All-EuroLeague · 2024/25"
+    assert spec.season_year == 2024
+    assert len(spec.slots) == 10
+    assert [slot.rank for slot in spec.slots[:5]] == [1, 1, 1, 1, 1]
+    assert [slot.rank for slot in spec.slots[5:]] == [2, 2, 2, 2, 2]
+    assert spec.slots[0].stat_value_label == "First Team"
+    assert spec.slots[-1].stat_value_label == "Second Team"
+
+
+def test_all_euroleague_category_is_registered_and_hides_active_answers(
+    all_euroleague_db,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        guess_the_list_service.random,
+        "choice",
+        lambda years: years[0],
+    )
+    game = guess_the_list_service.create_game(
+        all_euroleague_db,
+        mode="single_player",
+        target_wins=2,
+        timer_mode="40s",
+        category_type=guess_the_list_service.CATEGORY_ALL_EUROLEAGUE,
+        player1_name="Player One",
+        season_range_start=2024,
+        season_range_end=2024,
+    )
+
+    state = guess_the_list_service.serialize_game_state(all_euroleague_db, game)
+    active_round = state["round"]
+    assert state["category_type"] == guess_the_list_service.CATEGORY_ALL_EUROLEAGUE
+    assert active_round["category_type"] == guess_the_list_service.CATEGORY_ALL_EUROLEAGUE
+    assert active_round["scope_label"] == "All-EuroLeague · 2024/25"
+    assert active_round["total_slots"] == 10
+    assert all(
+        slot["player_name"] is None
+        and slot["rank"] is None
+        and slot["stat_value_label"] is None
+        and slot["jersey_number"] is None
+        and slot["position"] is None
+        for slot in active_round["slots"]
+    )
+
+    round_obj = guess_the_list_service.get_active_round(all_euroleague_db, game.id)
+    round_obj.status = "completed"
+    round_obj.completed_at = datetime.utcnow()
+    all_euroleague_db.flush()
+
+    completed_round = guess_the_list_service.serialize_completed_round(
+        all_euroleague_db,
+        game.id,
+        round_obj.round_number,
+    )
+    assert completed_round is not None
+    assert [slot["stat_value_label"] for slot in completed_round["slots"][:5]] == [
+        "First Team",
+        "First Team",
+        "First Team",
+        "First Team",
+        "First Team",
+    ]
+    assert completed_round["slots"][-1]["stat_value_label"] == "Second Team"
 
 
 def test_legacy_roster_guess_http_routes_alias_guess_the_list(client: TestClient):

@@ -1,0 +1,85 @@
+{
+  "players": [
+    {
+      "source_label": "Theo Papaloukas",
+      "euroleague_code": "ATW",
+      "note": "Reviewed All-EuroLeague alias: source uses Theo; local canonical row is THEODOROS PAPALOUKAS."
+    },
+    {
+      "source_label": "Sarunas Jasikevicius",
+      "euroleague_code": "ADG",
+      "note": "Reviewed All-EuroLeague alias for SARAS JASIKEVICIUS."
+    },
+    {
+      "source_label": "Šarūnas Jasikevičius",
+      "euroleague_code": "ADG",
+      "note": "Reviewed accented All-EuroLeague alias for SARAS JASIKEVICIUS."
+    },
+    {
+      "source_label": "Edy Tavares",
+      "euroleague_code": "005791",
+      "note": "Reviewed All-EuroLeague alias: source uses Edy; local canonical row is WALTER TAVARES."
+    },
+    {
+      "source_label": "Manu Ginóbili",
+      "euroleague_code": "AKX",
+      "note": "Reviewed All-EuroLeague alias; chose roster-backed EMANUEL GINOBILI row over zero-roster duplicate."
+    },
+    {
+      "source_label": "Ariel McDonald",
+      "euroleague_code": "APC",
+      "note": "Reviewed All-EuroLeague alias: local canonical row is ARRIEL McDONALD."
+    },
+    {
+      "source_label": "Jemeil Rich",
+      "euroleague_code": "ABU",
+      "note": "Reviewed All-EuroLeague alias: local canonical row is JAMEIL RICH."
+    },
+    {
+      "source_label": "Derrick Hamilton",
+      "euroleague_code": "AKK",
+      "note": "Reviewed All-EuroLeague alias: local canonical row is DERECK HAMILTON."
+    },
+    {
+      "source_label": "Ioannis Giannoulis",
+      "euroleague_code": "AIH",
+      "note": "Reviewed All-EuroLeague alias: local canonical row is YANNIS GIANNOULIS."
+    },
+    {
+      "source_label": "Kšyštof Lavrinovič",
+      "euroleague_code": "BLH",
+      "note": "Reviewed accented All-EuroLeague alias for KSISTOF LAVRINOVIC."
+    },
+    {
+      "source_label": "T. J. Shorts",
+      "euroleague_code": "012608",
+      "note": "Reviewed punctuation variant for local TJ SHORTS row."
+    },
+    {
+      "source_label": "Marko Jarić",
+      "euroleague_code": "ANM",
+      "note": "Reviewed ambiguous local name; chose roster-backed MARKO JARIC row over zero-roster duplicate."
+    },
+    {
+      "source_label": "David Andersen",
+      "euroleague_code": "AKT",
+      "note": "Reviewed ambiguous local name; chose roster-backed DAVID ANDERSEN row over zero-roster duplicate."
+    },
+    {
+      "source_label": "Matjaž Smodiš",
+      "euroleague_code": "ALC",
+      "note": "Reviewed ambiguous local name; chose roster-backed MATJAZ SMODIS row over zero-roster duplicate."
+    }
+  ],
+  "team_aliases": {
+    "Kinder Bologna": "VIR",
+    "Maccabi": "TEL",
+    "Fenerbahce Beko": "ULK",
+    "Fenerbahçe Beko": "ULK",
+    "Olimpia Milano": "MIL",
+    "Partizan Mobtel": "PAR",
+    "Zenit Saint Petersburg": "DYR",
+    "Slask Wroclaw": "WRO",
+    "Śląsk Wrocław": "WRO"
+  }
+}

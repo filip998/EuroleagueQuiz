@@ -251,6 +251,28 @@ describe("GuessTheListSetup", () => {
     );
   });
 
+  it("sends category_type and selected season range for an All-EuroLeague solo list", async () => {
+    createGuessTheListGame.mockResolvedValue({ id: 33, status: "active" });
+
+    renderSetup();
+    fireEvent.change(screen.getByLabelText("List type"), {
+      target: { value: "all_euroleague" },
+    });
+    expect(screen.getByText("All-EuroLeague Teams")).toBeInTheDocument();
+    expect(screen.getByText("Season Range")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Start Game"));
+
+    await waitFor(() => expect(onGameCreated).toHaveBeenCalled());
+    expect(createGuessTheListGame).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "single_player",
+        category_type: "all_euroleague",
+        season_range_start: 2000,
+        season_range_end: 2025,
+      })
+    );
+  });
+
   it("does not show the List Type picker on Classic join", () => {
     renderSetup({ initialMode: "online" });
     fireEvent.click(screen.getByText("Join"));

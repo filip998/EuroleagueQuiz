@@ -28,7 +28,9 @@ from app.game_actions import (
 from app.models import (
     Game,
     GamePlayerStats,
+    AwardDataRevision,
     Player,
+    PlayerAwardSelection,
     PlayerSeasonTeam,
     PlayerSeasonStats,
     Season,
@@ -56,6 +58,7 @@ MAX_ROSTER_RETRIES = 10
 CATEGORY_ROSTER = "roster"
 CATEGORY_ALL_TIME = "all_time"
 CATEGORY_SINGLE_SEASON = "single_season"
+CATEGORY_ALL_EUROLEAGUE = "all_euroleague"
 DEFAULT_CATEGORY_TYPE = CATEGORY_ROSTER
 LEADERBOARD_METRICS = ("points", "rebounds", "assists", "pir")
 QUICK_MATCH_CATEGORY_TYPES = (
@@ -191,6 +194,21 @@ SINGLE_SEASON_METRIC_CONFIGS: Mapping[str, SingleSeasonMetricConfig] = {
         "PIR",
         "PIR",
     ),
+}
+
+ALL_EUROLEAGUE_AWARD_KEY = "all_euroleague"
+ALL_EUROLEAGUE_METRIC_FIRST = "first"
+ALL_EUROLEAGUE_METRIC_SECOND = "second"
+ALL_EUROLEAGUE_METRIC_FIRST_SECOND = "first_second"
+ALL_EUROLEAGUE_MIN_FIRST_SLOTS = 5
+ALL_EUROLEAGUE_MIN_FIRST_SECOND_SLOTS = 10
+ALL_EUROLEAGUE_TIER_LABELS = {
+    ALL_EUROLEAGUE_METRIC_FIRST: "First Team",
+    ALL_EUROLEAGUE_METRIC_SECOND: "Second Team",
+}
+ALL_EUROLEAGUE_TIER_RANKS = {
+    ALL_EUROLEAGUE_METRIC_FIRST: 1,
+    ALL_EUROLEAGUE_METRIC_SECOND: 2,
 }
 
 
@@ -860,7 +878,183 @@ def _round_single_season_average(value: int | float | Decimal) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
 
 
+class AllEuroLeagueGenerator:
+    def build_round(
+        self,
+        db: Session,
+        game: GuessTheListGame,
+        round_number: int,
+    ) -> RoundSpec:
+        revision = _active_all_euroleague_revision(db)
+        metric = revision.enabled_metric
+        if metric not in {
+            ALL_EUROLEAGUE_METRIC_FIRST,
+            ALL_EUROLEAGUE_METRIC_FIRST_SECOND,
+        }:
+            raise GuessTheListError("All-EuroLeague Teams category is not enabled")
+
+        eligible_metrics = (
+            (ALL_EUROLEAGUE_METRIC_FIRST, ALL_EUROLEAGUE_METRIC_SECOND)
+            if metric == ALL_EUROLEAGUE_METRIC_FIRST_SECOND
+            else (ALL_EUROLEAGUE_METRIC_FIRST,)
+        )
+        min_slots = (
+            ALL_EUROLEAGUE_MIN_FIRST_SECOND_SLOTS
+            if metric == ALL_EUROLEAGUE_METRIC_FIRST_SECOND
+            else ALL_EUROLEAGUE_MIN_FIRST_SLOTS
+        )
+
+        rows = (
+            db.query(PlayerAwardSelection, Player, Season)
+            .join(Player, Player.id == PlayerAwardSelection.local_player_id)
+            .join(Season, Season.id == PlayerAwardSelection.season_id)
+            .filter(PlayerAwardSelection.revision_id == revision.id)
+            .filter(PlayerAwardSelection.award_key == ALL_EUROLEAGUE_AWARD_KEY)
+            .filter(PlayerAwardSelection.award_metric.in_(eligible_metrics))
+            .filter(PlayerAwardSelection.status == "accepted")
+            .filter(PlayerAwardSelection.local_player_id.isnot(None))
+            .filter(Season.year >= game.season_range_start)
+            .filter(Season.year <= game.season_range_end)
+            .all()
+        )
+        rows_by_season: dict[int, list[tuple[PlayerAwardSelection, Player, Season]]] = {}
+        for selection, player, season in rows:
+            rows_by_season.setdefault(season.year, []).append((selection, player, season))
+
+        eligible_years = [
+            year
+            for year, season_rows in rows_by_season.items()
+            if _accepted_unique_player_count(season_rows) >= min_slots
+        ]
+        if not eligible_years:
+            raise GuessTheListError(
+                "No All-EuroLeague Teams season with enough accepted selections "
+                "was found in the selected range"
+            )
+
+        used_years = _used_all_euroleague_seasons(
+            db,
+            game_id=game.id,
+            next_round_number=round_number,
+        )
+        unused_years = [year for year in eligible_years if year not in used_years]
+        chosen_year = random.choice(unused_years or eligible_years)
+        chosen_rows = sorted(
+            rows_by_season[chosen_year],
+            key=lambda item: (
+                ALL_EUROLEAGUE_TIER_RANKS.get(item[0].award_metric, 99),
+                item[0].source_order,
+                item[1].last_name or "",
+                item[1].first_name or "",
+                item[1].id,
+            ),
+        )
+        season = chosen_rows[0][2]
+        slots = []
+        for selection, player, _season in chosen_rows:
+            player_season_team = _award_player_season_team(db, selection)
+            player_name = f"{player.first_name or ''} {player.last_name or ''}".strip()
+            slots.append(
+                RoundSlotSpec(
+                    player_season_team_id=(
+                        player_season_team.id if player_season_team is not None else None
+                    ),
+                    player_id=player.id,
+                    jersey_number=(
+                        player_season_team.jersey_number
+                        if player_season_team is not None
+                        else None
+                    ),
+                    position=player.position,
+                    nationality=player.nationality,
+                    height_cm=player.height_cm,
+                    player_name=player_name or selection.source_player_label,
+                    rank=ALL_EUROLEAGUE_TIER_RANKS.get(selection.award_metric),
+                    stat_value_label=ALL_EUROLEAGUE_TIER_LABELS.get(
+                        selection.award_metric
+                    ),
+                )
+            )
+
+        return RoundSpec(
+            category_type=CATEGORY_ALL_EUROLEAGUE,
+            metric=metric,
+            scope_label=f"All-EuroLeague · {_season_label(season.year)}",
+            team_id=None,
+            season_id=season.id,
+            team_code=None,
+            team_name=None,
+            season_year=season.year,
+            slots=tuple(slots),
+        )
+
+
+def _active_all_euroleague_revision(db: Session) -> AwardDataRevision:
+    revision = (
+        db.query(AwardDataRevision)
+        .filter(AwardDataRevision.award_key == ALL_EUROLEAGUE_AWARD_KEY)
+        .filter(AwardDataRevision.is_active.is_(True))
+        .filter(AwardDataRevision.threshold_passed.is_(True))
+        .order_by(AwardDataRevision.created_at.desc(), AwardDataRevision.id.desc())
+        .first()
+    )
+    if revision is None:
+        raise GuessTheListError("All-EuroLeague Teams category is not enabled")
+    return revision
+
+
+def _accepted_unique_player_count(
+    rows: Sequence[tuple[PlayerAwardSelection, Player, Season]],
+) -> int:
+    return len({selection.local_player_id for selection, _player, _season in rows})
+
+
+def _used_all_euroleague_seasons(
+    db: Session,
+    *,
+    game_id: int,
+    next_round_number: int,
+) -> set[int]:
+    if next_round_number <= 1:
+        return set()
+    rows = (
+        db.query(GuessTheListRound.season_year)
+        .filter(GuessTheListRound.game_id == game_id)
+        .filter(GuessTheListRound.category_type == CATEGORY_ALL_EUROLEAGUE)
+        .filter(GuessTheListRound.round_number < next_round_number)
+        .filter(GuessTheListRound.season_year.isnot(None))
+        .all()
+    )
+    return {int(year) for (year,) in rows if year is not None}
+
+
+def _award_player_season_team(
+    db: Session,
+    selection: PlayerAwardSelection,
+) -> PlayerSeasonTeam | None:
+    if selection.local_player_id is None or selection.season_id is None:
+        return None
+    query = db.query(PlayerSeasonTeam).filter(
+        PlayerSeasonTeam.player_id == selection.local_player_id,
+        PlayerSeasonTeam.season_id == selection.season_id,
+    )
+    if selection.local_team_id is not None:
+        team_row = (
+            query.filter(PlayerSeasonTeam.team_id == selection.local_team_id)
+            .order_by(PlayerSeasonTeam.id.asc())
+            .first()
+        )
+        if team_row is not None:
+            return team_row
+    return query.order_by(PlayerSeasonTeam.id.asc()).first()
+
+
+def _season_label(season_year: int) -> str:
+    return f"{season_year}/{str(season_year + 1)[-2:]}"
+
+
 ROUND_GENERATOR_REGISTRY: dict[str, GuessTheListRoundGenerator] = {
+    CATEGORY_ALL_EUROLEAGUE: AllEuroLeagueGenerator(),
     CATEGORY_ALL_TIME: AllTimeLeadersGenerator(),
     CATEGORY_ROSTER: RosterGenerator(),
     CATEGORY_SINGLE_SEASON: SingleSeasonLeadersGenerator(),

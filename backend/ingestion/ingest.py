@@ -7,6 +7,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
+from ingestion.all_euroleague import (
+    DEFAULT_OVERRIDES_PATH as ALL_EUROLEAGUE_OVERRIDES_PATH,
+)
+from ingestion.all_euroleague import (
+    HttpAllEuroLeagueAdapter,
+    IngestOptions as AllEuroLeagueIngestOptions,
+    ingest_all_euroleague,
+)
 from app.services.tictactoe_stat_milestones import build_stat_milestone_eligibility
 from ingestion.aggregate_stats import aggregate_season_stats
 from ingestion.champions import enrich_champion_flags, format_champion_report
@@ -40,6 +48,7 @@ def main():
             "stat-milestones",
             "champions",
             "wikipedia-images",
+            "all-euroleague",
         ],
         default="all",
     )
@@ -70,7 +79,13 @@ def main():
         "--report",
         type=Path,
         default=None,
-        help="Optional JSON report path for the wikipedia-images step",
+        help="Optional JSON report path for report-producing ingestion steps",
+    )
+    parser.add_argument(
+        "--overrides",
+        type=Path,
+        default=None,
+        help="Optional overrides JSON path for review-gated source mapping steps",
     )
     parser.add_argument(
         "--skip-boxscores",
@@ -142,6 +157,16 @@ def main():
         refresh_champion_flags(SessionFactory, args.start_season, args.end_season)
         return
 
+    if args.step == "all-euroleague":
+        refresh_all_euroleague(
+            SessionFactory,
+            args.start_season,
+            args.end_season,
+            args.report,
+            args.overrides,
+        )
+        return
+
     for year in range(args.start_season, args.end_season + 1):
         logger.info(f"Processing season {year}-{year + 1}")
         session = SessionFactory()
@@ -201,6 +226,44 @@ def refresh_champion_flags(SessionFactory, start_year: int, end_year: int) -> No
     except Exception:
         session.rollback()
         logger.exception("Error refreshing EuroLeague champion title-squad flags")
+        raise
+    finally:
+        session.close()
+
+
+def refresh_all_euroleague(
+    SessionFactory,
+    start_year: int,
+    end_year: int,
+    report_path: Path | None,
+    overrides_path: Path | None,
+) -> None:
+    session = SessionFactory()
+    try:
+        report = ingest_all_euroleague(
+            session,
+            HttpAllEuroLeagueAdapter(),
+            AllEuroLeagueIngestOptions(
+                start_year=start_year,
+                end_year=end_year,
+                overrides_path=overrides_path or ALL_EUROLEAGUE_OVERRIDES_PATH,
+                report_path=report_path,
+            ),
+        )
+        session.commit()
+        logger.info(
+            "All-EuroLeague selections refreshed: rows=%s accepted=%s "
+            "unmatched=%s ambiguous=%s enabled_metric=%s active=%s",
+            report.in_range_rows,
+            report.accepted,
+            report.unmatched,
+            report.ambiguous,
+            report.enabled_metric,
+            report.threshold_passed,
+        )
+    except Exception:
+        session.rollback()
+        logger.exception("Error refreshing All-EuroLeague selections")
         raise
     finally:
         session.close()

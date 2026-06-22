@@ -58,6 +58,7 @@ const CATEGORY_TYPES = [
   ["roster", "Roster"],
   ["all_time", "All-Time Leaders"],
   ["single_season", "Single-Season Leaders"],
+  ["all_euroleague", "All-EuroLeague Teams"],
 ];
 const SEASONS = Array.from({ length: 26 }, (_, i) => 2000 + i);
 const FULL_SEASON_RANGE = { start: SEASONS[0], end: SEASONS[SEASONS.length - 1] };
@@ -218,7 +219,7 @@ export default function GuessTheListSetup({
       accent="player2"
       icon={HEADER_ICON}
       title="GUESS THE LIST"
-      tagline="Name rosters, all-time leaders, or single-season leaders."
+      tagline="Name rosters, leaders, and award teams from EuroLeague history."
       onHome={onBack}
       error={error}
     >

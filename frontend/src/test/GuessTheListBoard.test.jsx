@@ -219,3 +219,62 @@ describe("GuessTheListBoard leaderboard rounds", () => {
     expect(screen.queryByText("3,500 pts")).not.toBeInTheDocument();
   });
 });
+
+describe("GuessTheListBoard All-EuroLeague rounds", () => {
+  function allEuroLeagueGame() {
+    return activeSoloGame({
+      round: {
+        status: "in_progress",
+        category_type: "all_euroleague",
+        scope_label: "All-EuroLeague · 2024/25",
+        team_code: null,
+        team_name: null,
+        season_year: 2024,
+        guessed_count: 1,
+        total_slots: 2,
+        slots: [
+          {
+            id: 1,
+            position: "Guard",
+            nationality: "Greece",
+            guessed_by_player: 1,
+            player_name: "Dimitris Diamantidis",
+            rank: 1,
+            stat_value_label: "First Team",
+          },
+          {
+            id: 2,
+            position: null,
+            nationality: null,
+            guessed_by_player: null,
+            player_name: null,
+            rank: 2,
+            stat_value_label: "Second Team",
+          },
+        ],
+      },
+    });
+  }
+
+  it("renders the scope label and revealed tier without team chrome", () => {
+    render(
+      <GuessTheListBoard initialState={allEuroLeagueGame()} onNewGame={() => {}} onHome={() => {}} />
+    );
+
+    expect(screen.getByText("All-EuroLeague · 2024/25")).toBeInTheDocument();
+    expect(screen.getByText("Dimitris Diamantidis")).toBeInTheDocument();
+    expect(screen.getByText("1st")).toBeInTheDocument();
+    expect(screen.getByText("First Team")).toBeInTheDocument();
+    expect(screen.queryByTestId("club-logo")).not.toBeInTheDocument();
+  });
+
+  it("hides unclaimed All-EuroLeague tier details", () => {
+    render(
+      <GuessTheListBoard initialState={allEuroLeagueGame()} onNewGame={() => {}} onHome={() => {}} />
+    );
+
+    expect(screen.getByText("???")).toBeInTheDocument();
+    expect(screen.queryByText("2nd")).not.toBeInTheDocument();
+    expect(screen.queryByText("Second Team")).not.toBeInTheDocument();
+  });
+});
