@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 vi.mock("../api", () => ({
   getGuessTheListGame: vi.fn(),
@@ -150,6 +150,41 @@ describe("GuessTheListBoard end-of-game result", () => {
     // winnerDisplayName helper renders a neutral "No winner" headline.
     expect(screen.getByRole("heading", { name: "No winner" })).toBeInTheDocument();
     expect(screen.queryByText("Bob WINS!")).not.toBeInTheDocument();
+  });
+
+  it("renders an opponent-left win delivered over realtime", async () => {
+    render(
+      <GuessTheListBoard
+        initialState={onlineClassicGame({ current_player: 1 })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 2 }}
+      />
+    );
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: onlineClassicGame({
+          status: "finished",
+          winner_player: 2,
+          round: {
+            status: "completed",
+            slots: [
+              {
+                id: 1,
+                position: "Guard",
+                guessed_by_player: null,
+                player_name: "Hidden Player",
+              },
+            ],
+          },
+        }),
+        result: "opponent_left",
+      });
+    });
+
+    expect(await screen.findByText("Your opponent left the game.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Bob WINS!" })).toBeInTheDocument();
   });
 });
 
