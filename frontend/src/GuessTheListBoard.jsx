@@ -20,6 +20,12 @@ function posAbbr(p) {
   if (p.startsWith("Center")) return "C";
   return p.slice(0, 2).toUpperCase();
 }
+
+function normalizePlayerNumber(value) {
+  const parsed = typeof value === "string" ? Number(value) : value;
+  return parsed === 1 || parsed === 2 ? parsed : null;
+}
+
 function detailRankLabel(round, slot) {
   if (round.category_type === "all_euroleague") {
     if (slot.rank === 1) return "1st";
@@ -48,9 +54,13 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
   const isSolo = game?.mode === "single_player";
   // A solo / local game must never be treated as online, even if `onlineInfo`
   // carries a stale seat recovered for a reused game id (see onlineRecovery.js).
-  const isOnline = game?.mode === "online_friend" && Boolean(onlineInfo?.isOnline);
-  const myPlayer = onlineInfo?.playerNumber;
+  const isOnlineGame = game?.mode === "online_friend";
+  const myPlayer = isOnlineGame && onlineInfo?.isOnline
+    ? normalizePlayerNumber(onlineInfo.playerNumber)
+    : null;
+  const isOnline = isOnlineGame && myPlayer != null;
   const realtimeUnavailableMessage = "Realtime connection unavailable. Reconnecting...";
+  const onlineSeatMissingMessage = "This online seat was not recovered. Reopen the original tab to respond.";
 
   function handleRealtimeState(message) {
     const result = message.result;
@@ -130,7 +140,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const isMyTurn = !isOnline || game?.current_player === myPlayer;
+  const isMyTurn = !isOnlineGame || game?.current_player === myPlayer;
   const currentPlayerName = game?.current_player === 1 ? game?.player1_name : game?.player2_name;
   const inTransition = !!roundTransition;
   const isRevealing = revealCountdown !== null && revealCountdown > 0;
@@ -139,7 +149,11 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
   async function handlePlayerSelect(player) {
     setSearchQuery(""); setSearchResults([]); setLoading(true); setError(null);
     try {
-      if (isOnline) {
+      if (isOnlineGame) {
+        if (myPlayer == null) {
+          setError(onlineSeatMissingMessage);
+          return;
+        }
         if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.GUESS, { player_id: player.player_id })) {
           setError(realtimeUnavailableMessage);
         }
@@ -165,8 +179,15 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
   async function handleOfferEnd() {
     setLoading(true); setError(null);
     try {
-      if (isOnline) {
-        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.OFFER_END)) setError(realtimeUnavailableMessage);
+      if (isOnlineGame) {
+        if (myPlayer == null) {
+          setError(onlineSeatMissingMessage);
+          return;
+        }
+        if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.OFFER_END)) {
+          const r = await offerEndRound(game.id, myPlayer);
+          handleRealtimeState(r);
+        }
         return;
       }
       const r = await offerEndRound(game.id); handleRealtimeState(r);
@@ -176,9 +197,14 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
   async function handleRespondEnd(accept) {
     setLoading(true); setError(null);
     try {
-      if (isOnline) {
+      if (isOnlineGame) {
+        if (myPlayer == null) {
+          setError(onlineSeatMissingMessage);
+          return;
+        }
         if (!realtime.sendAction(REALTIME_CLIENT_ACTIONS.RESPOND_END, { accept })) {
-          setError(realtimeUnavailableMessage);
+          const r = await respondEndRound(game.id, accept, myPlayer);
+          handleRealtimeState(r);
         }
         return;
       }
@@ -217,6 +243,16 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
     : [...displayRound.slots].sort((a, b) => posRank(a.position) - posRank(b.position));
   const displayRoundOver = displayRound.status === "completed" || displayRound.status === "given_up";
   const canGuess = game.status === "active" && !inTransition && !isRevealing && !game.pending_end && isMyTurn && !roundOver;
+  const pendingEnd = game.pending_end;
+  const pendingOffererName = pendingEnd?.offered_by === 1 ? game.player1_name : game.player2_name;
+  const pendingRecipientName = pendingEnd?.respond_to === 1 ? game.player1_name : game.player2_name;
+  const canRespondToPendingEnd = Boolean(
+    pendingEnd && (!isOnlineGame || myPlayer === pendingEnd.respond_to)
+  );
+  const isPendingEndSender = Boolean(
+    pendingEnd && isOnlineGame && myPlayer === pendingEnd.offered_by
+  );
+  const isMissingOnlineSeat = isOnlineGame && myPlayer == null;
 
   if (!isSolo && game.status === "finished" && !inTransition && !isRevealing) {
     const finishedWinnerName = winnerDisplayName(game);
@@ -241,6 +277,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
         </div>
       </div>
       {isOnline && (<div className="bg-elq-bg text-center py-1 text-[11px] text-elq-muted border-b border-elq-border flex-shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block mr-1.5" />You are <strong>{game[`player${myPlayer}_name`]}</strong>{!isMyTurn && <span className="text-elq-orange ml-1">&mdash; Opponent&apos;s turn</span>}</div>)}
+      {isMissingOnlineSeat && (<div className="bg-amber-50 text-center py-1 text-[11px] text-amber-700 border-b border-amber-100 flex-shrink-0">{onlineSeatMissingMessage}</div>)}
       {isSolo ? (
       <div className="bg-white border-b border-elq-border flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2 text-center">
@@ -405,7 +442,23 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
         <div className="max-w-5xl mx-auto px-3 py-2 flex items-center justify-center gap-4">
           {game.status === "active" && !inTransition && !isRevealing && !roundOver && (
             <>
-              {game.pending_end ? (<div className="flex items-center gap-3 text-sm"><span className="text-elq-text"><strong>{game.pending_end.offered_by === 1 ? game.player1_name : game.player2_name}</strong> wants to end.</span>{(!isOnline || myPlayer === game.pending_end.respond_to) && (<><button onClick={() => handleRespondEnd(true)} disabled={loading} className="px-3 py-1 bg-elq-success text-white text-xs font-semibold rounded-lg hover:opacity-90 disabled:opacity-50">Accept</button><button onClick={() => handleRespondEnd(false)} disabled={loading} className="px-3 py-1 bg-white border border-elq-border text-elq-text text-xs font-semibold rounded-lg hover:bg-elq-bg disabled:opacity-50">Decline</button></>)}</div>) : (<>
+              {pendingEnd ? (
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="text-elq-text">
+                    {isPendingEndSender ? (
+                      <>Waiting for <strong>{pendingRecipientName}</strong> to respond.</>
+                    ) : (
+                      <><strong>{pendingOffererName}</strong> wants to end.</>
+                    )}
+                  </span>
+                  {canRespondToPendingEnd && (
+                    <>
+                      <button onClick={() => handleRespondEnd(true)} disabled={loading} className="px-3 py-1 bg-elq-success text-white text-xs font-semibold rounded-lg hover:opacity-90 disabled:opacity-50">Accept</button>
+                      <button onClick={() => handleRespondEnd(false)} disabled={loading} className="px-3 py-1 bg-white border border-elq-border text-elq-text text-xs font-semibold rounded-lg hover:bg-elq-bg disabled:opacity-50">Decline</button>
+                    </>
+                  )}
+                </div>
+              ) : (<>
                 {isMyTurn && game.mode !== "single_player" && (<button onClick={handleOfferEnd} disabled={loading} className="text-xs text-elq-muted hover:text-elq-text transition-colors">End Round</button>)}
                 {game.mode === "single_player" && (<button onClick={handleGiveUp} disabled={loading} className="text-xs text-red-400 hover:text-red-600 transition-colors font-medium">Give Up</button>)}
               </>)}

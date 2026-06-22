@@ -18,6 +18,8 @@ import {
   cancelGuessTheListRaceQuickMatch,
   getGuessTheListRaceQuickMatchPools,
   submitGuessTheList,
+  offerEndRound,
+  respondEndRound,
   autocompleteGuessTheListPlayer,
   connectGuessTheListRealtime,
   resignGuessTheListRaceGame,
@@ -388,6 +390,52 @@ describe("Guess the List API", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ player_id: 456, round_number: 3 }),
+      })
+    );
+  });
+
+  it("offerEndRound omits player query unless an online seat is provided", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 }, "end_offered")));
+
+    await offerEndRound(10);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/guess-the-list/games/10/end-offer",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("offerEndRound includes player query for online fallback", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 }, "end_offered")));
+
+    await offerEndRound(10, 2);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://localhost:8000/quiz/guess-the-list/games/10/end-offer?player=2",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("respondEndRound conditionally includes player query for online fallback", async () => {
+    mockFetch.mockReturnValue(mockJsonResponse(stateEnvelope({ id: 10 }, "end_declined")));
+
+    await respondEndRound(10, false);
+    await respondEndRound(10, true, 1);
+
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/quiz/guess-the-list/games/10/end-response",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ accept: false }),
+      })
+    );
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/quiz/guess-the-list/games/10/end-response?player=1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ accept: true }),
       })
     );
   });

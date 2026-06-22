@@ -129,6 +129,34 @@ def _create_guess_the_list_game(client: TestClient, mode: str = "single_player")
     return _action_payload(response)["game"]
 
 
+def _create_joined_guess_the_list_classic(
+    client: TestClient,
+    *,
+    target_wins: int = 2,
+    timer_mode: str = "unlimited",
+) -> dict:
+    create = client.post(
+        "/quiz/guess-the-list/games",
+        json={
+            "mode": "online_friend",
+            "target_wins": target_wins,
+            "timer_mode": timer_mode,
+            "player1_name": "Host",
+            "season_range_start": 2024,
+            "season_range_end": 2024,
+        },
+    )
+    assert create.status_code == 200
+    waiting = _action_payload(create)["game"]
+
+    join = client.post(
+        "/quiz/guess-the-list/games/join",
+        json={"join_code": waiting["join_code"], "player_name": "Joiner"},
+    )
+    assert join.status_code == 200
+    return _action_payload(join)["game"]
+
+
 def test_create_guess_the_list_game_returns_state_envelope(client: TestClient):
     game = _create_guess_the_list_game(client)
 
@@ -1843,6 +1871,156 @@ def test_online_guess_the_list_persists_guest_id(client: TestClient):
         stored = db.get(GuessTheListGame, game["id"])
         assert stored.player1_guest_id == "host-guest-abc"
         assert stored.player2_guest_id == "joiner-guest-def"
+
+
+def test_online_guess_the_list_end_offer_decline_keeps_recipient_current_and_guessable(
+    client: TestClient,
+):
+    game = _create_joined_guess_the_list_classic(client)
+
+    offer = client.post(
+        f"/quiz/guess-the-list/games/{game['id']}/end-offer?player=1"
+    )
+    assert offer.status_code == 200
+    offered = _action_payload(offer)
+    assert offered["result"] == "end_offered"
+    assert offered["game"]["pending_end"] == {"offered_by": 1, "respond_to": 2}
+    assert offered["game"]["current_player"] == 2
+
+    blocked_guess = client.post(
+        f"/quiz/guess-the-list/games/{game['id']}/guess?player=2",
+        json={"player_id": 1},
+    )
+    assert blocked_guess.status_code == 409
+    assert blocked_guess.json()["payload"]["message"] == (
+        "Resolve pending end offer before guessing"
+    )
+
+    decline = client.post(
+        f"/quiz/guess-the-list/games/{game['id']}/end-response?player=2",
+        json={"accept": False},
+    )
+    assert decline.status_code == 200
+    declined = _action_payload(decline)
+    assert declined["result"] == "end_declined"
+    assert declined["game"]["pending_end"] is None
+    assert declined["game"]["current_player"] == 2
+
+    guess = client.post(
+        f"/quiz/guess-the-list/games/{game['id']}/guess?player=2",
+        json={"player_id": 1},
+    )
+    assert guess.status_code == 200
+    guessed = _action_payload(guess)
+    assert guessed["result"] == "correct"
+    assert guessed["game"]["current_player"] == 1
+
+
+def test_online_guess_the_list_reverse_end_offer_accepts_and_rejects_sender_response(
+    client: TestClient,
+):
+    game = _create_joined_guess_the_list_classic(client, target_wins=2)
+
+    first_guess = client.post(
+        f"/quiz/guess-the-list/games/{game['id']}/guess?player=1",
+        json={"player_id": 1},
+    )
+    assert first_guess.status_code == 200
+    assert _action_payload(first_guess)["game"]["current_player"] == 2
+
+    offer = client.post(
+        f"/quiz/guess-the-list/games/{game['id']}/end-offer?player=2"
+    )
+    assert offer.status_code == 200
+    offered = _action_payload(offer)
+    assert offered["game"]["pending_end"] == {"offered_by": 2, "respond_to": 1}
+    assert offered["game"]["current_player"] == 1
+
+    sender_response = client.post(
+        f"/quiz/guess-the-list/games/{game['id']}/end-response?player=2",
+        json={"accept": False},
+    )
+    assert sender_response.status_code == 409
+    assert sender_response.json()["payload"]["message"] == (
+        "Only the recipient can respond to the end offer"
+    )
+
+    accept = client.post(
+        f"/quiz/guess-the-list/games/{game['id']}/end-response?player=1",
+        json={"accept": True},
+    )
+    assert accept.status_code == 200
+    accepted = _action_payload(accept)
+    assert accepted["result"] == "round_won"
+    assert accepted["game"]["pending_end"] is None
+    assert accepted["game"]["round_number"] == 2
+    assert accepted["game"]["player1_score"] == 1
+    assert accepted["completed_round"]["status"] == "completed"
+    assert accepted["completed_round"]["winner_player"] == 1
+
+
+def test_guess_the_list_race_rejects_end_offers(client: TestClient):
+    created = _create_guess_the_list_race(client)
+    game = _join_guess_the_list_race(client, created["join_code"])
+
+    response = client.post(
+        f"/quiz/guess-the-list/games/{game['id']}/end-offer?player=1"
+    )
+
+    assert response.status_code == 400
+    assert response.json()["payload"] == {
+        "code": "invalid_input",
+        "message": "End offers are not available in Race mode",
+    }
+
+
+@pytest.mark.asyncio
+async def test_guess_the_list_classic_end_offer_websocket_broadcasts_to_both_players(
+    client: TestClient,
+):
+    game = _create_joined_guess_the_list_classic(client)
+    module = OnlineGameRealtimeModule(
+        GuessTheListRealtimeAdapter(),
+        session_factory=client.session_local,
+    )
+    player_one = FakeWebSocket()
+    player_two = FakeWebSocket()
+    await module.connections.connect(game["id"], 1, player_one)
+    await module.connections.connect(game["id"], 2, player_two)
+
+    offer = await module.handle_client_message(
+        player_one,
+        game["id"],
+        1,
+        {"action": "offer_end"},
+        session_factory=client.session_local,
+    )
+
+    assert offer["payload"]["result"] == "end_offered"
+    for websocket in (player_one, player_two):
+        message = websocket.sent[-1]
+        RealtimeServerMessageAdapter.validate_python(message)
+        assert message["payload"]["result"] == "end_offered"
+        assert message["payload"]["game"]["pending_end"] == {
+            "offered_by": 1,
+            "respond_to": 2,
+        }
+
+    decline = await module.handle_client_message(
+        player_two,
+        game["id"],
+        2,
+        {"action": "respond_end", "accept": False},
+        session_factory=client.session_local,
+    )
+
+    assert decline["payload"]["result"] == "end_declined"
+    for websocket in (player_one, player_two):
+        message = websocket.sent[-1]
+        RealtimeServerMessageAdapter.validate_python(message)
+        assert message["payload"]["result"] == "end_declined"
+        assert message["payload"]["game"]["pending_end"] is None
+        assert message["payload"]["game"]["current_player"] == 2
 
 
 def _create_guess_the_list_race(client: TestClient, target_wins: int = 2) -> dict:

@@ -42,6 +42,27 @@ describe("saveOnlineInfo / loadOnlineInfo", () => {
     expect(loadOnlineInfo(7)).toEqual({ playerNumber: 2, isOnline: true });
   });
 
+  it("normalizes numeric string seats from legacy stored data", () => {
+    globalThis.sessionStorage.setItem(
+      "elq_game_7",
+      JSON.stringify({ playerNumber: "2", isOnline: true })
+    );
+    expect(loadOnlineInfo(7)).toEqual({ playerNumber: 2, isOnline: true });
+    expect(recoverGuessTheListOnlineInfo(7, { mode: "online_friend" })).toEqual({
+      playerNumber: 2,
+      isOnline: true,
+    });
+  });
+
+  it("ignores malformed stored seats", () => {
+    globalThis.sessionStorage.setItem(
+      "elq_game_7",
+      JSON.stringify({ playerNumber: 3, isOnline: true })
+    );
+    expect(loadOnlineInfo(7)).toBeNull();
+    expect(recoverGuessTheListOnlineInfo(7, { mode: "online_friend" })).toBeNull();
+  });
+
   it("does nothing when there is no online info", () => {
     saveOnlineInfo(7, null);
     expect(loadOnlineInfo(7)).toBeNull();
