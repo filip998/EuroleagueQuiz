@@ -9,6 +9,7 @@ vi.mock("../api", () => ({
   connectGuessTheListRealtime: vi.fn(),
   autocompleteGuessTheListPlayer: vi.fn(),
   giveUpGuessTheListRound: vi.fn(),
+  resignGuessTheListGame: vi.fn(),
 }));
 
 const realtimeHolder = vi.hoisted(() => ({ opts: null, sendAction: vi.fn() }));
@@ -24,7 +25,7 @@ vi.mock("../ClubLogo", () => ({
 }));
 
 import GuessTheListBoard from "../GuessTheListBoard";
-import { offerEndRound, respondEndRound } from "../api";
+import { offerEndRound, respondEndRound, resignGuessTheListGame } from "../api";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -150,6 +151,118 @@ describe("GuessTheListBoard end-of-game result", () => {
     // winnerDisplayName helper renders a neutral "No winner" headline.
     expect(screen.getByRole("heading", { name: "No winner" })).toBeInTheDocument();
     expect(screen.queryByText("Bob WINS!")).not.toBeInTheDocument();
+  });
+
+  describe("GuessTheListBoard online resign", () => {
+    it("resigns through the give-up endpoint and shows the self-resign outcome", async () => {
+      resignGuessTheListGame.mockResolvedValue({
+        state: onlineClassicGame({ status: "finished", winner_player: 2 }),
+        result: "resigned",
+      });
+
+      render(
+        <GuessTheListBoard
+          initialState={onlineClassicGame({ current_player: 2 })}
+          onNewGame={() => {}}
+          onHome={() => {}}
+          onlineInfo={{ isOnline: true, playerNumber: 1 }}
+        />
+      );
+
+      fireEvent.click(screen.getByText("Resign"));
+      expect(screen.getByText("Resign the match? Your opponent wins.")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Resign"));
+
+      await waitFor(() => expect(resignGuessTheListGame).toHaveBeenCalledWith(99, 1));
+      expect(await screen.findByText("You resigned.")).toBeInTheDocument();
+    });
+
+    it("renders an opponent resignation delivered over realtime", () => {
+      render(
+        <GuessTheListBoard
+          initialState={onlineClassicGame({ current_player: 1 })}
+          onNewGame={() => {}}
+          onHome={() => {}}
+          onlineInfo={{ isOnline: true, playerNumber: 2 }}
+        />
+      );
+
+      act(() => {
+        realtimeHolder.opts.onState({
+          state: onlineClassicGame({
+            status: "finished",
+            winner_player: 2,
+            round: {
+              status: "completed",
+              slots: [
+                {
+                  id: 1,
+                  position: "Guard",
+                  guessed_by_player: null,
+                  player_name: "Hidden Player",
+                },
+              ],
+            },
+          }),
+          result: "resigned",
+        });
+      });
+
+      expect(screen.getByText("Your opponent resigned.")).toBeInTheDocument();
+    });
+
+    it("does not offer a resign control once the game is finished", () => {
+      render(
+        <GuessTheListBoard
+          initialState={onlineClassicGame({ status: "finished", winner_player: 2 })}
+          onNewGame={() => {}}
+          onHome={() => {}}
+          onlineInfo={{ isOnline: true, playerNumber: 1 }}
+        />
+      );
+
+      expect(screen.queryByText("Resign")).not.toBeInTheDocument();
+    });
+
+    it("keeps resign available on the opponent's turn and during pending end offers", () => {
+      const { unmount } = render(
+        <GuessTheListBoard
+          initialState={onlineClassicGame({ current_player: 2 })}
+          onNewGame={() => {}}
+          onHome={() => {}}
+          onlineInfo={{ isOnline: true, playerNumber: 1 }}
+        />
+      );
+
+      expect(screen.getByText("Resign")).toBeInTheDocument();
+      unmount();
+
+      render(
+        <GuessTheListBoard
+          initialState={onlineClassicGame({
+            current_player: 2,
+            pending_end: { offered_by: 1, respond_to: 2 },
+          })}
+          onNewGame={() => {}}
+          onHome={() => {}}
+          onlineInfo={{ isOnline: true, playerNumber: 1 }}
+        />
+      );
+
+      expect(screen.getByText("Resign")).toBeInTheDocument();
+    });
+
+    it("does not expose resign when an online seat is missing", () => {
+      render(
+        <GuessTheListBoard
+          initialState={onlineClassicGame({ current_player: 1 })}
+          onNewGame={() => {}}
+          onHome={() => {}}
+        />
+      );
+
+      expect(screen.queryByText("Resign")).not.toBeInTheDocument();
+    });
   });
 
   it("renders an opponent-left win delivered over realtime", async () => {

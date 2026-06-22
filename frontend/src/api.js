@@ -301,8 +301,12 @@ export function giveUpGuessTheListRound(gameId) {
   return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/give-up`);
 }
 
+export function resignGuessTheListGame(gameId, player) {
+  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/give-up${playerQuery(player)}`);
+}
+
 export function resignGuessTheListRaceGame(gameId, player) {
-  return actionRequest("POST", `/quiz/guess-the-list/games/${gameId}/give-up?player=${player}`);
+  return resignGuessTheListGame(gameId, player);
 }
 
 export function autocompleteGuessTheListPlayer(q, limit = 15) {

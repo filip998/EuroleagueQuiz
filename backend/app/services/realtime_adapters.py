@@ -448,7 +448,7 @@ class GuessTheListRealtimeAdapter:
             )
 
         if action == GameActionName.GIVE_UP:
-            if getattr(game, "is_race", False):
+            if getattr(game, "mode", None) == "online_friend":
                 acting_player = _online_actor(game, player)
                 forfeited = guess_the_list_service.forfeit_online_game(
                     db,
