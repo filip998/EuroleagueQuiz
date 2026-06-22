@@ -140,6 +140,7 @@ cd backend
 python -m ingestion.ingest --start-season 2000 --end-season 2025
 python -m ingestion.ingest --step stat-milestones
 python -m ingestion.ingest --step all-euroleague --start-season 2000 --end-season 2025
+python -m ingestion.ingest --step player-awards --start-season 2000 --end-season 2025
 ```
 
 The aggregate ingestion path refreshes TicTacToe stat-milestone eligibility after
@@ -155,6 +156,15 @@ ships First+Second Team rounds for 25 awarded seasons (2000-2025, excluding the
 unawarded 2019-20 season). After running this ingestion or any migration
 locally, include the intentional `backend/data/euroleague.db` change in the PR
 and upload it to Azure before deploying.
+
+`--step player-awards` refreshes review-gated Regular Season MVP and Final Four
+MVP winners from the Wikipedia API into the same award revision tables. Gameplay
+uses active accepted rows as unique-winner windows: 7 awarded seasons for
+Regular Season MVP and 10 awarded seasons for Final Four MVP, with repeated
+winners collapsed into one answer slot and reveal details listing the winning
+season(s). The 2019-20 canceled season is stored as intentionally not awarded;
+the 2000-01 Final Four source excludes the SuproLeague row and uses the local
+EuroLeague Finals MVP row.
 
 ### Run Wikipedia Career Ingestion
 

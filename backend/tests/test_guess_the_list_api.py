@@ -1278,6 +1278,187 @@ def test_all_euroleague_category_is_registered_and_hides_active_answers(
     assert completed_round["slots"][-1]["stat_value_label"] == "Second Team"
 
 
+@pytest.fixture()
+def award_winners_db():
+    engine = create_engine("sqlite:///:memory:")
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    session = TestingSessionLocal()
+    try:
+        _seed_award_winners_fixture(session)
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def _seed_award_winners_fixture(session):
+    team = Team(euroleague_code="AWD", name="Awards Club", short_name="Awards")
+    seasons = {
+        year: Season(year=year, name=f"{year}-{year + 1}")
+        for year in (2013, 2014, 2015, 2016, 2017, 2018, 2020)
+    }
+    session.add(team)
+    session.add_all(seasons.values())
+    session.flush()
+
+    revision = AwardDataRevision(
+        award_key=guess_the_list_service.AWARD_WINNER_REGULAR_SEASON_MVP,
+        source_name="test",
+        source_url="https://example.test/mvp",
+        source_revision_id="test-revision",
+        source_retrieved_at=datetime.utcnow(),
+        content_hash="hash",
+        status="active",
+        enabled_metric=guess_the_list_service.AWARD_WINNER_REGULAR_SEASON_MVP,
+        eligible_row_count=7,
+        accepted_row_count=7,
+        eligible_round_count=1,
+        threshold_round_count=1,
+        threshold_passed=True,
+        is_active=True,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    session.add(revision)
+    session.flush()
+
+    winners = [
+        (2013, "Repeat", "Winner"),
+        (2014, "Repeat", "Winner"),
+        (2015, "Mvp", "Three"),
+        (2016, "Mvp", "Four"),
+        (2017, "Mvp", "Five"),
+        (2018, "Mvp", "Six"),
+        (2020, "Mvp", "Seven"),
+    ]
+    players_by_name = {}
+    for year, first_name, last_name in winners:
+        key = (first_name, last_name)
+        player = players_by_name.get(key)
+        if player is None:
+            player = Player(
+                euroleague_code=f"AWD{len(players_by_name) + 1:03}",
+                first_name=first_name,
+                last_name=last_name,
+                nationality="CountryA",
+                position="Guard",
+                height_cm=190 + len(players_by_name),
+            )
+            session.add(player)
+            session.flush()
+            players_by_name[key] = player
+        stint = PlayerSeasonTeam(
+            player_id=player.id,
+            team_id=team.id,
+            season_id=seasons[year].id,
+            jersey_number=str(year)[-2:],
+        )
+        session.add(stint)
+        session.flush()
+        session.add(
+            PlayerAwardSelection(
+                revision_id=revision.id,
+                award_key=guess_the_list_service.AWARD_WINNER_REGULAR_SEASON_MVP,
+                award_metric=guess_the_list_service.AWARD_WINNER_REGULAR_SEASON_MVP,
+                season_id=seasons[year].id,
+                season_year=year,
+                source_row_key=f"regular-season-mvp:{year}",
+                source_order=year,
+                source_position=None,
+                source_player_label=f"{first_name} {last_name}",
+                source_player_url=None,
+                local_player_id=player.id,
+                source_team_label="Awards Club",
+                source_team_url=None,
+                local_team_id=team.id,
+                status="accepted",
+                match_method="fixture",
+                reviewed=True,
+                candidate_count=1,
+                candidates_json="[]",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+        )
+    session.commit()
+
+
+def _new_award_winners_game(start_year=2013, end_year=2020):
+    game = _new_single_season_game(start_year, end_year)
+    game.category_type = guess_the_list_service.CATEGORY_AWARD_WINNERS
+    return game
+
+
+def test_award_winners_generator_collapses_repeat_winners_and_reveals_seasons(
+    award_winners_db,
+):
+    spec = guess_the_list_service.AwardWinnersGenerator(
+        metric=guess_the_list_service.AWARD_WINNER_REGULAR_SEASON_MVP
+    ).build_round(
+        award_winners_db,
+        _new_award_winners_game(),
+        1,
+    )
+
+    assert spec.category_type == guess_the_list_service.CATEGORY_AWARD_WINNERS
+    assert spec.metric == guess_the_list_service.AWARD_WINNER_REGULAR_SEASON_MVP
+    assert spec.scope_label == "EuroLeague MVPs · 2013/14-2020/21"
+    assert spec.season_year == 2013
+    assert len(spec.slots) == 6
+    repeat = spec.slots[0]
+    assert repeat.player_name == "Repeat Winner"
+    assert repeat.stat_value_label == "MVP: 2013/14, 2014/15"
+    assert spec.slots[-1].stat_value_label == "MVP: 2020/21"
+
+
+def test_award_winners_category_is_registered_and_hides_active_answers(
+    award_winners_db,
+):
+    game = guess_the_list_service.create_game(
+        award_winners_db,
+        mode="single_player",
+        target_wins=2,
+        timer_mode="40s",
+        category_type=guess_the_list_service.CATEGORY_AWARD_WINNERS,
+        player1_name="Player One",
+        season_range_start=2013,
+        season_range_end=2020,
+    )
+
+    state = guess_the_list_service.serialize_game_state(award_winners_db, game)
+    active_round = state["round"]
+    assert state["category_type"] == guess_the_list_service.CATEGORY_AWARD_WINNERS
+    assert active_round["category_type"] == guess_the_list_service.CATEGORY_AWARD_WINNERS
+    assert active_round["scope_label"] == "EuroLeague MVPs · 2013/14-2020/21"
+    assert active_round["total_slots"] == 6
+    assert all(
+        slot["player_name"] is None
+        and slot["rank"] is None
+        and slot["stat_value_label"] is None
+        and slot["position"] is None
+        for slot in active_round["slots"]
+    )
+
+    round_obj = guess_the_list_service.get_active_round(award_winners_db, game.id)
+    round_obj.status = "completed"
+    round_obj.completed_at = datetime.utcnow()
+    award_winners_db.flush()
+
+    completed_round = guess_the_list_service.serialize_completed_round(
+        award_winners_db,
+        game.id,
+        round_obj.round_number,
+    )
+    assert completed_round is not None
+    assert completed_round["slots"][0]["player_name"] == "Repeat Winner"
+    assert completed_round["slots"][0]["stat_value_label"] == (
+        "MVP: 2013/14, 2014/15"
+    )
+    assert completed_round["slots"][-1]["stat_value_label"] == "MVP: 2020/21"
+
+
 def test_legacy_roster_guess_http_routes_alias_guess_the_list(client: TestClient):
     create = client.post(
         "/quiz/roster-guess/games",

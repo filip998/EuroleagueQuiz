@@ -15,6 +15,12 @@ from ingestion.all_euroleague import (
     IngestOptions as AllEuroLeagueIngestOptions,
     ingest_all_euroleague,
 )
+from ingestion.player_awards import (
+    AWARD_OPTION_TO_METRICS,
+    HttpPlayerAwardsAdapter,
+    PlayerAwardsIngestOptions,
+    ingest_player_awards,
+)
 from app.services.tictactoe_stat_milestones import build_stat_milestone_eligibility
 from ingestion.aggregate_stats import aggregate_season_stats
 from ingestion.champions import enrich_champion_flags, format_champion_report
@@ -49,8 +55,15 @@ def main():
             "champions",
             "wikipedia-images",
             "all-euroleague",
+            "player-awards",
         ],
         default="all",
+    )
+    parser.add_argument(
+        "--award",
+        choices=sorted(AWARD_OPTION_TO_METRICS),
+        default="all",
+        help="Award source to ingest for the player-awards step",
     )
     parser.add_argument(
         "--limit",
@@ -167,6 +180,17 @@ def main():
         )
         return
 
+    if args.step == "player-awards":
+        refresh_player_awards(
+            SessionFactory,
+            args.start_season,
+            args.end_season,
+            args.report,
+            args.overrides,
+            args.award,
+        )
+        return
+
     for year in range(args.start_season, args.end_season + 1):
         logger.info(f"Processing season {year}-{year + 1}")
         session = SessionFactory()
@@ -264,6 +288,48 @@ def refresh_all_euroleague(
     except Exception:
         session.rollback()
         logger.exception("Error refreshing All-EuroLeague selections")
+        raise
+    finally:
+        session.close()
+
+
+def refresh_player_awards(
+    SessionFactory,
+    start_year: int,
+    end_year: int,
+    report_path: Path | None,
+    overrides_path: Path | None,
+    award: str,
+) -> None:
+    session = SessionFactory()
+    try:
+        report = ingest_player_awards(
+            session,
+            HttpPlayerAwardsAdapter(),
+            PlayerAwardsIngestOptions(
+                start_year=start_year,
+                end_year=end_year,
+                metrics=AWARD_OPTION_TO_METRICS[award],
+                overrides_path=overrides_path or ALL_EUROLEAGUE_OVERRIDES_PATH,
+                report_path=report_path,
+            ),
+        )
+        session.commit()
+        for award_report in report.awards.values():
+            logger.info(
+                "Player awards refreshed: metric=%s rows=%s accepted=%s "
+                "unmatched=%s ambiguous=%s excluded=%s active=%s",
+                award_report.metric,
+                award_report.in_range_rows,
+                award_report.accepted,
+                award_report.unmatched,
+                award_report.ambiguous,
+                award_report.excluded,
+                award_report.threshold_passed,
+            )
+    except Exception:
+        session.rollback()
+        logger.exception("Error refreshing EuroLeague player awards")
         raise
     finally:
         session.close()

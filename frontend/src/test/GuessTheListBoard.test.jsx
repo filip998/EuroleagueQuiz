@@ -278,3 +278,93 @@ describe("GuessTheListBoard All-EuroLeague rounds", () => {
     expect(screen.queryByText("Second Team")).not.toBeInTheDocument();
   });
 });
+
+describe("GuessTheListBoard award winner rounds", () => {
+  function awardWinnersGame(overrides = {}) {
+    return activeSoloGame({
+      round: {
+        status: "in_progress",
+        category_type: "award_winners",
+        metric: "regular_season_mvp",
+        scope_label: "EuroLeague MVPs · 2013/14-2020/21",
+        team_code: null,
+        team_name: null,
+        season_year: 2013,
+        guessed_count: 1,
+        total_slots: 2,
+        slots: [
+          {
+            id: 1,
+            position: "Guard",
+            nationality: "United States",
+            guessed_by_player: 1,
+            player_name: "Repeat Winner",
+            rank: 1,
+            stat_value_label: "MVP: 2013/14, 2014/15",
+          },
+          {
+            id: 2,
+            position: null,
+            nationality: null,
+            guessed_by_player: null,
+            player_name: null,
+            rank: 2,
+            stat_value_label: "MVP: 2020/21",
+          },
+        ],
+      },
+      ...overrides,
+    });
+  }
+
+  it("renders the scope label and revealed MVP season details without team chrome", () => {
+    render(
+      <GuessTheListBoard initialState={awardWinnersGame()} onNewGame={() => {}} onHome={() => {}} />
+    );
+
+    expect(screen.getByText("EuroLeague MVPs · 2013/14-2020/21")).toBeInTheDocument();
+    expect(screen.getByText("Repeat Winner")).toBeInTheDocument();
+    expect(screen.getByText("MVP")).toBeInTheDocument();
+    expect(screen.getByText("MVP: 2013/14, 2014/15")).toBeInTheDocument();
+    expect(screen.queryByTestId("club-logo")).not.toBeInTheDocument();
+  });
+
+  it("hides unclaimed award season details", () => {
+    render(
+      <GuessTheListBoard initialState={awardWinnersGame()} onNewGame={() => {}} onHome={() => {}} />
+    );
+
+    expect(screen.getByText("???")).toBeInTheDocument();
+    expect(screen.queryByText("MVP: 2020/21")).not.toBeInTheDocument();
+  });
+
+  it("uses an F4 badge for Final Four MVP rounds", () => {
+    render(
+      <GuessTheListBoard
+        initialState={awardWinnersGame({
+          round: {
+            ...awardWinnersGame().round,
+            metric: "final_four_mvp",
+            scope_label: "Final Four MVPs · 2010/11-2020/21",
+            slots: [
+              {
+                id: 1,
+                position: "Guard",
+                nationality: "Serbia",
+                guessed_by_player: 1,
+                player_name: "Final Star",
+                rank: 1,
+                stat_value_label: "F4 MVP: 2020/21",
+              },
+            ],
+          },
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+      />
+    );
+
+    expect(screen.getByText("F4")).toBeInTheDocument();
+    expect(screen.getByText("F4 MVP: 2020/21")).toBeInTheDocument();
+  });
+});

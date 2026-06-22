@@ -59,6 +59,7 @@ const CATEGORY_TYPES = [
   ["all_time", "All-Time Leaders"],
   ["single_season", "Single-Season Leaders"],
   ["all_euroleague", "All-EuroLeague Teams"],
+  ["award_winners", "MVP / Awards"],
 ];
 const SEASONS = Array.from({ length: 26 }, (_, i) => 2000 + i);
 const FULL_SEASON_RANGE = { start: SEASONS[0], end: SEASONS[SEASONS.length - 1] };
