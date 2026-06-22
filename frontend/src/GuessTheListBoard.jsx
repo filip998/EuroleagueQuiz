@@ -253,15 +253,24 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
     pendingEnd && isOnlineGame && myPlayer === pendingEnd.offered_by
   );
   const isMissingOnlineSeat = isOnlineGame && myPlayer == null;
+  const iWon = isOnline && myPlayer != null && game.winner_player === myPlayer;
+  let finishedReason = null;
+  if (lastResult === "opponent_left") {
+    finishedReason = iWon ? "Your opponent left the game." : "You left the game.";
+  }
 
   if (!isSolo && game.status === "finished" && !inTransition && !isRevealing) {
     const finishedWinnerName = winnerDisplayName(game);
     return (
       <GameResult
         title={finishedWinnerName ? `${finishedWinnerName} WINS!` : "No winner"}
-        subtitle={`${game.player1_name} ${game.player1_score} \u2013 ${game.player2_score} ${game.player2_name}`}
+        subtitle={
+          finishedReason ||
+          `${game.player1_name} ${game.player1_score} \u2013 ${game.player2_score} ${game.player2_name}`
+        }
         onPlayAgain={onNewGame}
         onHome={onHome}
+        celebrate={lastResult === "opponent_left" && iWon}
       />
     );
   }

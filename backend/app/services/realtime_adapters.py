@@ -289,7 +289,10 @@ class GuessTheListRealtimeAdapter:
         pass
 
     def disconnect_forfeit_eligible(self, game: Any) -> bool:
-        return bool(getattr(game, "is_race", False))
+        return (
+            getattr(game, "mode", None) == "online_friend"
+            and getattr(game, "status", None) == "active"
+        )
 
     def get_game(self, db: Session, game_id: int) -> Any:
         return guess_the_list_service.get_game_or_404(db, game_id)
@@ -562,9 +565,13 @@ class GuessTheListRealtimeAdapter:
         forfeiting_player: int,
         result: RealtimeResult,
     ) -> Any:
-        if not getattr(game, "is_race", False):
+        forfeited = guess_the_list_service.forfeit_online_game(
+            db,
+            game,
+            forfeiting_player=forfeiting_player,
+        )
+        if not forfeited:
             return GAME_ACTION_NOOP
-        guess_the_list_service.forfeit_online_game(db, game, forfeiting_player=forfeiting_player)
         return game
 
 

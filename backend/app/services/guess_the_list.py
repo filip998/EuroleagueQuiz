@@ -2218,12 +2218,11 @@ def forfeit_online_game(
     *,
     forfeiting_player: int,
 ) -> bool:
-    """Finish an online Guess the List Race game because one player resigned/disconnected.
+    """Finish an online Guess the List friend game because one player left.
 
-    The forfeiting player loses; the remaining player wins.  The current
-    active race round is completed so both sides see the roster reveal.
-    For non-race online games the function is a no-op (disconnect forfeits
-    are only enabled for Race games via the adapter's eligibility check).
+    The forfeiting player loses; the remaining player wins. The current active
+    round is completed when present so the terminal state can reveal the list;
+    Race keeps its reveal semantics through the serialized completed round.
     Idempotent: a no-op if the game is already finished.
 
     Returns ``True`` only when this call transitioned the game from

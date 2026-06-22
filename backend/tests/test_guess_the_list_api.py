@@ -2556,8 +2556,10 @@ async def test_guess_the_list_race_disconnect_grace_forfeits_active_game(client:
 
 
 @pytest.mark.asyncio
-async def test_guess_the_list_classic_online_disconnect_does_not_forfeit(client: TestClient):
-    """Classic (non-Race) online Guess the List games do NOT trigger disconnect forfeits."""
+async def test_guess_the_list_classic_disconnect_grace_forfeits_active_friend_game(
+    client: TestClient,
+):
+    """Disconnecting player 1 from an active Classic friend game forfeits the match."""
     create_resp = client.post(
         "/quiz/guess-the-list/games",
         json={
@@ -2591,14 +2593,57 @@ async def test_guess_the_list_classic_online_disconnect_does_not_forfeit(client:
         sleep=grace_sleep,
     )
     leaving = FakeWebSocket()
+    opponent = FakeWebSocket()
     await module.connections.connect(game_id, 1, leaving)
+    await module.connections.connect(game_id, 2, opponent)
 
     module.disconnect(game_id, 1, leaving)
-    # Grace timer should NOT start for non-Race games.
-    await drain_tasks(3)
-    assert not module.disconnect_grace_timer.has_game_timer(game_id)
+    await grace_sleep.wait_for_call()
+    grace_sleep.release()
+    await drain_tasks(5)
 
     with client.session_local() as db:
         stored = db.get(GuessTheListGame, game_id)
-        assert stored.status == "active"
-        assert stored.winner_player is None
+        assert stored.status == "finished"
+        assert stored.winner_player == 2
+
+    assert not module.disconnect_grace_timer.has_game_timer(game_id)
+    message = opponent.sent[-1]
+    RealtimeServerMessageAdapter.validate_python(message)
+    assert message["payload"]["result"] == "opponent_left"
+    assert message["payload"]["terminal"] is True
+    assert message["payload"]["game"]["winner_player"] == 2
+
+
+@pytest.mark.asyncio
+async def test_guess_the_list_classic_disconnect_grace_finishes_without_recipient_socket(
+    client: TestClient,
+):
+    """A Classic disconnect forfeit does not require the winner to still be connected."""
+    game = _create_joined_guess_the_list_classic(client)
+    game_id = game["id"]
+
+    grace_sleep = SleepController()
+    module = OnlineGameRealtimeModule(
+        GuessTheListRealtimeAdapter(),
+        session_factory=client.session_local,
+        disconnect_grace_seconds=3,
+    )
+    module.disconnect_grace_timer = DisconnectGraceTimerManager(
+        module._expire_disconnect_grace,
+        sleep=grace_sleep,
+    )
+    leaving = FakeWebSocket()
+    await module.connections.connect(game_id, 1, leaving)
+
+    module.disconnect(game_id, 1, leaving)
+    await grace_sleep.wait_for_call()
+    grace_sleep.release()
+    await drain_tasks(5)
+
+    with client.session_local() as db:
+        stored = db.get(GuessTheListGame, game_id)
+        assert stored.status == "finished"
+        assert stored.winner_player == 2
+
+    assert not module.disconnect_grace_timer.has_game_timer(game_id)
