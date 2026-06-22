@@ -20,6 +20,7 @@ from app.models import (
     PlayerSeasonStats,
     Season,
     Team,
+    TeamSeason,
 )
 from app.models.guess_the_list import GuessTheListGame, GuessTheListRound, GuessTheListSlot
 from app.schemas.realtime import RealtimeServerMessageAdapter
@@ -1457,6 +1458,262 @@ def test_award_winners_category_is_registered_and_hides_active_answers(
         "MVP: 2013/14, 2014/15"
     )
     assert completed_round["slots"][-1]["stat_value_label"] == "MVP: 2020/21"
+
+
+@pytest.fixture()
+def champion_rosters_db():
+    engine = create_engine("sqlite:///:memory:")
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    session = TestingSessionLocal()
+    try:
+        _seed_champion_rosters_fixture(session)
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def _seed_champion_rosters_fixture(session):
+    champion_2023 = Team(
+        euroleague_code="C23",
+        name="Champion Club 2023",
+        short_name="Champions 23",
+    )
+    champion_2024 = Team(
+        euroleague_code="C24",
+        name="Champion Club 2024",
+        short_name="Champions 24",
+    )
+    other_team = Team(euroleague_code="OTH", name="Other Club")
+    thin_team = Team(euroleague_code="THN", name="Thin Champion")
+    session.add_all([champion_2023, champion_2024, other_team, thin_team])
+    session.flush()
+
+    seasons = {
+        2023: Season(
+            year=2023,
+            name="2023-2024",
+            champion_team_id=champion_2023.id,
+        ),
+        2024: Season(
+            year=2024,
+            name="2024-2025",
+            champion_team_id=champion_2024.id,
+        ),
+        2025: Season(
+            year=2025,
+            name="2025-2026",
+            champion_team_id=thin_team.id,
+        ),
+    }
+    session.add_all(seasons.values())
+    session.flush()
+    session.add(
+        TeamSeason(
+            team_id=champion_2024.id,
+            season_id=seasons[2024].id,
+            team_name_that_season="Title Sponsor 2024",
+        )
+    )
+
+    def add_player(
+        *,
+        year: int,
+        team: Team,
+        index: int,
+        first_prefix: str,
+        is_champion: bool,
+    ):
+        player = Player(
+            euroleague_code=f"CHR{year}{team.euroleague_code}{index:02}",
+            first_name=f"{first_prefix}{year}{index:02}",
+            last_name="Player",
+            nationality="Spain" if index % 2 else "Greece",
+            position="Guard" if index <= 3 else "Forward",
+            height_cm=185 + index,
+        )
+        session.add(player)
+        session.flush()
+        stint = PlayerSeasonTeam(
+            player_id=player.id,
+            team_id=team.id,
+            season_id=seasons[year].id,
+            jersey_number=str(index),
+            is_champion=is_champion,
+        )
+        session.add(stint)
+        session.flush()
+        return player, stint
+
+    for year, team in ((2023, champion_2023), (2024, champion_2024)):
+        for index in range(1, 7):
+            add_player(
+                year=year,
+                team=team,
+                index=index,
+                first_prefix="Champion",
+                is_champion=True,
+            )
+        add_player(
+            year=year,
+            team=team,
+            index=90,
+            first_prefix="Unflagged",
+            is_champion=False,
+        )
+        add_player(
+            year=year,
+            team=other_team,
+            index=91,
+            first_prefix="Other",
+            is_champion=True,
+        )
+
+    for index in range(1, 5):
+        add_player(
+            year=2025,
+            team=thin_team,
+            index=index,
+            first_prefix="Thin",
+            is_champion=True,
+        )
+    session.commit()
+
+
+def _new_champions_game(start_year=2023, end_year=2025):
+    game = _new_single_season_game(start_year, end_year)
+    game.category_type = guess_the_list_service.CATEGORY_CHAMPIONS
+    return game
+
+
+def test_champions_generator_uses_champion_flags_and_scope_details(
+    champion_rosters_db,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        guess_the_list_service.random,
+        "choice",
+        lambda rows: next(row for row in rows if int(row.season_year) == 2024),
+    )
+
+    spec = guess_the_list_service.ChampionRosterGenerator().build_round(
+        champion_rosters_db,
+        _new_champions_game(),
+        1,
+    )
+
+    assert spec.category_type == guess_the_list_service.CATEGORY_CHAMPIONS
+    assert spec.metric is None
+    assert spec.scope_label == "Champions · 2024/25 · Title Sponsor 2024"
+    assert spec.team_code == "C24"
+    assert spec.team_name == "Title Sponsor 2024"
+    assert spec.season_year == 2024
+    assert len(spec.slots) == 6
+    assert all(slot.player_name.startswith("Champion2024") for slot in spec.slots)
+    assert "Unflagged202490 Player" not in [slot.player_name for slot in spec.slots]
+    assert "Other202491 Player" not in [slot.player_name for slot in spec.slots]
+    assert [slot.jersey_number for slot in spec.slots] == ["1", "2", "3", "4", "5", "6"]
+
+
+def test_champions_category_is_registered_and_preserves_roster_hints(
+    champion_rosters_db,
+    monkeypatch,
+):
+    assert (
+        guess_the_list_service.ROUND_GENERATOR_REGISTRY[
+            guess_the_list_service.CATEGORY_CHAMPIONS
+        ]
+        is not None
+    )
+    monkeypatch.setattr(
+        guess_the_list_service.random,
+        "choice",
+        lambda rows: rows[0],
+    )
+
+    game = guess_the_list_service.create_game(
+        champion_rosters_db,
+        mode="single_player",
+        target_wins=2,
+        timer_mode="40s",
+        category_type=guess_the_list_service.CATEGORY_CHAMPIONS,
+        player1_name="Player One",
+        season_range_start=2023,
+        season_range_end=2023,
+    )
+
+    state = guess_the_list_service.serialize_game_state(champion_rosters_db, game)
+    active_round = state["round"]
+    assert state["category_type"] == guess_the_list_service.CATEGORY_CHAMPIONS
+    assert active_round["category_type"] == guess_the_list_service.CATEGORY_CHAMPIONS
+    assert active_round["scope_label"] == "Champions · 2023/24 · Champion Club 2023"
+    assert active_round["team_code"] == "C23"
+    assert active_round["team_name"] == "Champion Club 2023"
+    assert active_round["total_slots"] == 6
+    assert all(
+        slot["player_name"] is None
+        and slot["jersey_number"] is not None
+        and slot["position"] is not None
+        and slot["nationality"] is not None
+        and slot["height_cm"] is not None
+        for slot in active_round["slots"]
+    )
+
+    round_obj = guess_the_list_service.get_active_round(champion_rosters_db, game.id)
+    round_obj.status = "completed"
+    round_obj.completed_at = datetime.utcnow()
+    champion_rosters_db.flush()
+
+    completed_round = guess_the_list_service.serialize_completed_round(
+        champion_rosters_db,
+        game.id,
+        round_obj.round_number,
+    )
+    assert completed_round is not None
+    assert completed_round["scope_label"] == "Champions · 2023/24 · Champion Club 2023"
+    assert all(slot["player_name"] for slot in completed_round["slots"])
+    assert [slot["jersey_number"] for slot in completed_round["slots"]] == [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+    ]
+
+
+def test_champions_generator_prefers_unused_seasons_before_repeating(
+    champion_rosters_db,
+    monkeypatch,
+):
+    monkeypatch.setattr(guess_the_list_service.random, "choice", lambda rows: rows[0])
+    game = _new_champions_game(2023, 2024)
+    champion_rosters_db.add(game)
+    champion_rosters_db.flush()
+
+    created_years = []
+    for _ in range(3):
+        round_obj = guess_the_list_service._create_next_round(champion_rosters_db, game)
+        created_years.append(round_obj.season_year)
+        round_obj.status = "completed"
+        round_obj.completed_at = datetime.utcnow()
+        champion_rosters_db.flush()
+
+    assert created_years[:2] == [2023, 2024]
+    assert created_years[2] == 2023
+
+
+def test_champions_generator_rejects_ranges_without_playable_title_roster(
+    champion_rosters_db,
+):
+    with pytest.raises(guess_the_list_service.GuessTheListError, match="champion roster"):
+        guess_the_list_service.ChampionRosterGenerator().build_round(
+            champion_rosters_db,
+            _new_champions_game(2025, 2025),
+            1,
+        )
 
 
 def test_legacy_roster_guess_http_routes_alias_guess_the_list(client: TestClient):

@@ -489,3 +489,58 @@ describe("GuessTheListRaceBoard leaderboard rounds", () => {
     expect(screen.queryByText("3,500 pts")).not.toBeInTheDocument();
   });
 });
+
+describe("GuessTheListRaceBoard Champions rounds", () => {
+  it("renders the Champions scope label while keeping roster-style claim rows", () => {
+    render(
+      <GuessTheListRaceBoard
+        initialState={activeRaceGame({
+          round: {
+            id: 57,
+            round_number: 4,
+            status: "active",
+            category_type: "champions",
+            scope_label: "Champions · 2024/25 · Fenerbahce Beko",
+            team_code: "ULK",
+            team_name: "Fenerbahce Beko",
+            season_year: 2024,
+            player1_correct: 1,
+            player2_correct: 0,
+            guessed_count: 1,
+            total_slots: 2,
+            slots: [
+              {
+                id: 1,
+                player_name: "Nigel Hayes-Davis",
+                position: "Forward",
+                nationality: "United States",
+                jersey_number: "24",
+                image_url: null,
+                guessed_by_player: 1,
+              },
+              {
+                id: 2,
+                player_name: null,
+                position: "Guard",
+                nationality: "Greece",
+                jersey_number: "33",
+                image_url: null,
+                guessed_by_player: null,
+              },
+            ],
+          },
+        })}
+        onlineInfo={{ playerNumber: 1 }}
+        onNewGame={vi.fn()}
+        onHome={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Champions · 2024/25 · Fenerbahce Beko")).toBeInTheDocument();
+    expect(screen.getByText("Nigel Hayes-Davis")).toBeInTheDocument();
+    expect(screen.getByText("24")).toBeInTheDocument();
+    expect(screen.getByText("33")).toBeInTheDocument();
+    expect(screen.getByText("???")).toBeInTheDocument();
+    expect(screen.queryByTestId("club-logo")).not.toBeInTheDocument();
+  });
+});

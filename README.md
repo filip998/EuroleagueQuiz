@@ -27,7 +27,7 @@ Then open `http://localhost:5173` to play.
 ## Games
 
 - **TicTacToe** — Claim cells on a 3×3 board by naming players who match both the row and column clue. Clues go beyond teams: shared teammates, nationality, season, position (Guard/Forward/Center), EuroLeague champions, and stat milestones (e.g. 15+ PPG). Solo, local 1v1, and online modes. Opening `/tictactoe` lands on online **Quick Match** — a near-one-click, lichess-style pool grid — with Solo, Local 1v1, and Play-a-Friend one tap away.
-- **Guess the List** — Guess rosters, all-time leaders, single-season leaders, and All-EuroLeague First+Second Teams by season. Solo, local/online Classic, plus online-only Race with public Quick Match and private Play-a-Friend.
+- **Guess the List** — Guess rosters, champion rosters, all-time leaders, single-season leaders, All-EuroLeague First+Second Teams, and MVP/Awards windows. Solo, local/online Classic, plus online-only Race with public Quick Match and private Play-a-Friend.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice, 2-player online friend races, and public Quick Match races.
 - **Photo Quiz** — Guess the player from a headshot. Solo practice, 2-player online friend races, and public Quick Match races, drawn from players with a Wikipedia page and either a EuroLeague CDN or Wikipedia image.
@@ -139,6 +139,7 @@ The initial local baseline is recorded in
 cd backend
 python -m ingestion.ingest --start-season 2000 --end-season 2025
 python -m ingestion.ingest --step stat-milestones
+python -m ingestion.ingest --step champions --start-season 2000 --end-season 2025
 python -m ingestion.ingest --step all-euroleague --start-season 2000 --end-season 2025
 python -m ingestion.ingest --step player-awards --start-season 2000 --end-season 2025
 ```
@@ -147,6 +148,13 @@ The aggregate ingestion path refreshes TicTacToe stat-milestone eligibility afte
 season stats are rebuilt. `--step stat-milestones` reruns only that derived-table
 precompute when raw `player_season_stats` / `game_player_stats` data already
 exists.
+
+`--step champions` refreshes curated EuroLeague champion teams and title-squad
+flags in `seasons.champion_team_id` and `player_season_teams.is_champion`.
+Guess the List Champions rounds use those existing flags as champion-roster
+lists with roster hints; the tracked database currently has 24 playable champion
+seasons from 2000-2025, excluding canceled 2019-20 and the curated 2025-26
+champion until title-roster rows are ingested.
 
 `--step all-euroleague` refreshes review-gated All-EuroLeague Team selections
 from the Wikipedia API into `award_data_revisions` and
@@ -388,8 +396,8 @@ shared-component code is required.
 Guess the List keeps Solo, Local 1v1, and Online as its top-level setup choices. Inside
 Online, players choose **Classic** (the existing turn-based Create/Join flow) or **Race**.
 Race is online-only: both players see the same list and claim players simultaneously,
-with each player awarded to the first competitor to name them. Friend races use roster
-lists from the selected season range; public Quick Match races use length-only pools
+with each player awarded to the first competitor to name them. Friend races use the
+selected list type and season range; public Quick Match races use length-only pools
 and randomize each round among roster, all-time leaderboard, and single-season
 leaderboard lists. The round ends when the 120-second timer expires or the full list is
 claimed; higher claim count wins the round, ties award no point, and non-terminal rounds
