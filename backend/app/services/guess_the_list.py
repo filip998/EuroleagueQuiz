@@ -2778,14 +2778,18 @@ def _hidden_slot_order_key(round_id: int, slot_id: int) -> str:
 
 
 def _serialize_slot(slot, round_over: bool, *, category_type: str) -> dict:
+    clean_category_type = _clean_category_type(category_type)
     show_answer = slot.guessed_by_player is not None or round_over
-    show_hints = show_answer or _is_roster_like_category(category_type)
+    show_full_hints = show_answer or _is_roster_like_category(clean_category_type)
+    show_nationality_hint = (
+        show_full_hints or clean_category_type == CATEGORY_ALL_EUROLEAGUE
+    )
     data = {
         "id": slot.id,
-        "jersey_number": slot.jersey_number if show_hints else None,
-        "position": slot.position if show_hints else None,
-        "nationality": slot.nationality if show_hints else None,
-        "height_cm": slot.height_cm if show_hints else None,
+        "jersey_number": slot.jersey_number if show_full_hints else None,
+        "position": slot.position if show_full_hints else None,
+        "nationality": slot.nationality if show_nationality_hint else None,
+        "height_cm": slot.height_cm if show_full_hints else None,
         "guessed_by_player": slot.guessed_by_player,
         "guessed_at": _utc_isoformat(slot.guessed_at),
         "player_name": slot.player_name if show_answer else None,
@@ -2798,7 +2802,7 @@ def _serialize_slot(slot, round_over: bool, *, category_type: str) -> dict:
         "stat_value_label": slot.stat_value_label if show_answer else None,
     }
     # Include country code for flag display
-    if show_hints and slot.nationality:
+    if show_nationality_hint and slot.nationality:
         code = NATIONALITY_TO_COUNTRY_CODE.get(slot.nationality)
         if code:
             data["country_code"] = code
