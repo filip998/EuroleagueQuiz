@@ -13,7 +13,7 @@ import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import { optimizeHeadshot, handleHeadshotError, HEADSHOT_WIDTHS } from "./imageUrl";
 import WaitingLobby from "./WaitingLobby";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
-import { buildInviteUrl } from "./inviteLink";
+import { buildInviteUrl, MODE_PARAM, RACE_INVITE_MODE } from "./inviteLink";
 import { clearOnlineInfo } from "./onlineRecovery";
 import { forgetQuickMatchSeat } from "./quickMatchSeats";
 import {
@@ -247,7 +247,9 @@ export default function GuessTheListRaceBoard({ initialState, onlineInfo, onNewG
     return (
       <WaitingLobby
         joinCode={game.join_code}
-        inviteUrl={buildInviteUrl(game.join_code, "/list")}
+        inviteUrl={buildInviteUrl(game.join_code, "/list", undefined, {
+          [MODE_PARAM]: RACE_INVITE_MODE,
+        })}
         onCancel={onNewGame}
       />
     );

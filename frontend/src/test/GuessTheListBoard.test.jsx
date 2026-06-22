@@ -26,6 +26,7 @@ vi.mock("../ClubLogo", () => ({
 
 import GuessTheListBoard from "../GuessTheListBoard";
 import { offerEndRound, respondEndRound, resignGuessTheListGame } from "../api";
+import { buildInviteUrl } from "../inviteLink";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -721,5 +722,56 @@ describe("GuessTheListBoard Champions rounds", () => {
     expect(screen.getByText("???")).toBeInTheDocument();
     expect(screen.queryByText("Hidden Champion")).not.toBeInTheDocument();
     expect(screen.queryByTestId("club-logo")).not.toBeInTheDocument();
+  });
+});
+
+describe("GuessTheListBoard Classic friend waiting lobby", () => {
+  it("renders the shared WaitingLobby with copy-code and a Classic invite link", () => {
+    const onNewGame = vi.fn();
+    render(
+      <GuessTheListBoard
+        initialState={onlineClassicGame({
+          status: "waiting_for_opponent",
+          join_code: "ABC123",
+        })}
+        onNewGame={onNewGame}
+        onHome={vi.fn()}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    expect(screen.getByText("WAITING FOR OPPONENT")).toBeInTheDocument();
+    expect(screen.getByText("ABC123")).toBeInTheDocument();
+    expect(screen.getByText("Copy code")).toBeInTheDocument();
+
+    // The Classic invite link is a bare /list?join= (no mode=race), so it opens
+    // Classic -> Join rather than the Race friend flow.
+    const inviteUrl = buildInviteUrl("ABC123", "/list");
+    const url = new URL(inviteUrl);
+    expect(url.pathname).toBe("/list");
+    expect(url.searchParams.get("join")).toBe("ABC123");
+    expect(url.searchParams.get("mode")).toBeNull();
+    expect(screen.getByText(inviteUrl)).toBeInTheDocument();
+    expect(screen.getByText("Copy link")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(onNewGame).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the invite link when no valid join code exists but still renders the lobby", () => {
+    render(
+      <GuessTheListBoard
+        initialState={onlineClassicGame({
+          status: "waiting_for_opponent",
+          join_code: null,
+        })}
+        onNewGame={vi.fn()}
+        onHome={vi.fn()}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    expect(screen.getByText("WAITING FOR OPPONENT")).toBeInTheDocument();
+    expect(screen.queryByText("Copy link")).not.toBeInTheDocument();
   });
 });

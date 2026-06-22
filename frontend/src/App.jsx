@@ -14,7 +14,7 @@ import PhotoQuizBoard from "./PhotoQuizBoard";
 import HomeQuickMatchCta, { HomePlayCta } from "./HomeQuickMatchCta";
 import { LogoFull } from "./Logo";
 import { getCareerGame, getGame, getPhotoGame, getGuessTheListGame } from "./api";
-import { parseJoinCode } from "./inviteLink";
+import { parseJoinCode, parseInviteMode, RACE_INVITE_MODE } from "./inviteLink";
 import {
   saveOnlineInfo,
   recoverCareerOnlineInfo,
@@ -231,6 +231,25 @@ function GuessTheListSetupPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const isQuickRace = new URLSearchParams(location.search).get("quick") === "1";
+  // Quick Match wins over any invite code, so it never opens a friend join.
+  const joinCode = isQuickRace ? "" : parseJoinCode(location.search);
+  const isRaceJoin = Boolean(joinCode) && parseInviteMode(location.search) === RACE_INVITE_MODE;
+
+  let initialMode = "solo";
+  let initialOnlineGameType = "classic";
+  if (isQuickRace) {
+    initialMode = "online";
+    initialOnlineGameType = "race";
+  } else if (joinCode) {
+    initialMode = "online";
+    initialOnlineGameType = isRaceJoin ? "race" : "classic";
+  }
+
+  const setupKey = isQuickRace
+    ? "race-quick"
+    : joinCode
+      ? `join-${initialOnlineGameType}-${joinCode}`
+      : "default";
 
   function handleGameCreated(resp, online) {
     const gameData = resp.state || resp.game || resp;
@@ -241,9 +260,10 @@ function GuessTheListSetupPage() {
 
   return (
     <GuessTheListSetup
-      key={isQuickRace ? "race-quick" : "default"}
-      initialMode={isQuickRace ? "online" : "solo"}
-      initialOnlineGameType={isQuickRace ? "race" : "classic"}
+      key={setupKey}
+      initialMode={initialMode}
+      initialOnlineGameType={initialOnlineGameType}
+      initialJoinCode={joinCode}
       onGameCreated={handleGameCreated}
       onBack={() => navigate("/")}
     />

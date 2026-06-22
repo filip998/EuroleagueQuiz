@@ -15,11 +15,12 @@ vi.mock("../GameBoard", () => ({
   default: () => <div data-testid="game-board" />,
 }));
 vi.mock("../GuessTheListSetup", () => ({
-  default: ({ onBack, initialMode, initialOnlineGameType }) => (
+  default: ({ onBack, initialMode, initialOnlineGameType, initialJoinCode }) => (
     <div
       data-testid="guess-the-list-setup"
       data-initial-mode={initialMode || ""}
       data-initial-online-game-type={initialOnlineGameType || ""}
+      data-initial-join-code={initialJoinCode || ""}
     >
       <button onClick={onBack}>Back</button>
     </div>
@@ -133,6 +134,78 @@ describe("App", () => {
     expect(setup).toBeInTheDocument();
     expect(setup).toHaveAttribute("data-initial-mode", "online");
     expect(setup).toHaveAttribute("data-initial-online-game-type", "race");
+  });
+
+  it("opens Guess the List Online → Classic → Join with a prefilled code from /list?join=", () => {
+    render(
+      <MemoryRouter initialEntries={["/list?join=abc123"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("guess-the-list-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-online-game-type", "classic");
+    expect(setup).toHaveAttribute("data-initial-join-code", "ABC123");
+  });
+
+  it("opens Guess the List Online → Race friend join from /list?mode=race&join=", () => {
+    render(
+      <MemoryRouter initialEntries={["/list?mode=race&join=abc123"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("guess-the-list-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-online-game-type", "race");
+    expect(setup).toHaveAttribute("data-initial-join-code", "ABC123");
+  });
+
+  it("keeps /list?quick=1 on Race Quick Match and ignores any invite code", () => {
+    render(
+      <MemoryRouter initialEntries={["/list?quick=1&join=abc123"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("guess-the-list-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-online-game-type", "race");
+    expect(setup).toHaveAttribute("data-initial-join-code", "");
+  });
+
+  it("ignores an invalid /list?join= code and falls back to Solo setup", () => {
+    render(
+      <MemoryRouter initialEntries={["/list?join=bad"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("guess-the-list-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "solo");
+    expect(setup).toHaveAttribute("data-initial-online-game-type", "classic");
+    expect(setup).toHaveAttribute("data-initial-join-code", "");
+  });
+
+  it("redirects legacy /roster?join= to Guess setup Classic join preserving the code", () => {
+    render(
+      <MemoryRouter initialEntries={["/roster?join=abc123"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("guess-the-list-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-online-game-type", "classic");
+    expect(setup).toHaveAttribute("data-initial-join-code", "ABC123");
+  });
+
+  it("redirects legacy /roster?mode=race&join= to Guess setup Race friend join", () => {
+    render(
+      <MemoryRouter initialEntries={["/roster?mode=race&join=abc123"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("guess-the-list-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-online-game-type", "race");
+    expect(setup).toHaveAttribute("data-initial-join-code", "ABC123");
   });
 
   it("navigates to Higher or Lower setup when clicking the card", () => {

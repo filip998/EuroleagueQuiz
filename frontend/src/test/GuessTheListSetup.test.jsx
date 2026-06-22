@@ -4,6 +4,7 @@ import GuessTheListSetup from "../GuessTheListSetup";
 import {
   createGuessTheListGame,
   createGuessTheListRaceGame,
+  joinGuessTheListGame,
   joinGuessTheListRaceGame,
   quickMatchGuessTheListRace,
 } from "../api";
@@ -184,6 +185,41 @@ describe("GuessTheListSetup", () => {
       { state: { id: 22, status: "active" } },
       { playerNumber: 2, isOnline: true, gameId: 22 }
     );
+  });
+
+  it("prefills Classic Join from initialJoinCode and joins by that code", async () => {
+    joinGuessTheListGame.mockResolvedValue({ state: { id: 30, status: "active" } });
+
+    renderSetup({
+      initialMode: "online",
+      initialOnlineGameType: "classic",
+      initialJoinCode: "abc123",
+    });
+
+    expect(screen.getByDisplayValue("ABC123")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Join Game"));
+
+    await waitFor(() => expect(onGameCreated).toHaveBeenCalled());
+    expect(joinGuessTheListGame).toHaveBeenCalledWith("ABC123", "Ace");
+    expect(createGuessTheListGame).not.toHaveBeenCalled();
+    expect(joinGuessTheListRaceGame).not.toHaveBeenCalled();
+  });
+
+  it("prefills Race friend Join from initialJoinCode and joins the race by that code", async () => {
+    joinGuessTheListRaceGame.mockResolvedValue({ state: { id: 31, status: "active" } });
+
+    renderSetup({
+      initialMode: "online",
+      initialOnlineGameType: "race",
+      initialJoinCode: "abc123",
+    });
+
+    expect(screen.getByDisplayValue("ABC123")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Join Game"));
+
+    await waitFor(() => expect(onGameCreated).toHaveBeenCalled());
+    expect(joinGuessTheListRaceGame).toHaveBeenCalledWith("ABC123", "Ace");
+    expect(joinGuessTheListGame).not.toHaveBeenCalled();
   });
 
   it("defaults the Solo list type to roster", async () => {
