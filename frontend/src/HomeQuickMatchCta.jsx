@@ -16,7 +16,8 @@ const PLAY_ICON = (
  * Shared persistent home-card call-to-action button. Rendered as its own `<Link>`
  * so it can sit beside a card's main link without nesting anchors. Game-agnostic:
  * pass the destination route in `to`, plus a `label`, optional `icon`, and a
- * `testid`. The orange button styling is the single source of truth for every
+ * `testid`. The CTA fill is the `--color-elq-cta` token (the accessible darker
+ * orange under the refined variant) and is the single source of truth for every
  * home-card CTA so the grid stays uniform.
  */
 export function HomeCardCta({ to, label, icon = null, testid }) {
@@ -25,7 +26,7 @@ export function HomeCardCta({ to, label, icon = null, testid }) {
       to={to}
       data-testid={testid}
       onClick={(e) => e.stopPropagation()}
-      className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-elq-orange px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white transition-colors hover:bg-elq-orange-dark"
+      className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-elq-cta px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white transition-colors hover:bg-elq-cta-dark"
     >
       {icon}
       {label}
