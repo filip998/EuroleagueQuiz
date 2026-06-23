@@ -226,6 +226,14 @@ const FLAGSHIP_BOARD = [
   null,
 ];
 
+// Compact "how it works" rules shown on the flagship card (game rules only —
+// mode guidance lives elsewhere). Kept short so the 3-step list never overflows.
+const FLAGSHIP_STEPS = [
+  "Pick a cell on the grid",
+  "Name a player who fits both clues",
+  "Claim it to build your line",
+];
+
 function HomeStat({ value, label }) {
   return (
     <div className="flex items-baseline gap-2">
@@ -326,9 +334,9 @@ function HomePageRefined() {
             {/* Flagship Tic-Tac-Toe. Wrapper is a <div> (not an anchor) so the two
                 sibling links — the body Link and the Quick Match CTA Link — never
                 nest. "Solo · 1v1 · Online" is a non-link affordance. */}
-            <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-elq-border bg-gradient-to-b from-white to-orange-50/40 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-elq-orange/40 hover:shadow-lg lg:col-span-7">
+            <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-elq-border bg-gradient-to-b from-white to-orange-50/40 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-elq-orange/40 hover:shadow-lg lg:col-span-7 lg:self-start">
               <span aria-hidden="true" className="absolute inset-x-0 top-0 h-1 bg-elq-orange" />
-              <div className="grid flex-1 content-center gap-6 p-6 sm:p-8 md:grid-cols-[1.1fr_0.9fr] md:items-center">
+              <div className="grid gap-6 p-6 sm:p-8 md:grid-cols-[1.1fr_0.9fr]">
                 <div className="flex flex-col">
                   <div className="flex items-center justify-between gap-3">
                     <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-orange-200 bg-orange-50 text-elq-cta">
@@ -344,6 +352,16 @@ function HomePageRefined() {
                       Claim cells on a 3×3 grid by naming players who match both the row and column clue. Outsmart a friend or beat the clock.
                     </p>
                   </Link>
+                  <ol className="mt-6 flex flex-col gap-2.5">
+                    {FLAGSHIP_STEPS.map((step, i) => (
+                      <li key={step} className="flex items-center gap-2.5">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-orange-200 bg-orange-50 text-[11px] font-bold text-elq-cta">
+                          {i + 1}
+                        </span>
+                        <span className="text-sm leading-snug text-elq-muted">{step}</span>
+                      </li>
+                    ))}
+                  </ol>
                   <div className="flex flex-wrap items-center gap-3">
                     <HomeQuickMatchCta to="/tictactoe" />
                     <span className="mt-4 inline-flex items-center rounded-lg border border-elq-border bg-white px-3 py-1.5 text-xs font-semibold text-elq-text">
@@ -364,7 +382,7 @@ function HomePageRefined() {
                   </div>
                 </div>
 
-                <div aria-hidden="true" className="hidden aspect-square w-full max-w-[236px] grid-cols-3 gap-2 justify-self-end md:grid">
+                <div aria-hidden="true" className="hidden aspect-square w-full max-w-[260px] grid-cols-3 gap-2 justify-self-end self-center md:grid">
                   {FLAGSHIP_BOARD.map((cell, i) => {
                     if (cell?.kind === "c") {
                       return (

@@ -304,4 +304,19 @@ describe("HomePage UI variant", () => {
       unmount();
     }
   });
+
+  it("shows the flagship 'how it works' steps in refined but not classic", () => {
+    const { unmount } = render(
+      <MemoryRouter><HomePage variant="refined" /></MemoryRouter>
+    );
+    expect(
+      screen.getByText("Name a player who fits both clues")
+    ).toBeInTheDocument();
+    unmount();
+
+    render(<MemoryRouter><HomePage variant="classic" /></MemoryRouter>);
+    expect(
+      screen.queryByText("Name a player who fits both clues")
+    ).not.toBeInTheDocument();
+  });
 });
