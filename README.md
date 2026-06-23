@@ -334,6 +334,40 @@ npm run dev
 
 Opens at `http://localhost:5173`.
 
+### Home page & UI variant (Refined Light)
+
+The home page ships in two interchangeable variants, selected once at build time
+by the `VITE_UI_VARIANT` environment variable and resolved in
+`frontend/src/uiVariant.js`:
+
+- **`refined`** *(default)* — the "Refined Light" home: a centered hero
+  (`HOW WELL DO YOU KNOW THE EUROLEAGUE?`), a static stat strip, and a
+  `Choose your game` lobby with a flagship **Tic-Tac-Toe** card beside a 2×2 grid
+  of the four other modes. Each card keeps its existing route, `HomeQuickMatchCta` /
+  `HomePlayCta`, and test IDs.
+- **`classic`** — the original flat five-card grid, preserved pixel-for-pixel. Set
+  `VITE_UI_VARIANT=classic` (e.g. in `frontend/.env.development` or the deploy build)
+  to fall back instantly with no code change.
+
+`App.jsx` exposes `HomePageClassic`, `HomePageRefined`, and a `HomePage({ variant })`
+selector (defaulting to `UI_VARIANT`) so the route stays `<HomePage />` and tests can
+render either variant deterministically. `main.jsx` writes the active variant to
+`document.documentElement.dataset.ui` at boot.
+
+**Accessible color tokens.** The refined variant darkens shared tokens in
+`frontend/src/index.css` to meet WCAG AA, scoped under a higher-specificity
+`html[data-ui="refined"]` block so the classic defaults in `@theme` are untouched:
+
+- `--color-elq-muted` → `#566677` (≈5.9:1 on white, ≈5.5:1 on `--color-elq-bg`) for
+  body/label/placeholder text.
+- New `--color-elq-cta` / `--color-elq-cta-dark` drive the primary-CTA fill; the
+  refined variant points them at `#C2410C` / `#9A3412` so white button text clears AA
+  (≈5.2:1), while classic maps them to the original `#FF6600` / `#E85D00`. The shared
+  `HomeQuickMatchCta` / `HomePlayCta` buttons use `bg-elq-cta`.
+
+A `prefers-reduced-motion: reduce` guard disables the entrance reveals
+(`.animate-fade-in-up`, `.animate-slide-down`) without ever gating content visibility.
+
 ### Shared Pre-Game Setup UX
 
 Every game's pre-game screen is built from three shared building blocks in `frontend/src/`:

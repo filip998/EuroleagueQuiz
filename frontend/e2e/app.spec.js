@@ -5,7 +5,7 @@ const backendUrl = `http://127.0.0.1:${backendPort}`;
 
 async function startTicTacToeQuickMatch(page, { nickname, preset = "Standard" }) {
   await page.goto("/");
-  await page.getByText("TICTACTOE").click();
+  await page.getByText("TIC-TAC-TOE").click();
   // /tictactoe lands directly on Online -> Quick Match. Set the optional name,
   // then a single tap on the pool card enters the pool (no Find Match button).
   await page.getByPlaceholder("Your name").fill(nickname);
@@ -86,7 +86,7 @@ test.describe("Home Page", () => {
   test("displays all three game mode cards", async ({ page }) => {
     await page.goto("/");
 
-    await expect(page.getByText("TICTACTOE")).toBeVisible();
+    await expect(page.getByText("TIC-TAC-TOE")).toBeVisible();
     await expect(page.getByText("GUESS THE LIST")).toBeVisible();
     await expect(page.getByText("HIGHER OR LOWER")).toBeVisible();
     await expect(page.getByText("Choose your game")).toBeVisible();
@@ -94,7 +94,7 @@ test.describe("Home Page", () => {
 
   test("navigates to TicTacToe setup and lands on Quick Match", async ({ page }) => {
     await page.goto("/");
-    await page.getByText("TICTACTOE").click();
+    await page.getByText("TIC-TAC-TOE").click();
 
     await expect(page.getByText("Game Mode")).toBeVisible();
     // Default landing is Online -> Quick Match (pool grid first).
@@ -117,7 +117,7 @@ test.describe("Home Page", () => {
 
   test("shows the Quick Match pool grid by default under Online", async ({ page }) => {
     await page.goto("/");
-    await page.getByText("TICTACTOE").click();
+    await page.getByText("TIC-TAC-TOE").click();
 
     // Online -> Quick Match is the default: a one-click pool grid, not the old
     // Create/Join toggle or a separate Find Match button.
@@ -130,7 +130,7 @@ test.describe("Home Page", () => {
 
   test("reveals the join-code form via Online then Play a Friend then Join", async ({ page }) => {
     await page.goto("/");
-    await page.getByText("TICTACTOE").click();
+    await page.getByText("TIC-TAC-TOE").click();
 
     // Online is already the default mode; switch the sub-mode to Play a Friend.
     await page.getByRole("button", { name: "Play a Friend" }).click();
@@ -173,11 +173,13 @@ test.describe("Home Page", () => {
 test.describe("TicTacToe Flow", () => {
   test("can create a solo game and see the board", async ({ page }) => {
     await page.goto("/");
-    await page.getByText("TICTACTOE").click();
+    await page.getByText("TIC-TAC-TOE").click();
 
-    // Quick Match is now the default landing; Solo is one tap away.
-    await page.getByText("Solo").click();
-    await page.getByText("Start Game").click();
+    // Quick Match is now the default landing; Solo is one tap away. Use the
+    // setup-page mode button (role-based) so this auto-waits through the SPA
+    // navigation and never matches the home page's "Solo" affordance text.
+    await page.getByRole("button", { name: "Solo" }).click();
+    await page.getByRole("button", { name: "Start Game" }).click();
 
     // Should see the game board with team names in headers
     await expect(page.locator("table, [class*='grid']").first()).toBeVisible({

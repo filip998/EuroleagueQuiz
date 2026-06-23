@@ -4,6 +4,8 @@
   --color-elq-orange: #FF6600;
   --color-elq-orange-light: #FF8533;
   --color-elq-orange-dark: #E85D00;
+  --color-elq-cta: #FF6600;
+  --color-elq-cta-dark: #E85D00;
   --color-elq-dark: #0F1923;
   --color-elq-bg: #F5F6F8;
   --color-elq-card: #FFFFFF;
@@ -18,6 +20,22 @@
   --color-elq-warning: #D97706;
   --font-display: "Bebas Neue", "Impact", sans-serif;
   --font-sans: "DM Sans", system-ui, sans-serif;
+}
+
+/*
+ * Refined Light token overrides. The `@theme` values above stay the classic
+ * defaults so `VITE_UI_VARIANT=classic` is pixel-for-pixel the previous look.
+ * Under the refined variant we darken the body/label/placeholder muted token to
+ * pass WCAG AA (#566677 ≈ 5.9:1 on white, ≈ 5.5:1 on --color-elq-bg) and point
+ * the primary-CTA fill at a darker orange so white button text passes AA
+ * (#C2410C ≈ 5.2:1). Large/non-text accents keep --color-elq-orange. The
+ * `html[data-ui]` selector outranks Tailwind's `:root` theme vars so the
+ * override wins regardless of source order, and cascades to every screen.
+ */
+html[data-ui="refined"] {
+  --color-elq-muted: #566677;
+  --color-elq-cta: #C2410C;
+  --color-elq-cta-dark: #9A3412;
 }
 
 @keyframes fade-in-up {
@@ -97,6 +115,18 @@
 
 .animate-spin-slow {
   animation: spin-slow 3s linear infinite;
+}
+
+/*
+ * Reduced-motion alternative for entrance reveals. These keyframes start at
+ * opacity:0 with `both` fill, so disabling the animation must fall back to the
+ * element's base (visible) state — never gate content visibility.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up,
+  .animate-slide-down {
+    animation: none;
+  }
 }
 
 body {

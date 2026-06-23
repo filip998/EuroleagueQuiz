@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import App from "../App";
+import App, { HomePage } from "../App";
 
 // Mock all child components to isolate App logic
 vi.mock("../GameSetup", () => ({
@@ -66,7 +66,7 @@ vi.mock("../PhotoQuizBoard", () => ({
 describe("App", () => {
   it("renders the game selection screen with all game modes", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
-    expect(screen.getByText("TICTACTOE")).toBeInTheDocument();
+    expect(screen.getByText("TIC-TAC-TOE")).toBeInTheDocument();
     expect(screen.getByText("GUESS THE LIST")).toBeInTheDocument();
     expect(screen.getByText("HIGHER OR LOWER")).toBeInTheDocument();
     expect(screen.getByText("CAREER QUIZ")).toBeInTheDocument();
@@ -76,7 +76,7 @@ describe("App", () => {
 
   it("navigates to TicTacToe setup when clicking the card", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
-    fireEvent.click(screen.getByText("TICTACTOE"));
+    fireEvent.click(screen.getByText("TIC-TAC-TOE"));
     expect(screen.getByTestId("game-setup")).toBeInTheDocument();
   });
 
@@ -221,8 +221,8 @@ describe("App", () => {
     expect(cta).toBeInTheDocument();
     expect(cta).toHaveAttribute("href", "/higherlower");
     expect(cta).toHaveTextContent("Play");
-    // ...and rendered as the shared orange button, not the old hover-only text.
-    expect(cta.className).toContain("bg-elq-orange");
+    // ...and rendered as the shared CTA button, not the old hover-only text.
+    expect(cta.className).toContain("bg-elq-cta");
     expect(cta.className).not.toContain("opacity-0");
     expect(cta.className).not.toContain("group-hover:opacity-100");
     fireEvent.click(cta);
@@ -243,11 +243,11 @@ describe("App", () => {
 
   it("navigates back to selection when onBack is called", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
-    fireEvent.click(screen.getByText("TICTACTOE"));
+    fireEvent.click(screen.getByText("TIC-TAC-TOE"));
     expect(screen.getByTestId("game-setup")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Back"));
-    expect(screen.getByText("TICTACTOE")).toBeInTheDocument();
+    expect(screen.getByText("TIC-TAC-TOE")).toBeInTheDocument();
     expect(screen.getByText("GUESS THE LIST")).toBeInTheDocument();
   });
 
@@ -273,5 +273,35 @@ describe("App", () => {
       "data-initial-join-code",
       ""
     );
+  });
+});
+
+describe("HomePage UI variant", () => {
+  it("renders the classic home when variant is 'classic'", () => {
+    render(<MemoryRouter><HomePage variant="classic" /></MemoryRouter>);
+    expect(screen.getByText("TICTACTOE")).toBeInTheDocument();
+    expect(screen.queryByText("TIC-TAC-TOE")).not.toBeInTheDocument();
+    expect(screen.queryByText(/how well do you know/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the refined home when variant is 'refined'", () => {
+    render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
+    expect(screen.getByText("TIC-TAC-TOE")).toBeInTheDocument();
+    expect(screen.getByText(/how well do you know/i)).toBeInTheDocument();
+    expect(screen.queryByText("TICTACTOE")).not.toBeInTheDocument();
+  });
+
+  it("renders every game mode and the section heading in both variants", () => {
+    for (const variant of ["classic", "refined"]) {
+      const { unmount } = render(
+        <MemoryRouter><HomePage variant={variant} /></MemoryRouter>
+      );
+      expect(screen.getByText("Choose your game")).toBeInTheDocument();
+      expect(screen.getByText("GUESS THE LIST")).toBeInTheDocument();
+      expect(screen.getByText("HIGHER OR LOWER")).toBeInTheDocument();
+      expect(screen.getByText("CAREER QUIZ")).toBeInTheDocument();
+      expect(screen.getByText("PHOTO QUIZ")).toBeInTheDocument();
+      unmount();
+    }
   });
 });
