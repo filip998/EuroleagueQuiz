@@ -445,3 +445,59 @@ describe("Refined home tag taxonomy + mode guidance (#243)", () => {
     expect(screen.queryByText("Solo · Local · Online")).not.toBeInTheDocument();
   });
 });
+
+describe("Refined home flagship board affordance + polish (#242)", () => {
+  const renderRefined = () =>
+    render(
+      <MemoryRouter>
+        <HomePage variant="refined" />
+      </MemoryRouter>
+    );
+
+  it("renders the 3×3 motif as a non-interactive decorative backdrop, not a claimable grid", () => {
+    renderRefined();
+    const board = screen.getByTestId("flagship-board");
+    // Decorative: removed from the a11y tree and non-interactive.
+    expect(board).toHaveAttribute("aria-hidden", "true");
+    expect(board.className).toContain("pointer-events-none");
+    // No live-game signals: no claimable links, and none of the old orange
+    // "claimed" cells / coloured ownership tiles remain inside the motif.
+    expect(board.querySelector("a")).toBeNull();
+    expect(board.querySelector(".bg-elq-cta")).toBeNull();
+    expect(board.querySelector(".bg-orange-50")).toBeNull();
+  });
+
+  it("omits the decorative flagship board from the classic variant", () => {
+    render(
+      <MemoryRouter>
+        <HomePage variant="classic" />
+      </MemoryRouter>
+    );
+    expect(screen.queryByTestId("flagship-board")).not.toBeInTheDocument();
+  });
+
+  it("places the '+ 84 clubs' crest strip ahead of the primary action so they don't compete", () => {
+    renderRefined();
+    const clubs = screen.getByText("+ 84 clubs");
+    const primary = screen
+      .getAllByTestId("home-quick-match-cta")
+      .find((el) => el.getAttribute("href") === "/tictactoe");
+    expect(primary).toBeDefined();
+    // crest strip precedes the flagship primary CTA in document order.
+    expect(
+      clubs.compareDocumentPosition(primary) & clubs.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it("keeps the flagship Solo link free of its own top margin (single action-row margin source)", () => {
+    renderRefined();
+    const solo = screen.getByRole("link", { name: /solo . local . friend/i });
+    expect(solo.className).not.toContain("mt-4");
+  });
+
+  it("equalises the 2×2 mini-card rows so their CTAs align across rows", () => {
+    renderRefined();
+    const grid = screen.getByText("GUESS THE LIST").closest("div.group").parentElement;
+    expect(grid.className).toContain("auto-rows-fr");
+  });
+});
