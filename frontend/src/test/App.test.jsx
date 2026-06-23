@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import App, { HomePage } from "../App";
 
@@ -385,5 +385,63 @@ describe("Refined home action hierarchy (#241)", () => {
     unmount();
     render(<MemoryRouter><HomePage variant="classic" /></MemoryRouter>);
     expect(screen.queryByText(/online 1v1/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("Refined home tag taxonomy + mode guidance (#243)", () => {
+  const renderRefined = () =>
+    render(
+      <MemoryRouter>
+        <HomePage variant="refined" />
+      </MemoryRouter>
+    );
+
+  it("labels every mini card with one consistent mode/availability tag", () => {
+    renderRefined();
+    // Guess the List: solo + local + online.
+    expect(screen.getByText("Solo · Local · Online")).toBeInTheDocument();
+    // Career Quiz and Photo Quiz: solo + online (no local 1v1).
+    expect(screen.getAllByText("Solo · Online")).toHaveLength(2);
+    // The "Streak" mechanic is no longer a mode tag...
+    expect(screen.queryByText("Streak")).not.toBeInTheDocument();
+    // ...it stays in Higher or Lower's description instead.
+    expect(screen.getByText(/build a streak/i)).toBeInTheDocument();
+  });
+
+  it("tags Higher or Lower as Solo-only without colliding with the legend's Solo token", () => {
+    renderRefined();
+    const holCard = screen.getByText("HIGHER OR LOWER").closest("div.group");
+    expect(holCard).not.toBeNull();
+    expect(within(holCard).getByText("Solo")).toBeInTheDocument();
+  });
+
+  it("keeps the ★ Most played accolade visually distinct from the mode chips", () => {
+    renderRefined();
+    const accolade = screen.getByText("★ Most played");
+    const modeChip = screen.getByText("Solo · Local · Online");
+    // Accolade is a soft-filled orange badge; mode chips are muted outlines.
+    expect(accolade).toHaveClass("bg-orange-50");
+    expect(accolade).toHaveClass("text-elq-cta");
+    expect(modeChip).not.toHaveClass("bg-orange-50");
+    expect(modeChip).toHaveClass("text-elq-muted");
+  });
+
+  it("surfaces the mode legend under the heading and drops the far-right micro-line", () => {
+    renderRefined();
+    expect(
+      screen.queryByText("Jump in solo, pass-and-play, or matchmake online")
+    ).not.toBeInTheDocument();
+    const legend = screen.getByText(/mode tags show how to play/i);
+    expect(legend).toHaveTextContent(/Solo.*Local 1v1.*Online/);
+  });
+
+  it("does not leak the #243 legend or mode tags into the classic variant", () => {
+    render(
+      <MemoryRouter>
+        <HomePage variant="classic" />
+      </MemoryRouter>
+    );
+    expect(screen.queryByText(/mode tags show how to play/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Solo · Local · Online")).not.toBeInTheDocument();
   });
 });

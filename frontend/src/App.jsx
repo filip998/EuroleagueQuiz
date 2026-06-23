@@ -325,9 +325,14 @@ function HomePageRefined() {
         </section>
 
         <section className="mt-10 animate-fade-in-up" style={{ animationDelay: "150ms" }}>
-          <div className="mb-5 flex flex-wrap items-end justify-between gap-3 px-1">
+          <div className="mb-5 px-1">
             <h2 className="font-display text-3xl tracking-wide text-elq-dark">Choose your game</h2>
-            <span className="text-sm text-elq-muted">Jump in solo, pass-and-play, or matchmake online</span>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-elq-muted">
+              Mode tags show how to play:{" "}
+              <span className="font-semibold text-elq-dark">Solo</span> on your own,{" "}
+              <span className="font-semibold text-elq-dark">Local 1v1</span> on one screen, or{" "}
+              <span className="font-semibold text-elq-dark">Online</span> against others.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-12">
@@ -343,7 +348,7 @@ function HomePageRefined() {
                     <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-orange-200 bg-orange-50 text-elq-cta">
                       {ICON_TTT}
                     </span>
-                    <span className="whitespace-nowrap rounded-full border border-orange-200 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-elq-cta">
+                    <span className="whitespace-nowrap rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-elq-cta">
                       ★ Most played
                     </span>
                   </div>
@@ -422,7 +427,7 @@ function HomePageRefined() {
                 to="/list"
                 title="GUESS THE LIST"
                 description="Name a full roster, all-time stat leaders, champions or MVP winners."
-                tag="Solo · 1v1"
+                tag="Solo · Local · Online"
                 icon={ICON_PEOPLE}
                 accentBar="bg-elq-player2"
                 iconChip="border-red-200 bg-red-50 text-elq-player2"
@@ -432,7 +437,7 @@ function HomePageRefined() {
                 to="/higherlower"
                 title="HIGHER OR LOWER"
                 description="Who posts the bigger stat? Build a streak — one miss ends the run."
-                tag="Streak"
+                tag="Solo"
                 icon={ICON_ARROWS}
                 accentBar="bg-emerald-600"
                 iconChip="border-emerald-200 bg-emerald-50 text-emerald-600"
@@ -442,7 +447,7 @@ function HomePageRefined() {
                 to="/career"
                 title="CAREER QUIZ"
                 description="Guess the player from a club-by-club career timeline."
-                tag="Solo · 1v1"
+                tag="Solo · Online"
                 icon={ICON_CLOCK}
                 accentBar="bg-amber-600"
                 iconChip="border-amber-200 bg-amber-50 text-amber-600"
@@ -452,7 +457,7 @@ function HomePageRefined() {
                 to="/photo"
                 title="PHOTO QUIZ"
                 description="Name the EuroLeague player from his photo before the buzzer."
-                tag="Solo · 1v1"
+                tag="Solo · Online"
                 icon={ICON_CAMERA}
                 accentBar="bg-violet-600"
                 iconChip="border-violet-200 bg-violet-50 text-violet-600"
