@@ -213,18 +213,10 @@ const ICON_CAMERA = (
 // Real club crests used by the flagship card (served from /public/logos).
 const FLAGSHIP_CRESTS = ["bar", "mad", "csk", "oly", "pan"];
 
-// Decorative 3x3 motif: "c" = crest tile, "o" = claimed cell, null = empty.
-const FLAGSHIP_BOARD = [
-  { kind: "c", crest: "bar" },
-  null,
-  { kind: "o" },
-  null,
-  { kind: "o" },
-  null,
-  { kind: "o" },
-  { kind: "c", crest: "csk" },
-  null,
-];
+// Decorative 3x3 motif. Purely a faded, grayscale backdrop — it deliberately
+// does NOT mimic a live, claimable game (no orange "claimed" cells, no coloured
+// ownership tiles). Each entry is a crest code or null for an empty tile.
+const FLAGSHIP_BOARD = ["bar", null, "mad", null, "csk", null, "oly", null, "pan"];
 
 // Compact "how it works" rules shown on the flagship card (game rules only —
 // mode guidance lives elsewhere). Kept short so the 3-step list never overflows.
@@ -358,30 +350,6 @@ function HomePageRefined() {
                       Claim cells on a 3×3 grid by naming players who match both the row and column clue. Outsmart a friend or beat the clock.
                     </p>
                   </Link>
-                  <ol className="mt-6 flex flex-col gap-2.5">
-                    {FLAGSHIP_STEPS.map((step, i) => (
-                      <li key={step} className="flex items-center gap-2.5">
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-orange-200 bg-orange-50 text-[11px] font-bold text-elq-cta">
-                          {i + 1}
-                        </span>
-                        <span className="text-sm leading-snug text-elq-muted">{step}</span>
-                      </li>
-                    ))}
-                  </ol>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                    <HomeQuickMatchCta to="/tictactoe" />
-                    <Link
-                      to="/tictactoe"
-                      onClick={(e) => e.stopPropagation()}
-                      className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-elq-muted underline-offset-4 transition-colors hover:text-elq-dark hover:underline"
-                    >
-                      Solo · Local · Friend
-                      <span aria-hidden="true">→</span>
-                    </Link>
-                  </div>
-                  <p className="mt-2 text-xs text-elq-muted">
-                    Quick Match pairs you with an online 1v1 opponent.
-                  </p>
                   <div className="mt-5 flex items-center">
                     {FLAGSHIP_CRESTS.map((crest, i) => (
                       <img
@@ -394,26 +362,57 @@ function HomePageRefined() {
                     ))}
                     <span className="ml-3 text-xs font-semibold text-elq-muted">+ 84 clubs</span>
                   </div>
+                  <ol className="mt-6 flex flex-col gap-2.5">
+                    {FLAGSHIP_STEPS.map((step, i) => (
+                      <li key={step} className="flex items-center gap-2.5">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-orange-200 bg-orange-50 text-[11px] font-bold text-elq-cta">
+                          {i + 1}
+                        </span>
+                        <span className="text-sm leading-snug text-elq-muted">{step}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  {/* Action row: one filled primary (Quick Match) plus a calm Solo
+                      text link. The button owns the single top margin (its baked-in
+                      mt-4); the link carries none and baseline-aligns to it, so there
+                      is no competing double margin. */}
+                  <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+                    <HomeQuickMatchCta to="/tictactoe" />
+                    <Link
+                      to="/tictactoe"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-elq-muted underline-offset-4 transition-colors hover:text-elq-dark hover:underline"
+                    >
+                      Solo · Local · Friend
+                      <span aria-hidden="true">→</span>
+                    </Link>
+                  </div>
+                  <p className="mt-2 text-xs text-elq-muted">
+                    Quick Match pairs you with an online 1v1 opponent.
+                  </p>
                 </div>
 
-                <div aria-hidden="true" className="hidden aspect-square w-full max-w-[260px] grid-cols-3 gap-2 justify-self-end self-center md:grid">
-                  {FLAGSHIP_BOARD.map((cell, i) => {
-                    if (cell?.kind === "c") {
-                      return (
-                        <div key={i} className="flex items-center justify-center rounded-xl border border-blue-200 bg-blue-50">
-                          <img src={`/logos/${cell.crest}.png`} alt="" className="h-3/5 w-3/5 rounded-full bg-white object-contain p-0.5" />
-                        </div>
-                      );
-                    }
-                    if (cell?.kind === "o") {
-                      return (
-                        <div key={i} className="flex items-center justify-center rounded-xl border border-orange-200 bg-orange-50">
-                          <span className="h-3 w-3 rounded-full bg-elq-cta" />
-                        </div>
-                      );
-                    }
-                    return <div key={i} className="rounded-xl border border-elq-border bg-slate-50" />;
-                  })}
+                {/* Faded, grayscale decorative motif — never a live, claimable
+                    grid (no orange "claimed" cells, no coloured ownership tiles).
+                    aria-hidden + pointer-events-none keep it non-interactive. */}
+                <div
+                  data-testid="flagship-board"
+                  aria-hidden="true"
+                  className="pointer-events-none hidden aspect-square w-full max-w-[260px] grid-cols-3 gap-2 justify-self-end self-center opacity-90 [-webkit-mask-image:linear-gradient(to_bottom_right,#000_45%,transparent)] [mask-image:linear-gradient(to_bottom_right,#000_45%,transparent)] md:grid"
+                >
+                  {FLAGSHIP_BOARD.map((crest, i) =>
+                    crest ? (
+                      <div key={i} className="flex items-center justify-center rounded-xl border border-elq-border bg-slate-50">
+                        <img
+                          src={`/logos/${crest}.png`}
+                          alt=""
+                          className="h-3/5 w-3/5 rounded-full bg-white object-contain p-0.5 opacity-70 grayscale"
+                        />
+                      </div>
+                    ) : (
+                      <div key={i} className="rounded-xl border border-elq-border bg-slate-50/60" />
+                    )
+                  )}
                 </div>
               </div>
             </div>
@@ -422,7 +421,7 @@ function HomePageRefined() {
                 mobile). Each keeps its existing CTA testid, but the calm CTA is now a
                 low-emphasis "Play →" link that opens the game's setup on its Solo
                 default (Quick Match stays one tap away inside setup). */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:col-span-5">
+            <div className="grid grid-cols-1 gap-4 sm:auto-rows-fr sm:grid-cols-2 sm:gap-5 lg:col-span-5 lg:self-start">
               <GameMiniCard
                 to="/list"
                 title="GUESS THE LIST"
