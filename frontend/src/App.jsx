@@ -300,7 +300,7 @@ function HomePageRefined() {
 
         <section className="mt-8 animate-fade-in-up text-center" style={{ animationDelay: "80ms" }}>
           <h1 className="text-balance font-display text-5xl leading-[0.92] tracking-wide text-elq-dark sm:text-6xl lg:text-7xl">
-            HOW WELL DO YOU KNOW<br className="hidden sm:block" /> THE <span className="text-elq-orange">EUROLEAGUE</span>?
+            HOW WELL DO YOU KNOW<br className="hidden sm:block" /> THE <span className="text-elq-cta">EUROLEAGUE</span>?
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-elq-muted sm:text-lg">
             Five ways to test your hoops IQ — claim the grid, name the roster, and race friends across 25 seasons of European basketball.
