@@ -355,6 +355,7 @@ test.describe.serial("Guess the List Classic online Play-a-Friend", () => {
   });
 
   test("active online game recovers after a refresh", async ({ browser }) => {
+    test.setTimeout(45000);
     const contextA = await browser.newContext();
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
@@ -385,9 +386,16 @@ test.describe.serial("Guess the List Classic online Play-a-Friend", () => {
       await expect(identityBanner(pageA, "Classic Alice")).toBeVisible({ timeout: 15000 });
       await expect(guessInput(pageA)).toBeVisible({ timeout: 15000 });
 
-      // Recovery cancelled the forfeit, so the game is still active.
+      // Reloading dropped the host websocket, which arms the disconnect-grace
+      // forfeit timer; recovery must reconnect and cancel it. Assert the game is
+      // still active only AFTER the grace window (10s in the e2e backend) would
+      // have elapsed, so a broken reconnect-cancel cannot pass by being checked
+      // before the forfeit fires. This bounded wait is unavoidable: the expected
+      // outcome is the absence of a timed forfeit event.
+      await pageA.waitForTimeout(13000);
       const recovered = await apiJson(`/quiz/guess-the-list/games/${gameId}`);
       expect(recovered.status).toBe("active");
+      await expect(guessInput(pageA)).toBeVisible();
     } finally {
       if (gameId) await resignViaApi(gameId, 1);
       await contextA.close().catch(() => {});
