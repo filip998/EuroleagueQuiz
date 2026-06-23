@@ -395,7 +395,10 @@ test.describe.serial("Guess the List Classic online Play-a-Friend", () => {
       await pageA.waitForTimeout(13000);
       const recovered = await apiJson(`/quiz/guess-the-list/games/${gameId}`);
       expect(recovered.status).toBe("active");
-      await expect(guessInput(pageA)).toBeVisible();
+      // Turn-insensitive: the identity banner renders whenever the online board
+      // is mounted, regardless of whose turn it is, so a 40s turn-timer switch
+      // during a slow run cannot turn this into a false failure.
+      await expect(identityBanner(pageA, "Classic Alice")).toBeVisible();
     } finally {
       if (gameId) await resignViaApi(gameId, 1);
       await contextA.close().catch(() => {});
