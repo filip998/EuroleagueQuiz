@@ -125,6 +125,7 @@ export default defineConfig({
         ELQ_CORS_ORIGINS: frontendUrl,
         ELQ_CLERK_ISSUER: e2eClerk.issuer,
         ELQ_CLERK_JWKS_URL: `${frontendUrl}/.well-known/e2e-clerk-jwks.json`,
+        ELQ_ONLINE_DISCONNECT_GRACE_SECONDS: "10",
       },
     },
     {
