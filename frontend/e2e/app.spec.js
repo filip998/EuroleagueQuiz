@@ -175,9 +175,11 @@ test.describe("TicTacToe Flow", () => {
     await page.goto("/");
     await page.getByText("TIC-TAC-TOE").click();
 
-    // Quick Match is now the default landing; Solo is one tap away.
-    await page.getByText("Solo").click();
-    await page.getByText("Start Game").click();
+    // Quick Match is now the default landing; Solo is one tap away. Use the
+    // setup-page mode button (role-based) so this auto-waits through the SPA
+    // navigation and never matches the home page's "Solo" affordance text.
+    await page.getByRole("button", { name: "Solo" }).click();
+    await page.getByRole("button", { name: "Start Game" }).click();
 
     // Should see the game board with team names in headers
     await expect(page.locator("table, [class*='grid']").first()).toBeVisible({
