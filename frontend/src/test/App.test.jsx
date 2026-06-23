@@ -43,8 +43,8 @@ vi.mock("../HigherLowerBoard", () => ({
   default: () => <div data-testid="hl-board" />,
 }));
 vi.mock("../CareerQuizSetup", () => ({
-  default: ({ onBack }) => (
-    <div data-testid="career-setup">
+  default: ({ onBack, initialMode }) => (
+    <div data-testid="career-setup" data-initial-mode={initialMode || ""}>
       <button onClick={onBack}>Back</button>
     </div>
   ),
@@ -91,17 +91,18 @@ describe("App", () => {
     expect(screen.getByTestId("game-setup")).toBeInTheDocument();
   });
 
-  it("renders a Quick Match CTA on the Photo Quiz card that opens setup on Online", () => {
+  it("renders a calm Play CTA on the Photo Quiz card that opens setup on its Solo default", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     const cta = screen
       .getAllByTestId("home-quick-match-cta")
-      .find((el) => el.getAttribute("href") === "/photo?quick=1");
+      .find((el) => el.getAttribute("href") === "/photo");
     expect(cta).toBeDefined();
-    expect(cta).toHaveTextContent("Quick Match");
+    expect(cta).toHaveTextContent("Play");
     fireEvent.click(cta);
     const setup = screen.getByTestId("photo-setup");
     expect(setup).toBeInTheDocument();
-    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    // Solo default: no forced ?quick=1 → Online.
+    expect(setup).toHaveAttribute("data-initial-mode", "solo");
   });
 
   it("navigates to Guess the List setup when clicking the card", () => {
@@ -110,18 +111,19 @@ describe("App", () => {
     expect(screen.getByTestId("guess-the-list-setup")).toBeInTheDocument();
   });
 
-  it("renders a Quick Match CTA on the Guess the List card that opens Race setup", () => {
+  it("renders a calm Play CTA on the Guess the List card that opens setup on its Solo default", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     const cta = screen
       .getAllByTestId("home-quick-match-cta")
-      .find((el) => el.getAttribute("href") === "/list?quick=1");
+      .find((el) => el.getAttribute("href") === "/list");
     expect(cta).toBeDefined();
-    expect(cta).toHaveTextContent("Quick Match");
+    expect(cta).toHaveTextContent("Play");
     fireEvent.click(cta);
     const setup = screen.getByTestId("guess-the-list-setup");
     expect(setup).toBeInTheDocument();
-    expect(setup).toHaveAttribute("data-initial-mode", "online");
-    expect(setup).toHaveAttribute("data-initial-online-game-type", "race");
+    // Solo default: no forced ?quick=1 → Online → Race.
+    expect(setup).toHaveAttribute("data-initial-mode", "solo");
+    expect(setup).toHaveAttribute("data-initial-online-game-type", "classic");
   });
 
   it("redirects legacy /roster quick links to the Guess the List setup without losing the query", () => {
@@ -214,15 +216,17 @@ describe("App", () => {
     expect(screen.getByTestId("hl-setup")).toBeInTheDocument();
   });
 
-  it("renders a persistent Play CTA on the Higher or Lower card that opens setup", () => {
+  it("renders a persistent low-emphasis Play CTA on the Higher or Lower card that opens setup", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     const cta = screen.getByTestId("home-play-cta");
     // Persistent: present in the DOM without any hover interaction...
     expect(cta).toBeInTheDocument();
     expect(cta).toHaveAttribute("href", "/higherlower");
     expect(cta).toHaveTextContent("Play");
-    // ...and rendered as the shared CTA button, not the old hover-only text.
-    expect(cta.className).toContain("bg-elq-cta");
+    // ...rendered as the shared low-emphasis CTA link (accent text, not a filled
+    // button), and never the old hover-only reveal.
+    expect(cta.className).toContain("text-elq-cta");
+    expect(cta.className).not.toContain("bg-elq-cta");
     expect(cta.className).not.toContain("opacity-0");
     expect(cta.className).not.toContain("group-hover:opacity-100");
     fireEvent.click(cta);
@@ -318,5 +322,68 @@ describe("HomePage UI variant", () => {
     expect(
       screen.queryByText("Name a player who fits both clues")
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("Refined home action hierarchy (#241)", () => {
+  it("keeps the flagship Quick Match as the only filled primary CTA", () => {
+    render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
+    const flagship = screen
+      .getAllByTestId("home-quick-match-cta")
+      .find((el) => el.getAttribute("href") === "/tictactoe");
+    expect(flagship).toBeDefined();
+    expect(flagship).toHaveTextContent("Quick Match");
+    // The flagship is the page-level primary action: a solid filled button.
+    expect(flagship.className).toContain("bg-elq-cta");
+  });
+
+  // Each mini card keeps its existing testid but renders a low-emphasis "Play" link
+  // that opens the game's setup on its Solo default (no forced ?quick=1).
+  it.each([
+    ["/list", "home-quick-match-cta"],
+    ["/career", "home-quick-match-cta"],
+    ["/photo", "home-quick-match-cta"],
+    ["/higherlower", "home-play-cta"],
+  ])("renders a low-emphasis Solo-default Play CTA for %s", (href, testid) => {
+    render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
+    const cta = screen
+      .getAllByTestId(testid)
+      .find((el) => el.getAttribute("href") === href);
+    expect(cta).toBeDefined();
+    expect(cta).toHaveTextContent("Play");
+    // Quieter than the flagship: accent text link, not a filled button.
+    expect(cta.className).toContain("text-elq-cta");
+    expect(cta.className).not.toContain("bg-elq-cta");
+  });
+
+  it("opens Career Quiz setup on its Solo default from the calm Play CTA", () => {
+    render(<MemoryRouter><App /></MemoryRouter>);
+    const cta = screen
+      .getAllByTestId("home-quick-match-cta")
+      .find((el) => el.getAttribute("href") === "/career");
+    expect(cta).toBeDefined();
+    fireEvent.click(cta);
+    const setup = screen.getByTestId("career-setup");
+    expect(setup).toBeInTheDocument();
+    expect(setup).toHaveAttribute("data-initial-mode", "solo");
+  });
+
+  it("replaces the fake 'Solo · 1v1 · Online' pill with a real Solo · Local · Friend link into setup", () => {
+    render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
+    expect(screen.queryByText("Solo · 1v1 · Online")).not.toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /solo . local . friend/i });
+    expect(link).toHaveAttribute("href", "/tictactoe");
+    // A text link, not a button/pill — must not carry the filled CTA style.
+    expect(link.className).not.toContain("bg-elq-cta");
+  });
+
+  it("qualifies Quick Match as online with adjacent helper copy in refined only", () => {
+    const { unmount } = render(
+      <MemoryRouter><HomePage variant="refined" /></MemoryRouter>
+    );
+    expect(screen.getByText(/online 1v1/i)).toBeInTheDocument();
+    unmount();
+    render(<MemoryRouter><HomePage variant="classic" /></MemoryRouter>);
+    expect(screen.queryByText(/online 1v1/i)).not.toBeInTheDocument();
   });
 });

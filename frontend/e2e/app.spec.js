@@ -106,8 +106,9 @@ test.describe("Home Page", () => {
 
   test("home TicTacToe Quick Match CTA lands on the pool grid", async ({ page }) => {
     await page.goto("/");
-    // Two home cards now expose a Quick Match CTA (TicTacToe + Photo Quiz); scope
-    // by href so the locator resolves to a single element.
+    // Several home cards share the home-quick-match-cta testid: the flagship
+    // TicTacToe Quick Match button plus the calm "Play" mini-card links (which open
+    // each game's Solo setup default). Scope by href so the locator resolves to one.
     await page.locator('[data-testid="home-quick-match-cta"][href="/tictactoe"]').click();
 
     await expect(page).toHaveURL(/\/tictactoe$/);

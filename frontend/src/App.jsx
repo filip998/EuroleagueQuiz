@@ -332,8 +332,9 @@ function HomePageRefined() {
 
           <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-12">
             {/* Flagship Tic-Tac-Toe. Wrapper is a <div> (not an anchor) so the two
-                sibling links — the body Link and the Quick Match CTA Link — never
-                nest. "Solo · 1v1 · Online" is a non-link affordance. */}
+                sibling links — the body Link and the filled Quick Match CTA Link —
+                never nest. The single filled CTA is the page-level primary action;
+                "Solo · Local · Friend →" is a calm secondary text link into setup. */}
             <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-elq-border bg-gradient-to-b from-white to-orange-50/40 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-elq-orange/40 hover:shadow-lg lg:col-span-7 lg:self-start">
               <span aria-hidden="true" className="absolute inset-x-0 top-0 h-1 bg-elq-orange" />
               <div className="grid gap-6 p-6 sm:p-8 md:grid-cols-[1.1fr_0.9fr]">
@@ -362,12 +363,20 @@ function HomePageRefined() {
                       </li>
                     ))}
                   </ol>
-                  <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                     <HomeQuickMatchCta to="/tictactoe" />
-                    <span className="mt-4 inline-flex items-center rounded-lg border border-elq-border bg-white px-3 py-1.5 text-xs font-semibold text-elq-text">
-                      Solo · 1v1 · Online
-                    </span>
+                    <Link
+                      to="/tictactoe"
+                      onClick={(e) => e.stopPropagation()}
+                      className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-elq-muted underline-offset-4 transition-colors hover:text-elq-dark hover:underline"
+                    >
+                      Solo · Local · Friend
+                      <span aria-hidden="true">→</span>
+                    </Link>
                   </div>
+                  <p className="mt-2 text-xs text-elq-muted">
+                    Quick Match pairs you with an online 1v1 opponent.
+                  </p>
                   <div className="mt-5 flex items-center">
                     {FLAGSHIP_CRESTS.map((crest, i) => (
                       <img
@@ -405,7 +414,9 @@ function HomePageRefined() {
             </div>
 
             {/* Four differentiated cards (2x2 on desktop/tablet, single column on
-                mobile). Each preserves its existing CTA route + testid. */}
+                mobile). Each keeps its existing CTA testid, but the calm CTA is now a
+                low-emphasis "Play →" link that opens the game's setup on its Solo
+                default (Quick Match stays one tap away inside setup). */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:col-span-5">
               <GameMiniCard
                 to="/list"
@@ -415,7 +426,7 @@ function HomePageRefined() {
                 icon={ICON_PEOPLE}
                 accentBar="bg-elq-player2"
                 iconChip="border-red-200 bg-red-50 text-elq-player2"
-                cta={<HomeQuickMatchCta to="/list?quick=1" />}
+                cta={<HomeQuickMatchCta to="/list" label="Play" emphasis="quiet" />}
               />
               <GameMiniCard
                 to="/higherlower"
@@ -425,7 +436,7 @@ function HomePageRefined() {
                 icon={ICON_ARROWS}
                 accentBar="bg-emerald-600"
                 iconChip="border-emerald-200 bg-emerald-50 text-emerald-600"
-                cta={<HomePlayCta to="/higherlower" />}
+                cta={<HomePlayCta to="/higherlower" emphasis="quiet" />}
               />
               <GameMiniCard
                 to="/career"
@@ -435,7 +446,7 @@ function HomePageRefined() {
                 icon={ICON_CLOCK}
                 accentBar="bg-amber-600"
                 iconChip="border-amber-200 bg-amber-50 text-amber-600"
-                cta={<HomeQuickMatchCta to="/career?quick=1" />}
+                cta={<HomeQuickMatchCta to="/career" label="Play" emphasis="quiet" />}
               />
               <GameMiniCard
                 to="/photo"
@@ -445,7 +456,7 @@ function HomePageRefined() {
                 icon={ICON_CAMERA}
                 accentBar="bg-violet-600"
                 iconChip="border-violet-200 bg-violet-50 text-violet-600"
-                cta={<HomeQuickMatchCta to="/photo?quick=1" />}
+                cta={<HomeQuickMatchCta to="/photo" label="Play" emphasis="quiet" />}
               />
             </div>
           </div>
@@ -729,9 +740,9 @@ function CareerGamePage() {
 function PhotoSetupPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  // The home-card Quick Match CTA links to /photo?quick=1; honor it by opening
-  // setup on Online (which defaults to the Quick Match pool grid). Direct visits
-  // to /photo keep PhotoQuizSetup's Solo default.
+  // A `?quick=1` deep link (the classic home card, or `/photo?quick=1` directly)
+  // opens setup on Online, which defaults to the Quick Match pool grid. The refined
+  // home card and any plain `/photo` visit keep PhotoQuizSetup's Solo default.
   const initialMode =
     new URLSearchParams(location.search).get("quick") === "1" ? "online" : "solo";
 

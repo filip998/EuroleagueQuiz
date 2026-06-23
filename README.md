@@ -343,8 +343,12 @@ by the `VITE_UI_VARIANT` environment variable and resolved in
 - **`refined`** *(default)* — the "Refined Light" home: a centered hero
   (`HOW WELL DO YOU KNOW THE EUROLEAGUE?`), a static stat strip, and a
   `Choose your game` lobby with a flagship **Tic-Tac-Toe** card beside a 2×2 grid
-  of the four other modes. Each card keeps its existing route, `HomeQuickMatchCta` /
-  `HomePlayCta`, and test IDs.
+  of the four other modes. The lobby has one clear action hierarchy: the flagship
+  carries the single filled primary CTA — **Quick Match** (qualified as online 1v1 by
+  adjacent helper copy) plus a low-emphasis `Solo · Local · Friend →` text link — while
+  the four mini cards use calm, low-emphasis **Play →** links that open each game's
+  setup on its **Solo** default (Quick Match is then one tap away inside setup). Each
+  card keeps its existing route, `HomeQuickMatchCta` / `HomePlayCta`, and test IDs.
 - **`classic`** — the original flat five-card grid, preserved pixel-for-pixel. Set
   `VITE_UI_VARIANT=classic` (e.g. in `frontend/.env.development` or the deploy build)
   to fall back instantly with no code change.
@@ -363,7 +367,10 @@ render either variant deterministically. `main.jsx` writes the active variant to
 - New `--color-elq-cta` / `--color-elq-cta-dark` drive the primary-CTA fill; the
   refined variant points them at `#C2410C` / `#9A3412` so white button text clears AA
   (≈5.2:1), while classic maps them to the original `#FF6600` / `#E85D00`. The shared
-  `HomeQuickMatchCta` / `HomePlayCta` buttons use `bg-elq-cta`.
+  `HomeQuickMatchCta` / `HomePlayCta` use these tokens two ways via an `emphasis` prop:
+  the default `primary` is the filled `bg-elq-cta` button, and `quiet` is a low-emphasis
+  `text-elq-cta` accent text link (no fill) — `#C2410C` clears AA as body text too
+  (≈5.2:1).
 
 A `prefers-reduced-motion: reduce` guard disables the entrance reveals
 (`.animate-fade-in-up`, `.animate-slide-down`) without ever gating content visibility.
@@ -414,7 +421,9 @@ shared-component pattern:
   `getPresetLabel`, and `title` are props (defaulting to the TicTacToe pool source/copy), so
   Career Quiz and Photo Quiz reuse it with their own pool feeds and labels.
 - `HomeQuickMatchCta.jsx` — the reusable home-card CTA `<Link>` (pass the setup route in
-  `to`); it sits beside a card's main link without nesting anchors.
+  `to`); it sits beside a card's main link without nesting anchors. An `emphasis` prop
+  selects the filled primary button (`primary`, default) or a low-emphasis accent text
+  link (`quiet`); `HomePlayCta` is the same component with a "Play" label and play icon.
 - `identity.js` `getGuestName()` / `getDisplayName()` — the guest-name fallback (see Guest
   Identity below).
 
@@ -438,7 +447,9 @@ claimed; higher claim count wins the round, ties award no point, and non-termina
 reveal the full list for 12 seconds before the next one unlocks.
 
 Race reuses the shared Quick Match components: `/list?quick=1` opens Online → Race →
-Quick Match, the home card has a Quick Match CTA, and the board uses
+Quick Match (the refined home card's calm **Play →** link opens Solo, while the
+`?quick=1` deep link and the classic home card still jump to Race Quick Match), and the
+board uses
 `QuickMatchSearchingLobby` for public pool searches. Race also supports private
 Play-a-Friend Create/Join inside the Race tab; Classic online remains unchanged.
 
