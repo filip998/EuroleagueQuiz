@@ -62,6 +62,7 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
 
   const isOnline = mode === "online";
   const isLocal = mode === "local";
+  const isSolo = mode === "solo";
   const isQuick = isOnline && onlineSub === "quick";
   const isFriend = isOnline && onlineSub === "friend";
   const isJoin = isFriend && friendSub === "join";
@@ -225,22 +226,28 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
               </div>
             ) : (
               <>
-                <div className="space-y-4 mb-6">
-                  <NameField
-                    value={player1Name}
-                    onChange={handlePlayer1NameChange}
-                    label={isLocal ? "Player 1" : "Your Name"}
-                    placeholder={isLocal ? "Player 1" : "Your name"}
-                  />
-                  {isLocal && (
+                {isSolo ? (
+                  <div className="mb-6 rounded-xl border border-elq-border bg-elq-bg/60 px-4 py-3 text-sm text-elq-muted">
+                    Solo challenge — claim three in a row before three strikes. No name needed.
+                  </div>
+                ) : (
+                  <div className="space-y-4 mb-6">
                     <NameField
-                      value={player2Name}
-                      onChange={setPlayer2Name}
-                      label="Player 2"
-                      placeholder="Player 2"
+                      value={player1Name}
+                      onChange={handlePlayer1NameChange}
+                      label={isLocal ? "Player 1" : "Your Name"}
+                      placeholder={isLocal ? "Player 1" : "Your name"}
                     />
-                  )}
-                </div>
+                    {isLocal && (
+                      <NameField
+                        value={player2Name}
+                        onChange={setPlayer2Name}
+                        label="Player 2"
+                        placeholder="Player 2"
+                      />
+                    )}
+                  </div>
+                )}
 
                 {showMatchSettings && (
                   <>

@@ -152,6 +152,41 @@ describe("PlayerSearch", () => {
     });
   });
 
+  it("disambiguates duplicate names with a nationality · era context line", async () => {
+    const players = [
+      {
+        player_id: 1,
+        full_name: "Vasilije Micic",
+        nationality: "Serbia",
+        era: "2014\u20132024",
+      },
+      // A second "Micic" with no context still renders its bare name (no crash).
+      { player_id: 2, full_name: "Marko Micic" },
+    ];
+    autocompletePlayer.mockResolvedValue({ players });
+
+    render(
+      <PlayerSearch
+        rowAxis={barca}
+        colAxis={madrid}
+        onSelect={mockOnSelect}
+        onCancel={mockOnCancel}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type player name...");
+    await userEvent.type(input, "micic");
+
+    await waitFor(() => {
+      expect(screen.getByText("Vasilije Micic")).toBeInTheDocument();
+    });
+    // The extra context distinguishes the otherwise duplicate surnames.
+    expect(screen.getByText("Serbia \u00b7 2014\u20132024")).toBeInTheDocument();
+    // The context line is the player's button, so the whole row stays selectable.
+    fireEvent.click(screen.getByText("Vasilije Micic"));
+    expect(mockOnSelect).toHaveBeenCalledWith(players[0]);
+  });
+
   it("calls onSelect when clicking a player result", async () => {
     const player = { player_id: 1, full_name: "Luka Doncic" };
     autocompletePlayer.mockResolvedValue({ players: [player] });

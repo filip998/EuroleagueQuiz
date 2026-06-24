@@ -2003,12 +2003,39 @@ def autocomplete_players(
         .limit(limit)
         .all()
     )
+
+    # Disambiguation context for the autocomplete rows (duplicate names like
+    # "MICIC" / "MICIC"): the active EuroLeague career span ("2014-2024" or a
+    # single year). Computed in one batched MIN/MAX query over the returned ids.
+    era_by_player: dict[int, str] = {}
+    player_ids = [p.id for p in players]
+    if player_ids:
+        era_rows = (
+            db.query(
+                PlayerSeasonTeam.player_id,
+                func.min(Season.year),
+                func.max(Season.year),
+            )
+            .join(Season, Season.id == PlayerSeasonTeam.season_id)
+            .filter(PlayerSeasonTeam.player_id.in_(player_ids))
+            .group_by(PlayerSeasonTeam.player_id)
+            .all()
+        )
+        for pid, min_year, max_year in era_rows:
+            if min_year is None or max_year is None:
+                continue
+            era_by_player[pid] = (
+                str(min_year) if min_year == max_year else f"{min_year}\u2013{max_year}"
+            )
+
     return [
         {
             "player_id": p.id,
             "first_name": p.first_name,
             "last_name": p.last_name,
             "full_name": f"{p.first_name or ''} {p.last_name or ''}".strip(),
+            "nationality": p.nationality or None,
+            "era": era_by_player.get(p.id),
         }
         for p in players
     ]

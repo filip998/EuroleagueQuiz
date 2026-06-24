@@ -159,7 +159,12 @@ export default function PlayerSearch({
                       index === activeIndex ? "bg-elq-orange/5 text-elq-orange" : ""
                     }`}
                   >
-                    {p.full_name}
+                    <span className="block truncate font-medium">{p.full_name}</span>
+                    {(p.nationality || p.era) && (
+                      <span className="mt-0.5 block truncate text-xs text-elq-muted">
+                        {[p.nationality, p.era].filter(Boolean).join(" \u00b7 ")}
+                      </span>
+                    )}
                   </button>
                 </li>
               ))}
