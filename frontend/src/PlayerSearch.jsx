@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { autocompletePlayer, autocompleteGuessTheListPlayer } from "./api";
 import { useListKeyboardNav } from "./useListKeyboardNav";
+import { buildCluePromptParts } from "./cluePrompt";
 
 export default function PlayerSearch({
-  rowTeamCode,
-  colTeamCode,
+  rowAxis,
+  colAxis,
   onSelect,
   onCancel,
   guessTheListMode,
@@ -37,7 +38,7 @@ export default function PlayerSearch({
       }
     }, 250);
     return () => clearTimeout(timer);
-  }, [query, rowTeamCode, colTeamCode, guessTheListMode]);
+  }, [query, guessTheListMode]);
 
   const { activeIndex, activeItemRef, handleKeyDown: handleNavKeyDown } =
     useListKeyboardNav(results, onSelect, !loading);
@@ -88,12 +89,15 @@ export default function PlayerSearch({
           <p className="text-xs text-elq-muted mb-4">
             {guessTheListMode
               ? "Search for a player you think was on this roster"
-              : <>Find a player who played for both{" "}
-                  <span className="font-semibold text-elq-text">{rowTeamCode}</span>{" "}
-                  and{" "}
-                  <span className="font-semibold text-elq-text">{colTeamCode}</span>
-                </>
-            }
+              : buildCluePromptParts(rowAxis, colAxis).map((part, i) =>
+                  part.strong !== undefined ? (
+                    <span key={i} className="font-semibold text-elq-text">
+                      {part.strong}
+                    </span>
+                  ) : (
+                    <span key={i}>{part.text}</span>
+                  )
+                )}
           </p>
 
           {/* Search input */}

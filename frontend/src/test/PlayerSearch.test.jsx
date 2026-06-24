@@ -10,6 +10,18 @@ vi.mock("../api", () => ({
 
 import { autocompletePlayer, autocompleteGuessTheListPlayer } from "../api";
 
+const teamAxis = (name, code) => ({
+  axis_type: "team",
+  value: "1",
+  display_label: name,
+  team_code: code,
+  team_name: name,
+});
+const natAxis = (name) => ({ axis_type: "nationality", value: name, display_label: name });
+
+const barca = teamAxis("Barcelona", "BAR");
+const madrid = teamAxis("Real Madrid", "RMB");
+
 describe("PlayerSearch", () => {
   const mockOnSelect = vi.fn();
   const mockOnCancel = vi.fn();
@@ -23,8 +35,8 @@ describe("PlayerSearch", () => {
   it("renders the search modal with input", () => {
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
       />
@@ -34,25 +46,45 @@ describe("PlayerSearch", () => {
     expect(screen.getByPlaceholderText("Type player name...")).toBeInTheDocument();
   });
 
-  it("shows team codes in description for standard search mode", () => {
+  it("shows full club names (not raw codes) for a team-vs-team prompt", () => {
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
       />
     );
 
-    expect(screen.getByText("BAR")).toBeInTheDocument();
-    expect(screen.getByText("RMB")).toBeInTheDocument();
+    expect(screen.getByText("Barcelona")).toBeInTheDocument();
+    expect(screen.getByText("Real Madrid")).toBeInTheDocument();
+    // The raw upstream codes must never surface in the prompt.
+    expect(screen.queryByText("BAR")).not.toBeInTheDocument();
+    expect(screen.queryByText("RMB")).not.toBeInTheDocument();
+    expect(screen.getByText(/played for both/)).toBeInTheDocument();
+  });
+
+  it("derives a mixed-axis prompt (team x nationality) with no blanks or codes", () => {
+    render(
+      <PlayerSearch
+        rowAxis={madrid}
+        colAxis={natAxis("Serbia")}
+        onSelect={mockOnSelect}
+        onCancel={mockOnCancel}
+      />
+    );
+
+    expect(screen.getByText("Real Madrid")).toBeInTheDocument();
+    expect(screen.getByText("Serbia")).toBeInTheDocument();
+    expect(screen.getByText(/played for/)).toBeInTheDocument();
+    expect(screen.getByText(/is from/)).toBeInTheDocument();
   });
 
   it("shows Guess the List description when guessTheListMode is true", () => {
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
         guessTheListMode={true}
@@ -67,8 +99,8 @@ describe("PlayerSearch", () => {
   it("calls onCancel when Escape is pressed", async () => {
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
       />
@@ -82,8 +114,8 @@ describe("PlayerSearch", () => {
   it("calls onCancel when clicking the backdrop", () => {
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
       />
@@ -104,8 +136,8 @@ describe("PlayerSearch", () => {
 
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
       />
@@ -126,8 +158,8 @@ describe("PlayerSearch", () => {
 
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
       />
@@ -150,8 +182,8 @@ describe("PlayerSearch", () => {
 
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
       />
@@ -173,8 +205,8 @@ describe("PlayerSearch", () => {
 
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
       />
@@ -195,8 +227,8 @@ describe("PlayerSearch", () => {
 
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
         guessTheListMode={true}
@@ -221,8 +253,8 @@ describe("PlayerSearch", () => {
 
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
       />
@@ -258,8 +290,8 @@ describe("PlayerSearch", () => {
 
     render(
       <PlayerSearch
-        rowTeamCode="BAR"
-        colTeamCode="RMB"
+        rowAxis={barca}
+        colAxis={madrid}
         onSelect={mockOnSelect}
         onCancel={mockOnCancel}
       />

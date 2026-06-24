@@ -44,15 +44,13 @@ export function AxisLabel({ axis }) {
   const prefix =
     isNationality && !countryCode
       ? "\ud83c\udf0d "
-      : isPlayedWith && !imageUrl
-        ? "\ud83e\udd1d "
-        : isSeason
-          ? "\ud83d\udcc5 "
-          : isChampion
-            ? "\ud83c\udfc6 "
-            : isStatMilestone
-              ? "\ud83d\udcca "
-              : "";
+      : isSeason
+        ? "\ud83d\udcc5 "
+        : isChampion
+          ? "\ud83c\udfc6 "
+          : isStatMilestone
+            ? "\ud83d\udcca "
+            : "";
   const bgColor =
     AXIS_CHIP_STYLES[axisType] || "bg-slate-50 text-slate-700 border-slate-200";
   return (
@@ -60,7 +58,12 @@ export function AxisLabel({ axis }) {
       className={`px-2 py-3 text-[11px] sm:text-xs font-semibold text-center rounded-lg border ${bgColor} leading-tight flex flex-col items-center justify-center gap-1 min-w-0`}
     >
       {isTeam && axis.team_code && (
-        <ClubLogo code={axis.team_code} size={28} />
+        <ClubLogo code={axis.team_code} size={28} alt={axis.team_name || label} />
+      )}
+      {isPlayedWith && (
+        <span className="text-[9px] font-bold uppercase tracking-wide opacity-80 leading-none">
+          {"\ud83e\udd1d"} Played with
+        </span>
       )}
       {imageUrl && (
         <img
@@ -712,8 +715,8 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       {/* Player search modal */}
       {selectedCell && game.status === "active" && !inTransition && (
         <PlayerSearch
-          rowTeamCode={selectedCell.row_team_code || null}
-          colTeamCode={selectedCell.col_team_code || null}
+          rowAxis={selectedCell.row_axis ?? round?.rows?.[selectedCell.row_index]}
+          colAxis={selectedCell.col_axis ?? round?.columns?.[selectedCell.col_index]}
           onSelect={handlePlayerSelect}
           onCancel={() => setSelectedCell(null)}
         />
