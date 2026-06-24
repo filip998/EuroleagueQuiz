@@ -100,6 +100,64 @@ describe("AxisLabel stat_milestone axis", () => {
   });
 });
 
+describe("AxisLabel played_with axis", () => {
+  it("labels the teammate clue even when a headshot image is present", () => {
+    render(
+      <AxisLabel
+        axis={{
+          axis_type: "played_with",
+          value: "42",
+          display_label: "Vasilije Mičić",
+          image_url: "https://example.com/micic.png",
+        }}
+      />
+    );
+
+    // The chip must never be a bare face: an explicit "Played with" label shows
+    // alongside the headshot and the teammate's name.
+    expect(screen.getByText(/Played with/)).toBeInTheDocument();
+    expect(screen.getByText("Vasilije Mičić")).toBeInTheDocument();
+    expect(screen.getByAltText("Vasilije Mičić")).toBeInTheDocument();
+  });
+
+  it("labels the teammate clue when there is no headshot image", () => {
+    render(
+      <AxisLabel
+        axis={{
+          axis_type: "played_with",
+          value: "42",
+          display_label: "Vasilije Mičić",
+        }}
+      />
+    );
+
+    expect(screen.getByText(/Played with/)).toBeInTheDocument();
+    expect(screen.getByText("Vasilije Mičić")).toBeInTheDocument();
+  });
+});
+
+describe("AxisLabel team axis", () => {
+  it("exposes the full club name (not the raw code) as the logo's accessible label", () => {
+    render(
+      <AxisLabel
+        axis={{
+          axis_type: "team",
+          value: "1",
+          display_label: "Virtus Bologna",
+          team_code: "VIR",
+          team_name: "Virtus Bologna",
+        }}
+      />
+    );
+
+    // The visible chip text and the logo alt both use the full name; "VIR" never
+    // surfaces to a screen reader.
+    expect(screen.getByText("Virtus Bologna")).toBeInTheDocument();
+    expect(screen.getByAltText("Virtus Bologna")).toBeInTheDocument();
+    expect(screen.queryByAltText("VIR")).not.toBeInTheDocument();
+  });
+});
+
 describe("AxisLabel fallback handling", () => {
   it("shows a neutral placeholder for an unknown axis type with no label", () => {
     const { container } = render(
