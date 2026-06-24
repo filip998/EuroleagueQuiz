@@ -103,6 +103,20 @@ def _invalid_player_for_cell(client: TestClient, cell: dict) -> int | None:
     return None
 
 
+def _invalid_player_for_serialized_cell(client: TestClient, cell: dict) -> int:
+    """Return a player invalid for a serialized cell's row/column axes."""
+    with client.session_local() as db:
+        for player_id in _all_player_ids(client):
+            if not ttt_service._player_matches_cell(
+                db,
+                player_id,
+                cell["row_axis"],
+                cell["col_axis"],
+            ):
+                return player_id
+    raise AssertionError("Expected at least one invalid player for cell")
+
+
 def _action_payload(response) -> dict:
     payload = response.json()
     assert payload["type"] == "state"
@@ -439,6 +453,20 @@ def _create_ttt_game(client: TestClient, target_wins: int = 2) -> dict:
             "timer_mode": "15s",
             "player1_name": "Player One",
             "player2_name": "Player Two",
+        },
+    )
+    assert response.status_code == 200
+    return _action_payload(response)["game"]
+
+
+def _create_solo_ttt_game(client: TestClient) -> dict:
+    response = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "single_player",
+            "target_wins": 2,
+            "timer_mode": "15s",
+            "player1_name": "Solo Ace",
         },
     )
     assert response.status_code == 200
@@ -1484,6 +1512,177 @@ def test_create_tictactoe_game_has_board(client: TestClient):
     assert len(payload["round"]["cells"]) == 9
 
 
+def test_create_solo_tictactoe_game_serializes_progress(client: TestClient):
+    payload = _create_solo_ttt_game(client)
+
+    assert payload["mode"] == "single_player"
+    assert payload["solo_progress"] == {
+        "claimed_cells": 0,
+        "total_cells": 9,
+        "strikes_used": 0,
+        "strikes_remaining": 3,
+        "strike_limit": 3,
+        "boards_won": 0,
+    }
+
+
+def test_solo_tictactoe_three_in_row_finishes_as_win(client: TestClient):
+    game = _create_solo_ttt_game(client)
+    game_id = game["id"]
+    final_response = None
+
+    for row_index, col_index in ((0, 0), (1, 1), (2, 2)):
+        latest_state = client.get(f"/quiz/tictactoe/games/{game_id}").json()
+        cell = _find_cell(latest_state, row_index, col_index)
+        player_id = _valid_player_for_cell(client, cell)
+        final_response = client.post(
+            f"/quiz/tictactoe/games/{game_id}/moves",
+            json={
+                "row_index": row_index,
+                "col_index": col_index,
+                "player_id": player_id,
+            },
+        )
+        assert final_response.status_code == 200
+
+    assert final_response is not None
+    payload = _action_payload(final_response)
+    assert payload["result"] == "solo_won"
+    assert payload["terminal"] is True
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] == 1
+    assert payload["game"]["player1_score"] == 1
+    assert payload["game"]["round_number"] == 1
+    assert payload["game"]["solo_progress"]["claimed_cells"] == 3
+    assert payload["game"]["solo_progress"]["boards_won"] == 1
+    assert payload["completed_round"]["round_number"] == 1
+    assert payload["completed_round"]["status"] == "completed"
+
+    next_move = client.post(
+        f"/quiz/tictactoe/games/{game_id}/moves",
+        json={"row_index": 0, "col_index": 1, "player_id": 1},
+    )
+    assert next_move.status_code == 409
+
+
+def test_solo_tictactoe_wrong_answers_consume_strikes_and_finish_loss(
+    client: TestClient,
+):
+    game = _create_solo_ttt_game(client)
+    game_id = game["id"]
+    cell = _find_cell(game, 0, 0)
+    invalid_player_id = _invalid_player_for_serialized_cell(client, cell)
+
+    for expected_used in (1, 2):
+        response = client.post(
+            f"/quiz/tictactoe/games/{game_id}/moves",
+            json={
+                "row_index": 0,
+                "col_index": 0,
+                "player_id": invalid_player_id,
+            },
+        )
+        assert response.status_code == 200
+        payload = _action_payload(response)
+        assert payload["result"] == "incorrect"
+        assert payload["terminal"] is False
+        assert payload["game"]["status"] == "active"
+        assert payload["game"]["solo_progress"]["strikes_used"] == expected_used
+        assert (
+            payload["game"]["solo_progress"]["strikes_remaining"]
+            == 3 - expected_used
+        )
+        assert _find_cell(payload["game"], 0, 0)["claimed_by_player"] is None
+
+    final_response = client.post(
+        f"/quiz/tictactoe/games/{game_id}/moves",
+        json={
+            "row_index": 0,
+            "col_index": 0,
+            "player_id": invalid_player_id,
+        },
+    )
+    assert final_response.status_code == 200
+    final_payload = _action_payload(final_response)
+    assert final_payload["result"] == "solo_lost"
+    assert final_payload["terminal"] is True
+    assert final_payload["game"]["status"] == "finished"
+    assert final_payload["game"]["winner_player"] is None
+    assert final_payload["game"]["solo_progress"]["strikes_used"] == 3
+    assert final_payload["game"]["solo_progress"]["strikes_remaining"] == 0
+    assert final_payload["completed_round"]["round_number"] == 1
+    assert final_payload["completed_round"]["status"] == "drawn"
+
+
+def test_solo_tictactoe_full_board_without_line_finishes_defensive_draw(
+    client: TestClient,
+):
+    game = _create_solo_ttt_game(client)
+    game_id = game["id"]
+
+    with client.session_local() as db:
+        player_ids = [player.id for player in db.query(Player).order_by(Player.id).limit(2)]
+        round_obj = (
+            db.query(QuizTicTacToeRound)
+            .filter(
+                QuizTicTacToeRound.game_id == game_id,
+                QuizTicTacToeRound.status == "active",
+            )
+            .one()
+        )
+        claims = {
+            (0, 0): 1,
+            (0, 1): 1,
+            (0, 2): 2,
+            (1, 0): 2,
+            (1, 1): 2,
+            (1, 2): 1,
+            (2, 0): 1,
+            (2, 1): 2,
+        }
+        for cell in round_obj.cells:
+            claim = claims.get((cell.row_index, cell.col_index))
+            if claim is None:
+                continue
+            cell.claimed_by_player = claim
+            cell.claimed_player_id = player_ids[claim - 1]
+        db.commit()
+
+    latest_state = client.get(f"/quiz/tictactoe/games/{game_id}").json()
+    final_cell = _find_cell(latest_state, 2, 2)
+    player_id = _valid_player_for_cell(client, final_cell)
+    response = client.post(
+        f"/quiz/tictactoe/games/{game_id}/moves",
+        json={"row_index": 2, "col_index": 2, "player_id": player_id},
+    )
+
+    assert response.status_code == 200
+    payload = _action_payload(response)
+    assert payload["result"] == "solo_drawn"
+    assert payload["terminal"] is True
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] is None
+    assert payload["game"]["solo_progress"]["claimed_cells"] == 5
+    assert payload["completed_round"]["status"] == "drawn"
+
+
+def test_solo_tictactoe_show_answers_finishes_without_next_round(client: TestClient):
+    game = _create_solo_ttt_game(client)
+    response = client.post(f"/quiz/tictactoe/games/{game['id']}/give-up")
+
+    assert response.status_code == 200
+    payload = _action_payload(response)
+    assert payload["result"] == "gave_up"
+    assert payload["terminal"] is True
+    assert payload["game"]["status"] == "finished"
+    assert payload["game"]["winner_player"] is None
+    assert payload["game"]["round_number"] == 1
+    assert payload["completed_round"]["round_number"] == 1
+    assert payload["completed_round"]["status"] == "drawn"
+    for cell in payload["completed_round"]["cells"]:
+        assert isinstance(cell["sample_answers"], list)
+
+
 @pytest.mark.parametrize(
     ("achievement_axis_type", "achievement_value", "achievement_label"),
     [
@@ -1695,7 +1894,8 @@ def test_tictactoe_completed_round_uses_batched_sample_answers(
 
     assert final_response is not None
     payload = _action_payload(final_response)
-    assert payload["result"] == "board_complete"
+    assert payload["result"] == "solo_won"
+    assert payload["game"]["status"] == "finished"
     assert payload["completed_round"]["round_number"] == 1
     for cell in payload["completed_round"]["cells"]:
         assert isinstance(cell["sample_answers"], list)
