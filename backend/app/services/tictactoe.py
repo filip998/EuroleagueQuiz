@@ -48,6 +48,8 @@ TicTacToeConflictError = ConflictGameActionError
 TicTacToeNotImplementedError = UnsupportedGameActionError
 
 GUEST_ID_MAX_LENGTH = 64
+SOLO_STRIKE_LIMIT = 3
+SOLO_TOTAL_CELLS = 9
 AxisKey = tuple[str, str]
 CellKey = tuple[AxisKey, AxisKey]
 _EMPTY_PLAYER_SET: frozenset[int] = frozenset()
@@ -1497,6 +1499,50 @@ def get_active_round(db: Session, game_id: int) -> QuizTicTacToeRound:
     return round_obj
 
 
+def _solo_strikes_used(game: QuizTicTacToeGame) -> int:
+    return min(max(game.player2_score or 0, 0), SOLO_STRIKE_LIMIT)
+
+
+def _solo_progress(
+    game: QuizTicTacToeGame,
+    round_obj: QuizTicTacToeRound | None,
+) -> dict[str, int]:
+    strikes_used = _solo_strikes_used(game)
+    claimed_cells = 0
+    total_cells = SOLO_TOTAL_CELLS
+    if round_obj is not None:
+        total_cells = len(round_obj.cells) or SOLO_TOTAL_CELLS
+        claimed_cells = sum(
+            1
+            for cell in round_obj.cells
+            if cell.claimed_by_player == 1
+        )
+    return {
+        "claimed_cells": claimed_cells,
+        "total_cells": total_cells,
+        "strikes_used": strikes_used,
+        "strikes_remaining": max(0, SOLO_STRIKE_LIMIT - strikes_used),
+        "strike_limit": SOLO_STRIKE_LIMIT,
+        "boards_won": max(game.player1_score or 0, 0),
+    }
+
+
+def _finish_solo_round(
+    game: QuizTicTacToeGame,
+    round_obj: QuizTicTacToeRound,
+    *,
+    round_status: str,
+    winner_player: int | None,
+) -> None:
+    round_obj.status = round_status
+    round_obj.winner_player = winner_player
+    game.status = "finished"
+    game.winner_player = winner_player
+    game.pending_draw_from = None
+    game.pending_draw_to = None
+    game.updated_at = datetime.utcnow()
+
+
 def submit_move(
     db: Session,
     *,
@@ -1542,7 +1588,22 @@ def submit_move(
             else None
         )
         now = datetime.utcnow()
-        if not is_solo:
+        if is_solo:
+            game.player2_score = _solo_strikes_used(game) + 1
+            if _solo_strikes_used(game) >= SOLO_STRIKE_LIMIT:
+                _finish_solo_round(
+                    game,
+                    round_obj,
+                    round_status="drawn",
+                    winner_player=None,
+                )
+                db.flush()
+                return _move_result(
+                    "solo_lost",
+                    include_feedback=include_feedback,
+                    feedback=feedback,
+                )
+        else:
             game.current_player = _other_player(acting_player)
         game.turn_started_at = now
         game.updated_at = now
@@ -1558,13 +1619,28 @@ def submit_move(
     cell.claimed_at = datetime.utcnow()
 
     if is_solo:
-        # Solo: no match scoring — just complete the board
-        if _has_three_in_row(round_obj, acting_player) or _is_board_full(round_obj):
-            round_obj.status = "completed" if _has_three_in_row(round_obj, acting_player) else "drawn"
-            round_obj.winner_player = acting_player if round_obj.status == "completed" else None
-            create_next_round(db, game, started_by_player=1)
+        if _has_three_in_row(round_obj, acting_player):
+            game.player1_score += 1
+            _finish_solo_round(
+                game,
+                round_obj,
+                round_status="completed",
+                winner_player=acting_player,
+            )
             db.flush()
-            return _move_result("board_complete", include_feedback=include_feedback)
+            return _move_result("solo_won", include_feedback=include_feedback)
+
+        # Defensive: normal solo play cannot fill a one-player board without a
+        # line, but persisted/synthetic no-line full boards should still end.
+        if _is_board_full(round_obj):
+            _finish_solo_round(
+                game,
+                round_obj,
+                round_status="drawn",
+                winner_player=None,
+            )
+            db.flush()
+            return _move_result("solo_drawn", include_feedback=include_feedback)
 
         game.updated_at = datetime.utcnow()
         db.flush()
@@ -1609,17 +1685,19 @@ def submit_move(
 
 
 def give_up_round(db: Session, game: QuizTicTacToeGame) -> int:
-    """Give up the current round in a solo game. Returns the round number that was given up."""
+    """Reveal answers and finish the current solo game."""
     if game.mode != "single_player":
         raise TicTacToeError("Give up is only available in single player mode")
     _ensure_game_playable(game)
 
     round_obj = get_active_round(db, game.id)
     given_up_round_number = round_obj.round_number
-    round_obj.status = "drawn"
-    round_obj.winner_player = None
-
-    create_next_round(db, game, started_by_player=1)
+    _finish_solo_round(
+        game,
+        round_obj,
+        round_status="drawn",
+        winner_player=None,
+    )
     db.flush()
     return given_up_round_number
 
@@ -1854,6 +1932,9 @@ def serialize_game_state(
             "respond_to": game.pending_draw_to,
         }
         if game.pending_draw_from is not None
+        else None,
+        "solo_progress": _solo_progress(game, round_obj)
+        if game.mode == "single_player"
         else None,
         "round": round_payload,
     }

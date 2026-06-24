@@ -27,7 +27,15 @@ from app.services.race_rounds import public_round_timer_delay_seconds_from_state
 from app.services.realtime import TurnTimerState
 
 
-_TICTACTOE_ROUND_RESULTS = {"round_won", "round_drawn", "match_won", "board_complete"}
+_TICTACTOE_ROUND_RESULTS = {
+    "round_won",
+    "round_drawn",
+    "match_won",
+    "board_complete",
+    "solo_won",
+    "solo_lost",
+    "solo_drawn",
+}
 _GUESS_THE_LIST_ROUND_RESULTS = {"round_won", "round_complete", "match_won", "board_complete"}
 _CAREER_ROUND_RESULTS = {"round_won", "match_won"}
 _PHOTO_ROUND_RESULTS = {"round_won", "match_won"}

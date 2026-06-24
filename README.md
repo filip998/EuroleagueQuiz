@@ -26,7 +26,7 @@ Then open `http://localhost:5173` to play.
 
 ## Games
 
-- **TicTacToe** — Claim cells on a 3×3 board by naming players who match both the row and column clue. Clues go beyond teams: shared teammates, nationality, season, position (Guard/Forward/Center), EuroLeague champions, and stat milestones (e.g. 15+ PPG). Solo, local 1v1, and online modes. Opening `/tictactoe` lands on online **Quick Match** — a near-one-click, lichess-style pool grid — with Solo, Local 1v1, and Play-a-Friend one tap away.
+- **TicTacToe** — Claim cells on a 3×3 board by naming players who match both the row and column clue. Clues go beyond teams: shared teammates, nationality, season, position (Guard/Forward/Center), EuroLeague champions, and stat milestones (e.g. 15+ PPG). Solo now has real stakes: complete three in a row before three wrong-answer strikes, then get a win/loss end screen with answer reveal and Play Again. Local 1v1 and online modes keep match scoring. Opening `/tictactoe` lands on online **Quick Match** — a near-one-click, lichess-style pool grid — with Solo, Local 1v1, and Play-a-Friend one tap away.
 - **Guess the List** — Guess rosters, champion rosters, all-time leaders, single-season leaders, All-EuroLeague First+Second Teams, and MVP/Awards windows. Solo, local/online Classic, plus online-only Race with public Quick Match and private Play-a-Friend.
 - **Higher or Lower** — Compare player stats and build a streak. Easy, medium, and hard tiers with leaderboards.
 - **Career Quiz** — Guess the player from a professional club career timeline built from Wikipedia. EuroLeague data only selects which players are eligible; the displayed career follows Wikipedia alone. Solo practice, 2-player online friend races, and public Quick Match races.
@@ -245,6 +245,15 @@ every axis type the backend can serve (`team`, `nationality`, `played_with`,
 `season`, `position`, `champion`, `stat_milestone`) with type-level copy aligned
 to the per-cell search prompt; it touches no game state, routes, or existing
 data-testids, so solo/local/online/anonymous play is unaffected.
+
+Solo TicTacToe has a terminal board objective instead of an endless next-board
+loop: three in a row returns `solo_won` and finishes the game, each wrong answer
+spends one of three strikes, exhausting strikes returns `solo_lost`, and a
+defensive no-line full-board state returns `solo_drawn`. The serialized
+`solo_progress` block reports claimed cells, strike usage, and boards won for
+the live progress panel. The neutral **Show answers** control finishes the solo
+game, reveals sample answers, and routes to the same Play Again/Home result
+screen.
 
 Online TicTacToe, Guess the List, Career Quiz, and Photo Quiz share an **Online Game Realtime Module**. The backend
 Module in `backend/app/services/realtime.py` owns WebSocket connection cleanup,

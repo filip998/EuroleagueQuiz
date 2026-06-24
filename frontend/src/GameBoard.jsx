@@ -29,6 +29,152 @@ const AXIS_CHIP_STYLES = {
   stat_milestone: "bg-rose-50 text-rose-800 border-rose-200",
 };
 
+const SOLO_STRIKE_LIMIT = 3;
+const SOLO_TOTAL_CELLS = 9;
+const SOLO_TERMINAL_RESULTS = new Set(["solo_won", "solo_lost", "solo_drawn", "gave_up"]);
+const ROUND_REVEAL_RESULTS = new Set([
+  "round_won",
+  "round_drawn",
+  "match_won",
+  "board_complete",
+  "solo_won",
+  "solo_lost",
+  "solo_drawn",
+  "draw_accepted",
+]);
+
+function buildSoloProgress(game, round) {
+  const progress = game?.solo_progress || {};
+  const strikeLimit = progress.strike_limit ?? SOLO_STRIKE_LIMIT;
+  const strikesUsed = Math.min(
+    Math.max(progress.strikes_used ?? game?.player2_score ?? 0, 0),
+    strikeLimit
+  );
+  const totalCells = progress.total_cells ?? round?.cells?.length ?? SOLO_TOTAL_CELLS;
+  const claimedCells =
+    progress.claimed_cells ??
+    round?.cells?.filter((cell) => cell.claimed_by_player === 1).length ??
+    0;
+  return {
+    claimedCells,
+    totalCells,
+    strikesUsed,
+    strikesRemaining: progress.strikes_remaining ?? Math.max(0, strikeLimit - strikesUsed),
+    strikeLimit,
+    boardsWon: progress.boards_won ?? Math.max(game?.player1_score ?? 0, 0),
+  };
+}
+
+function clueText(axis) {
+  return axis?.display_label || axis?.team_name || "Clue";
+}
+
+function SoloAnswerReveal({ round }) {
+  const cellsWithAnswers =
+    round?.cells?.filter((cell) => cell.sample_answers?.length || cell.claimed_player_name) || [];
+  if (!cellsWithAnswers.length) return null;
+
+  return (
+    <div className="mb-6 text-left">
+      <h3 className="text-sm font-bold uppercase tracking-wide text-elq-muted mb-2">
+        Answer reveal
+      </h3>
+      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+        {cellsWithAnswers.map((cell) => (
+          <div
+            key={`${cell.row_index}-${cell.col_index}`}
+            className="rounded-xl border border-elq-border bg-elq-bg/70 p-3"
+          >
+            <div className="text-xs font-semibold text-elq-dark">
+              {clueText(cell.row_axis)} × {clueText(cell.col_axis)}
+            </div>
+            {cell.claimed_player_name && (
+              <div className="text-xs text-elq-player1 mt-1">
+                Your pick: {cell.claimed_player_name}
+              </div>
+            )}
+            {cell.sample_answers?.length > 0 && (
+              <div className="text-xs text-elq-muted mt-1">
+                {cell.claimed_player_name ? "Also works: " : "Examples: "}
+                {cell.sample_answers.join(", ")}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SoloEndStats({ progress }) {
+  return (
+    <div className="grid grid-cols-2 gap-2 mb-5 text-sm">
+      <div className="rounded-xl bg-elq-bg border border-elq-border p-3">
+        <div className="text-elq-muted">Cells claimed</div>
+        <div className="font-bold text-elq-dark">
+          {progress.claimedCells}/{progress.totalCells}
+        </div>
+      </div>
+      <div className="rounded-xl bg-elq-bg border border-elq-border p-3">
+        <div className="text-elq-muted">Strikes</div>
+        <div className="font-bold text-elq-dark">
+          {progress.strikesUsed}/{progress.strikeLimit}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isRoundFull(round) {
+  return Boolean(
+    round?.cells?.length &&
+      round.cells.every((cell) => cell.claimed_by_player != null)
+  );
+}
+
+function soloResultPresentation(game, progress, lastResult, round) {
+  const result =
+    lastResult ||
+    (game.winner_player === 1
+      ? "solo_won"
+      : progress.strikesRemaining === 0
+        ? "solo_lost"
+        : round?.status === "drawn" && isRoundFull(round)
+          ? "solo_drawn"
+          : "gave_up");
+
+  if (result === "solo_won") {
+    return {
+      emoji: "🏆",
+      title: "Solo board won!",
+      subtitle: `Three in a row with ${progress.strikesRemaining} strike${progress.strikesRemaining === 1 ? "" : "s"} left.`,
+      celebrate: true,
+    };
+  }
+  if (result === "solo_lost") {
+    return {
+      emoji: "❌",
+      title: "Out of strikes",
+      subtitle: `You used all ${progress.strikeLimit} strikes before completing a line.`,
+      celebrate: false,
+    };
+  }
+  if (result === "solo_drawn") {
+    return {
+      emoji: "🤝",
+      title: "Board complete",
+      subtitle: "No three-in-a-row on the finished board.",
+      celebrate: false,
+    };
+  }
+  return {
+    emoji: "👀",
+    title: "Answers revealed",
+    subtitle: "Study the board, then try again when you are ready.",
+    celebrate: false,
+  };
+}
+
 export function AxisLabel({ axis }) {
   const axisType = axis?.axis_type;
   const isTeam = axisType === "team";
@@ -113,7 +259,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     const feedback = message.feedback || null;
     setGame(message.state);
     setError(null);
-    if (result && message.completedRound && ["round_won", "round_drawn", "match_won", "board_complete", "draw_accepted"].includes(result)) {
+    if (result && message.completedRound && ROUND_REVEAL_RESULTS.has(result)) {
       startRoundTransition(result, message.completedRound, feedback);
     } else if (result) {
       setLastResult(result);
@@ -136,6 +282,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   });
 
   const round = game?.round;
+  const soloProgress = isSolo ? buildSoloProgress(game, round) : null;
 
   // Sync timer
   useEffect(() => {
@@ -204,7 +351,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
   function startRoundTransition(result, completedRound, feedback = null) {
     if (completedRound) {
-      setRoundTransition({ countdown: 3, completedRound, result });
+      setRoundTransition({
+        countdown: SOLO_TERMINAL_RESULTS.has(result) ? null : 3,
+        completedRound,
+        result,
+      });
     }
     setLastResult(result);
     setLastFeedback(feedback);
@@ -301,8 +452,10 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       const res = await giveUpGame(game.id);
       setGame(res.state);
       if (res.completedRound) {
-        setRoundTransition({ countdown: null, completedRound: res.completedRound, result: "gave_up" });
-        setLastResult("gave_up");
+        const result = res.result || "gave_up";
+        setRoundTransition({ countdown: null, completedRound: res.completedRound, result });
+        setLastResult(result);
+        setLastFeedback(res.feedback || null);
         setSelectedCell(null);
       }
     } catch (err) {
@@ -387,12 +540,15 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
   const resultMessages = {
     correct: isSolo ? "\u2705 Correct!" : "\u2705 Correct! Turn switches.",
-    incorrect: isSolo ? "\u274c Incorrect." : "\u274c Incorrect. Turn switches.",
+    incorrect: isSolo ? "\u274c Incorrect. Strike lost." : "\u274c Incorrect. Turn switches.",
     round_won: "\ud83c\udfc6 Round won!",
     round_drawn: "\ud83e\udd1d Round drawn \u2014 new board!",
     match_won: "\ud83c\udf89 Match won!",
     board_complete: "\u2705 Board complete!",
-    gave_up: "\ud83c\udff3\ufe0f Round given up.",
+    solo_won: "\ud83c\udf89 Solo win! Three in a row.",
+    solo_lost: "\u274c Out of strikes.",
+    solo_drawn: "\ud83e\udd1d Board complete \u2014 no line.",
+    gave_up: "\ud83d\udc40 Answers revealed.",
     draw_offered: "\ud83e\udd1d Draw offered.",
     draw_accepted: "\ud83e\udd1d Draw accepted \u2014 new board!",
     draw_declined: "Draw declined \u2014 game continues.",
@@ -422,6 +578,23 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       : isOnline && myPlayer != null
         ? "Better luck next time."
         : "Match complete \u2014 well played!");
+
+  if (isSolo && game.status === "finished" && !inTransition) {
+    const presentation = soloResultPresentation(game, soloProgress, lastResult, round);
+    return (
+      <GameResult
+        emoji={presentation.emoji}
+        title={presentation.title}
+        subtitle={presentation.subtitle}
+        onPlayAgain={onNewGame}
+        onHome={onHome}
+        celebrate={presentation.celebrate}
+      >
+        <SoloEndStats progress={soloProgress} />
+        <SoloAnswerReveal round={round} />
+      </GameResult>
+    );
+  }
 
   if (!isSolo && game.status === "finished" && !inTransition) {
     const finishedWinnerName = winnerDisplayName(game);
@@ -464,12 +637,56 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       <div className="flex-1 flex flex-col items-center px-4 py-4 sm:py-6 max-w-2xl mx-auto w-full">
         {/* Scoreboard */}
         {isSolo ? (
-          <div className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-4 sm:p-5 mb-4 animate-fade-in-up">
-            <div className="text-center">
-              <div className="text-sm font-semibold text-elq-player1">
-                {game.player1_name}
+          <div
+            className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-4 sm:p-5 mb-4 animate-fade-in-up"
+            aria-label="TicTacToe solo progress"
+          >
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wide text-elq-muted">
+                  Solo run
+                </div>
+                <div className="text-sm font-semibold text-elq-player1">
+                  {game.player1_name}
+                </div>
+              </div>
+              {game.turn_seconds && game.status === "active" && timeLeft !== null && (
+                <div
+                  className={`px-3 py-1 rounded-full text-xs font-bold ${
+                    timeLeft <= 5
+                      ? "bg-red-50 text-red-700 border border-red-200"
+                      : "bg-elq-bg text-elq-muted border border-elq-border"
+                  }`}
+                >
+                  {timeLeft}s
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-elq-bg border border-elq-border p-3 text-center">
+                <div className="text-xs text-elq-muted">Claimed cells</div>
+                <div className="text-xl font-bold text-elq-dark">
+                  {soloProgress.claimedCells}/{soloProgress.totalCells}
+                </div>
+              </div>
+              <div className="rounded-xl bg-elq-bg border border-elq-border p-3 text-center">
+                <div className="text-xs text-elq-muted">Strikes remaining</div>
+                <div
+                  className={`text-xl font-bold ${
+                    soloProgress.strikesRemaining <= 1
+                      ? "text-red-700"
+                      : "text-elq-dark"
+                  }`}
+                >
+                  {soloProgress.strikesRemaining}/{soloProgress.strikeLimit}
+                </div>
               </div>
             </div>
+            {soloProgress.boardsWon > 0 && (
+              <div className="mt-3 text-center text-xs font-semibold text-elq-muted">
+                Boards won: {soloProgress.boardsWon}
+              </div>
+            )}
           </div>
         ) : (
         <div className="w-full">
@@ -509,17 +726,22 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           <div className="w-full mb-4 animate-slide-down">
             <div
               className={`p-3 rounded-xl text-center text-sm font-medium ${
-                ["round_won", "match_won", "board_complete"].includes(lastResult)
+                ["round_won", "match_won", "board_complete", "solo_won"].includes(lastResult)
                   ? "bg-elq-orange/10 text-elq-orange border border-elq-orange/20"
                   : lastResult === "correct"
                     ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                    : lastResult === "incorrect" || lastResult === "time_expired"
+                    : ["incorrect", "time_expired", "solo_lost"].includes(lastResult)
                       ? "bg-red-50 text-red-700 border border-red-200"
                       : "bg-amber-50 text-amber-700 border border-amber-200"
               }`}
             >
               {resultMessages[lastResult] || lastResult}
-              {lastResult === "incorrect" && lastFeedback?.message && (
+              {isSolo && lastResult === "incorrect" && soloProgress && (
+                <span className="block mt-1 font-normal">
+                  {soloProgress.strikesRemaining} strike{soloProgress.strikesRemaining === 1 ? "" : "s"} remaining.
+                </span>
+              )}
+              {["incorrect", "solo_lost"].includes(lastResult) && lastFeedback?.message && (
                 <span className="block mt-1 font-normal">
                   {lastFeedback.message}
                 </span>
@@ -533,10 +755,17 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
             {inTransition && roundTransition.countdown === null && (
               <div className="text-center mt-3">
                 <button
-                  onClick={() => { setRoundTransition(null); setLastResult(null); setLastFeedback(null); }}
+                  onClick={() => {
+                    const preserveResult = SOLO_TERMINAL_RESULTS.has(roundTransition.result);
+                    setRoundTransition(null);
+                    if (!preserveResult) {
+                      setLastResult(null);
+                      setLastFeedback(null);
+                    }
+                  }}
                   className="px-6 py-2.5 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all"
                 >
-                  Start New Round
+                  {SOLO_TERMINAL_RESULTS.has(roundTransition.result) ? "See Result" : "Start New Round"}
                 </button>
               </div>
             )}
@@ -658,15 +887,15 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           ))}
         </div>
 
-        {/* Give Up button for solo mode */}
+        {/* Answer reveal button for solo mode */}
         {isSolo && game.status === "active" && !inTransition && (
           <div className="mt-6 text-center">
             <button
               onClick={handleGiveUp}
               disabled={loading}
-              className="text-sm text-elq-muted hover:text-red-500 transition-colors underline underline-offset-2"
+              className="text-sm text-elq-muted hover:text-elq-text transition-colors underline underline-offset-2"
             >
-              Give Up
+              Show answers
             </button>
           </div>
         )}

@@ -110,6 +110,38 @@ function activeGame(overrides = {}) {
   };
 }
 
+function soloGame(overrides = {}) {
+  return activeGame({
+    mode: "single_player",
+    player1_name: "Solo Ace",
+    player2_name: "",
+    current_player: 1,
+    solo_progress: {
+      claimed_cells: 0,
+      total_cells: 9,
+      strikes_used: 0,
+      strikes_remaining: 3,
+      strike_limit: 3,
+      boards_won: 0,
+    },
+    ...overrides,
+  });
+}
+
+function completedRound(overrides = {}) {
+  return {
+    columns: [axis("A"), axis("B"), axis("C")],
+    rows: [axis("1"), axis("2"), axis("3")],
+    status: "completed",
+    winner_player: 1,
+    cells: boardCells().map((cell) => ({
+      ...cell,
+      sample_answers: ["Vasilije Micic"],
+    })),
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   realtimeHolder.opts = null;
@@ -396,6 +428,198 @@ describe("GameBoard wrong-guess feedback", () => {
   });
 });
 
+describe("GameBoard solo stakes", () => {
+  it("shows live claimed-cell and strike progress in solo mode", () => {
+    render(
+      <GameBoard
+        initialState={soloGame({
+          solo_progress: {
+            claimed_cells: 4,
+            total_cells: 9,
+            strikes_used: 1,
+            strikes_remaining: 2,
+            strike_limit: 3,
+            boards_won: 1,
+          },
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    const progress = screen.getByLabelText("TicTacToe solo progress");
+    expect(within(progress).getByText("Solo run")).toBeInTheDocument();
+    expect(within(progress).getByText("Solo Ace")).toBeInTheDocument();
+    expect(within(progress).getByText("Claimed cells")).toBeInTheDocument();
+    expect(within(progress).getByText("4/9")).toBeInTheDocument();
+    expect(within(progress).getByText("Strikes remaining")).toBeInTheDocument();
+    expect(within(progress).getByText("2/3")).toBeInTheDocument();
+    expect(screen.getByText("Boards won: 1")).toBeInTheDocument();
+    expect(screen.getByText("Show answers")).toBeInTheDocument();
+    expect(screen.queryByText("Give Up")).not.toBeInTheDocument();
+  });
+
+  it("shows strike feedback after a solo wrong answer", async () => {
+    const feedback = { message: "Nando De Colo did not match either clue." };
+    submitMove.mockResolvedValue({
+      state: soloGame({
+        solo_progress: {
+          claimed_cells: 0,
+          total_cells: 9,
+          strikes_used: 1,
+          strikes_remaining: 2,
+          strike_limit: 3,
+          boards_won: 0,
+        },
+      }),
+      result: "incorrect",
+      feedback,
+    });
+
+    render(
+      <GameBoard
+        initialState={soloGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    await waitFor(() =>
+      expect(submitMove).toHaveBeenCalledWith(7, {
+        row_index: 0,
+        col_index: 0,
+        player_id: 99,
+      })
+    );
+    expect(await screen.findByText("❌ Incorrect. Strike lost.")).toBeInTheDocument();
+    expect(screen.getByText("2 strikes remaining.")).toBeInTheDocument();
+    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+  });
+
+  it("pauses on the solo answer reveal before showing the win screen", async () => {
+    const revealRound = completedRound();
+    submitMove.mockResolvedValue({
+      state: soloGame({
+        status: "finished",
+        winner_player: 1,
+        player1_score: 1,
+        solo_progress: {
+          claimed_cells: 3,
+          total_cells: 9,
+          strikes_used: 0,
+          strikes_remaining: 3,
+          strike_limit: 3,
+          boards_won: 1,
+        },
+        round: revealRound,
+      }),
+      result: "solo_won",
+      completedRound: revealRound,
+    });
+
+    render(
+      <GameBoard
+        initialState={soloGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    expect(await screen.findByText(/Solo win! Three in a row/)).toBeInTheDocument();
+    expect(screen.queryByText(/Next board in/)).not.toBeInTheDocument();
+    expect(screen.getByText("See Result")).toBeInTheDocument();
+    expect(screen.getAllByText("Vasilije Micic").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByText("See Result"));
+
+    expect(await screen.findByRole("heading", { name: "Solo board won!" })).toBeInTheDocument();
+    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getAllByText(/Vasilije Micic/).length).toBeGreaterThan(0);
+  });
+
+  it("uses Show answers to reveal the board and then show the neutral result screen", async () => {
+    const revealRound = completedRound({
+      status: "drawn",
+      winner_player: null,
+    });
+    giveUpGame.mockResolvedValue({
+      state: soloGame({
+        status: "finished",
+        winner_player: null,
+        round: revealRound,
+      }),
+      result: "gave_up",
+      completedRound: revealRound,
+    });
+
+    render(
+      <GameBoard
+        initialState={soloGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Show answers"));
+
+    await waitFor(() => expect(giveUpGame).toHaveBeenCalledWith(7));
+    expect(await screen.findByText("👀 Answers revealed.")).toBeInTheDocument();
+    expect(screen.getByText("See Result")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("See Result"));
+
+    expect(await screen.findByRole("heading", { name: "Answers revealed" })).toBeInTheDocument();
+    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+  });
+
+  it("renders the defensive solo draw result screen for a full no-winner board", () => {
+    const fullDrawRound = completedRound({
+      status: "drawn",
+      winner_player: null,
+      cells: boardCells().map((cell, index) => ({
+        ...cell,
+        claimed_by_player: index % 2 === 0 ? 1 : 2,
+        claimed_player_name: index % 2 === 0 ? "Solo Pick" : "Blocker",
+        sample_answers: ["Vasilije Micic"],
+      })),
+    });
+
+    render(
+      <GameBoard
+        initialState={soloGame({
+          status: "finished",
+          winner_player: null,
+          solo_progress: {
+            claimed_cells: 5,
+            total_cells: 9,
+            strikes_used: 1,
+            strikes_remaining: 2,
+            strike_limit: 3,
+            boards_won: 0,
+          },
+          round: fullDrawRound,
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Board complete" })).toBeInTheDocument();
+    expect(screen.getByText("No three-in-a-row on the finished board.")).toBeInTheDocument();
+  });
+});
+
 describe("GameBoard end-of-game result", () => {
   it("reveals the inline result and clears the waiting indicator when the opponent resigns", async () => {
     // Player 2 is the viewer and it is player 1's turn, so the stale-prone
@@ -504,20 +728,34 @@ describe("GameBoard end-of-game result", () => {
     expect(screen.getByText("Home")).toBeInTheDocument();
   });
 
-  it("does not render the result screen for a finished solo game", () => {
+  it("renders a finished solo loss result screen after refresh", () => {
     render(
       <GameBoard
-        initialState={activeGame({ mode: "single_player", status: "finished", winner_player: 1 })}
+        initialState={soloGame({
+          status: "finished",
+          winner_player: null,
+          solo_progress: {
+            claimed_cells: 2,
+            total_cells: 9,
+            strikes_used: 3,
+            strikes_remaining: 0,
+            strike_limit: 3,
+            boards_won: 0,
+          },
+          round: completedRound({
+            status: "drawn",
+            winner_player: null,
+          }),
+        })}
         onNewGame={() => {}}
         onHome={() => {}}
         onlineInfo={{ isOnline: false }}
       />
     );
 
-    // Solo games keep their final board (the shared result screen is online-only),
-    // so neither the winner headline nor the Play Again action appears.
-    expect(screen.queryByText(/WINS!/)).not.toBeInTheDocument();
-    expect(screen.queryByText("Play Again")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Out of strikes" })).toBeInTheDocument();
+    expect(screen.getByText("Play Again")).toBeInTheDocument();
+    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
   });
 
   it("does not credit Player 2 when a finished online game has no winner", async () => {
@@ -592,7 +830,7 @@ describe("GameBoard solo / local never shows the online Resign control (issue #1
   // `onlineInfo`. The board must still refuse to go online based on the game mode.
   const staleSeat = { isOnline: true, playerNumber: 1 };
 
-  it("renders only Give Up (no Resign) for a single_player game with a stale seat", () => {
+  it("renders only Show answers (no Resign) for a single_player game with a stale seat", () => {
     render(
       <GameBoard
         initialState={activeGame({ mode: "single_player" })}
@@ -602,7 +840,7 @@ describe("GameBoard solo / local never shows the online Resign control (issue #1
       />
     );
 
-    expect(screen.getByText("Give Up")).toBeInTheDocument();
+    expect(screen.getByText("Show answers")).toBeInTheDocument();
     expect(screen.queryByText("Resign")).not.toBeInTheDocument();
     // The leak is behavioural too: the realtime transport must stay disabled.
     expect(realtimeHolder.opts.enabled).toBe(false);
