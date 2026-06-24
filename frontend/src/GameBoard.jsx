@@ -12,6 +12,7 @@ import ClubLogo from "./ClubLogo";
 import WaitingLobby from "./WaitingLobby";
 import ResignControl from "./ResignControl";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
+import TicTacToeGuide from "./TicTacToeGuide";
 import { buildInviteUrl } from "./inviteLink";
 import { clearOnlineInfo } from "./onlineRecovery";
 import { forgetQuickMatchSeat } from "./quickMatchSeats";
@@ -539,6 +540,10 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           </div>
         )}
 
+        {/* Onboarding: objective, first-run how-to, clue legend */}
+        <div className="w-full">
+          <TicTacToeGuide />
+        </div>
         {/* Board */}
         <div className="w-full animate-fade-in-up" style={{ animationDelay: "100ms" }}>
           {/* Column headers */}

@@ -232,6 +232,20 @@ with a 10-game minimum, plus 30+ points in one game and 1,000+ EuroLeague career
 points summed from `player_season_stats`. The 3,000-point legend tier is defined
 for future use but not shipped as an axis because its pool is below the guard.
 
+The TicTacToe board ships additive onboarding chrome in
+`frontend/src/TicTacToeGuide.jsx`, rendered above the grid in every mode by
+`GameBoard.jsx`: a persistent one-line objective, a dismissible first-run
+how-to (the "seen" flag is stored try/catch-safe in `localStorage` under
+`elq_ttt_howto_seen`, degrading to always-showing when storage is unavailable),
+and an always-present **How to play** / **Clue legend** affordance row. The
+how-to and legend open as portal-mounted, focus-trapped dialogs (role=`dialog`,
+`aria-modal`, Esc/backdrop close, focus restoration, `prefers-reduced-motion`
+path) so they are never clipped by the board's overflow. The legend explains
+every axis type the backend can serve (`team`, `nationality`, `played_with`,
+`season`, `position`, `champion`, `stat_milestone`) with type-level copy aligned
+to the per-cell search prompt; it touches no game state, routes, or existing
+data-testids, so solo/local/online/anonymous play is unaffected.
+
 Online TicTacToe, Guess the List, Career Quiz, and Photo Quiz share an **Online Game Realtime Module**. The backend
 Module in `backend/app/services/realtime.py` owns WebSocket connection cleanup,
 broadcast envelopes, server-side turn timers for timer-enabled games, disconnect-grace timers,
