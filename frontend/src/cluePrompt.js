@@ -24,9 +24,18 @@ function axisLabel(axis) {
 // The predicate describing what a player did for a single clue, e.g.
 // "played for <strong>Real Madrid</strong>". Used for clue pairings that the
 // backend matches as two independent facts joined by "and".
+// Generic clue used whenever an axis is missing or has no usable label, so the
+// prompt never renders a blank emphasized slot or a dangling verb phrase.
+const GENERIC_CLAUSE_PARTS = [{ text: "matches " }, { strong: "this clue" }];
+
 function axisClauseParts(axis) {
   const type = axis?.axis_type;
   const label = axisLabel(axis);
+  // `champion` carries its own non-empty fallback; every other known type emits
+  // the label directly, so a missing label would otherwise leave a blank slot.
+  if (!label && type !== "champion") {
+    return GENERIC_CLAUSE_PARTS;
+  }
   switch (type) {
     case "team":
       return [{ text: "played for " }, { strong: label }];
@@ -62,14 +71,16 @@ const PROMPT_PREFIX = "Find a player who ";
 export function buildCluePromptParts(rowAxis, colAxis) {
   const rowType = rowAxis?.axis_type;
   const colType = colAxis?.axis_type;
+  const rowLabel = axisLabel(rowAxis);
+  const colLabel = axisLabel(colAxis);
 
   // Both clues are teams: the natural "played for both A and B" phrasing.
-  if (rowType === "team" && colType === "team") {
+  if (rowType === "team" && colType === "team" && rowLabel && colLabel) {
     return [
       { text: `${PROMPT_PREFIX}played for both ` },
-      { strong: axisLabel(rowAxis) },
+      { strong: rowLabel },
       { text: " and " },
-      { strong: axisLabel(colAxis) },
+      { strong: colLabel },
     ];
   }
 
@@ -83,22 +94,29 @@ export function buildCluePromptParts(rowAxis, colAxis) {
       : seasonAxis === colAxis
         ? rowAxis
         : null;
+  const seasonLabel = axisLabel(seasonAxis);
+  const otherLabel = axisLabel(otherAxis);
 
-  if (seasonAxis && otherAxis?.axis_type === "team") {
+  if (seasonAxis && seasonLabel && otherLabel && otherAxis?.axis_type === "team") {
     return [
       { text: `${PROMPT_PREFIX}played for ` },
-      { strong: axisLabel(otherAxis) },
+      { strong: otherLabel },
       { text: " in the " },
-      { strong: axisLabel(seasonAxis) },
+      { strong: seasonLabel },
       { text: " season" },
     ];
   }
-  if (seasonAxis && otherAxis?.axis_type === "played_with") {
+  if (
+    seasonAxis &&
+    seasonLabel &&
+    otherLabel &&
+    otherAxis?.axis_type === "played_with"
+  ) {
     return [
       { text: `${PROMPT_PREFIX}was a teammate of ` },
-      { strong: axisLabel(otherAxis) },
+      { strong: otherLabel },
       { text: " in the " },
-      { strong: axisLabel(seasonAxis) },
+      { strong: seasonLabel },
       { text: " season" },
     ];
   }

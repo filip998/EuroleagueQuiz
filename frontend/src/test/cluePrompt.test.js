@@ -223,3 +223,52 @@ describe("buildCluePromptParts — robustness", () => {
     );
   });
 });
+
+describe("buildCluePromptParts — missing labels on known axes (hardening)", () => {
+  const noBlankStrongs = (parts) => {
+    for (const value of strongs(parts)) {
+      expect(value.trim().length).toBeGreaterThan(0);
+    }
+  };
+
+  it("never emits a blank slot when a team axis has no label", () => {
+    const labellessTeam = { axis_type: "team", value: "1", team_code: "VIR" };
+    const parts = buildCluePromptParts(labellessTeam, nationality("Serbia"));
+    noBlankStrongs(parts);
+    expect(sentence(parts)).toBe(
+      "Find a player who matches this clue and is from Serbia"
+    );
+    // The raw code must never leak even on the degraded path.
+    expect(sentence(parts)).not.toContain("VIR");
+  });
+
+  it("does not claim a same-season join when the season axis has no label", () => {
+    const labellessSeason = { axis_type: "season", value: "5" };
+    const parts = buildCluePromptParts(labellessSeason, madrid);
+    noBlankStrongs(parts);
+    // Falls back to the independent form rather than "in the  season".
+    expect(sentence(parts)).toBe(
+      "Find a player who matches this clue and played for Real Madrid"
+    );
+    expect(sentence(parts)).not.toMatch(/in the\s+season/);
+  });
+
+  it("does not use the both-team phrasing when one team has no label", () => {
+    const labellessTeam = { axis_type: "team", value: "9" };
+    const parts = buildCluePromptParts(labellessTeam, madrid);
+    noBlankStrongs(parts);
+    expect(sentence(parts)).toBe(
+      "Find a player who matches this clue and played for Real Madrid"
+    );
+    expect(sentence(parts)).not.toContain("played for both");
+  });
+
+  it("keeps the champion fallback even with no label", () => {
+    const labellessChampion = { axis_type: "champion", value: "euroleague_champion" };
+    const parts = buildCluePromptParts(labellessChampion, madrid);
+    noBlankStrongs(parts);
+    expect(sentence(parts)).toBe(
+      "Find a player who was a EuroLeague champion and played for Real Madrid"
+    );
+  });
+});
