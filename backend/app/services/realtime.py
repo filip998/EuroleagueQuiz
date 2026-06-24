@@ -453,6 +453,7 @@ class OnlineGameRealtimeModule:
         *,
         result: RealtimeResult | str | None = None,
         completed_round: dict[str, Any] | None = None,
+        feedback: dict[str, Any] | None = None,
         only_player: int | None = None,
     ) -> int:
         terminal = is_terminal_result(result, game_state)
@@ -467,6 +468,7 @@ class OnlineGameRealtimeModule:
                     game_state,
                     result=result,
                     completed_round=completed_round,
+                    feedback=feedback,
                 ),
                 only_player=only_player,
                 on_disconnect=(

@@ -20,7 +20,7 @@ from app.models import (
     Season,
     Team,
 )
-from app.models.tictactoe import QuizTicTacToeGame
+from app.models.tictactoe import QuizTicTacToeGame, QuizTicTacToeRound
 from app.routers import quiz as quiz_router
 from app.services import realtime as realtime_service
 from app.schemas.realtime import RealtimeServerMessageAdapter
@@ -297,6 +297,27 @@ def ttt_axis_session(tmp_path: Path):
             nationality="CountryB",
             position="Forward",
         ),
+        "champion_non_teammate": Player(
+            euroleague_code="AXP011",
+            first_name="Champion",
+            last_name="Nonteammate",
+            nationality="CountryB",
+            position="Guard",
+        ),
+        "season_team_mismatch": Player(
+            euroleague_code="AXP012",
+            first_name="Season",
+            last_name="TeamMismatch",
+            nationality="CountryB",
+            position="Forward",
+        ),
+        "season_teammate_mismatch": Player(
+            euroleague_code="AXP013",
+            first_name="Season",
+            last_name="TeammateMismatch",
+            nationality="CountryB",
+            position="Center",
+        ),
     }
     session.add_all(players.values())
     session.flush()
@@ -371,6 +392,22 @@ def ttt_axis_session(tmp_path: Path):
         start=date(2024, 7, 1),
         end=date(2024, 8, 1),
     )
+    add_stint(
+        "champion_non_teammate",
+        team_c,
+        past_season,
+        start=date(2023, 7, 1),
+        end=date(2023, 8, 1),
+        is_champion=True,
+    )
+    add_stint("season_team_mismatch", team_a, past_season)
+    add_stint("season_team_mismatch", team_b, current_season)
+    add_stint(
+        "season_teammate_mismatch",
+        team_b,
+        past_season,
+    )
+    add_stint("season_teammate_mismatch", team_a, current_season)
     for definition in SHIPPED_STAT_MILESTONE_DEFINITIONS:
         for player_key in ("guard", "forward"):
             session.add(
@@ -801,6 +838,7 @@ def test_tictactoe_startup_warm_logs_failures(
 def test_tictactoe_existing_axis_builders_and_matchers(ttt_axis_session):
     db, data = ttt_axis_session
     current_season = data["current_season"]
+    past_season = data["past_season"]
     team_a = data["teams"][0]
     players = data["players"]
 
@@ -818,6 +856,11 @@ def test_tictactoe_existing_axis_builders_and_matchers(ttt_axis_session):
         "axis_type": "played_with",
         "value": str(players["star"].id),
         "display_label": "Star Guard",
+    }
+    past_season_axis = {
+        "axis_type": "season",
+        "value": str(past_season.id),
+        "display_label": "2023/24",
     }
     season_axis = {
         "axis_type": "season",
@@ -1069,6 +1112,190 @@ def test_tictactoe_achievement_providers_builders_matchers_and_loose_cells(
     assert ttt_service._player_matches_cell(
         db, players["guard"].id, stat_axis, milestone_team_axis
     )
+
+
+def test_tictactoe_feedback_explains_champion_played_with_non_overlap(
+    ttt_axis_session,
+):
+    db, data = ttt_axis_session
+    players = data["players"]
+    player = players["champion_non_teammate"]
+    champion_axis = ttt_service._get_champion_candidates(db)[0]
+    played_with_axis = {
+        "axis_type": "played_with",
+        "value": str(players["star"].id),
+        "display_label": "Star Guard",
+    }
+
+    assert ttt_service._player_matches_axis(db, player.id, champion_axis)
+    assert not ttt_service._player_matches_axis(db, player.id, played_with_axis)
+    assert not ttt_service._player_matches_cell(
+        db,
+        player.id,
+        champion_axis,
+        played_with_axis,
+    )
+
+    feedback = ttt_service._build_incorrect_move_feedback(
+        db,
+        player,
+        champion_axis,
+        played_with_axis,
+    )
+
+    assert feedback["message"] == (
+        "Champion Nonteammate matched the row clue EuroLeague champion, "
+        "but not the column clue Played with Star Guard."
+    )
+    assert feedback["matched_axes"] == [
+        {
+            "side": "row",
+            "axis_type": "champion",
+            "value": "euroleague_champion",
+            "display_label": "EuroLeague champion",
+            "label": "EuroLeague champion",
+        }
+    ]
+    assert feedback["failed_axes"] == [
+        {
+            "side": "column",
+            "axis_type": "played_with",
+            "value": str(players["star"].id),
+            "display_label": "Star Guard",
+            "label": "Played with Star Guard",
+        }
+    ]
+
+
+def test_tictactoe_feedback_season_context_qualifies_failed_axis(
+    ttt_axis_session,
+):
+    db, data = ttt_axis_session
+    current_season = data["current_season"]
+    past_season = data["past_season"]
+    team_a = data["teams"][0]
+    players = data["players"]
+    season_axis = {
+        "axis_type": "season",
+        "value": str(current_season.id),
+        "display_label": "2024/25",
+    }
+    past_season_axis = {
+        "axis_type": "season",
+        "value": str(past_season.id),
+        "display_label": "2023/24",
+    }
+    team_axis = {
+        "axis_type": "team",
+        "value": str(team_a.id),
+        "display_label": team_a.name,
+    }
+    played_with_axis = {
+        "axis_type": "played_with",
+        "value": str(players["star"].id),
+        "display_label": "Star Guard",
+    }
+
+    team_mismatch = players["season_team_mismatch"]
+    assert ttt_service._player_matches_axis(db, team_mismatch.id, season_axis)
+    assert ttt_service._player_matches_axis(db, team_mismatch.id, team_axis)
+    assert not ttt_service._player_matches_cell(
+        db,
+        team_mismatch.id,
+        season_axis,
+        team_axis,
+    )
+    team_feedback = ttt_service._build_incorrect_move_feedback(
+        db,
+        team_mismatch,
+        season_axis,
+        team_axis,
+    )
+    assert team_feedback["message"] == (
+        "Season TeamMismatch matched the row clue 2024/25, "
+        "but not the column clue Axis Team 1 in 2024/25."
+    )
+    assert team_feedback["failed_axes"] == [
+        {
+            "side": "column",
+            "axis_type": "team",
+            "value": str(team_a.id),
+            "display_label": team_a.name,
+            "label": "Axis Team 1 in 2024/25",
+        }
+    ]
+
+    teammate_mismatch = players["season_teammate_mismatch"]
+    assert ttt_service._player_matches_axis(db, teammate_mismatch.id, past_season_axis)
+    assert ttt_service._player_matches_axis(
+        db,
+        teammate_mismatch.id,
+        played_with_axis,
+    )
+    assert not ttt_service._player_matches_cell(
+        db,
+        teammate_mismatch.id,
+        past_season_axis,
+        played_with_axis,
+    )
+    teammate_feedback = ttt_service._build_incorrect_move_feedback(
+        db,
+        teammate_mismatch,
+        past_season_axis,
+        played_with_axis,
+    )
+    assert teammate_feedback["message"] == (
+        "Season TeammateMismatch matched the row clue 2023/24, "
+        "but not the column clue Played with Star Guard in 2023/24."
+    )
+    assert teammate_feedback["failed_axes"] == [
+        {
+            "side": "column",
+            "axis_type": "played_with",
+            "value": str(players["star"].id),
+            "display_label": "Star Guard",
+            "label": "Played with Star Guard in 2023/24",
+        }
+    ]
+
+
+def test_tictactoe_legacy_team_axes_feedback_uses_team_names(
+    ttt_axis_session,
+):
+    db, data = ttt_axis_session
+    team_a, team_b, team_c, team_d, _team_e, team_f = data["teams"]
+    round_obj = QuizTicTacToeRound(
+        round_number=1,
+        row_team_id_1=team_a.id,
+        row_team_id_2=team_b.id,
+        row_team_id_3=team_c.id,
+        col_team_id_1=team_b.id,
+        col_team_id_2=team_d.id,
+        col_team_id_3=team_f.id,
+    )
+    round_obj.row_team_1 = team_a
+    round_obj.row_team_2 = team_b
+    round_obj.row_team_3 = team_c
+    round_obj.col_team_1 = team_b
+    round_obj.col_team_2 = team_d
+    round_obj.col_team_3 = team_f
+
+    row_axis, col_axis = ttt_service._cell_axes(round_obj, 0, 0)
+    feedback = ttt_service._build_incorrect_move_feedback(
+        db,
+        data["players"]["team_past_only"],
+        row_axis,
+        col_axis,
+    )
+
+    assert row_axis["display_label"] == "Axis Team 1"
+    assert col_axis["display_label"] == "Axis Team 2"
+    assert feedback["message"] == (
+        "Past Team matched the row clue Axis Team 1, "
+        "but not the column clue Axis Team 2."
+    )
+    assert f"row clue {team_a.id}" not in feedback["message"]
+    assert f"column clue {team_b.id}" not in feedback["message"]
 
 
 def test_tictactoe_board_generation_can_include_position_with_cap_and_answers(
@@ -2013,6 +2240,71 @@ def test_submit_correct_and_incorrect_moves_switch_turn(client: TestClient):
     assert cell_01_after["claimed_by_player"] is None
 
 
+def test_tictactoe_incorrect_move_response_includes_feedback(
+    client: TestClient,
+    monkeypatch,
+):
+    with client.session_local() as db:
+        teams = db.query(Team).order_by(Team.id).limit(5).all()
+        bad_player_id = (
+            db.query(Player.id)
+            .filter(Player.euroleague_code == "P006")
+            .scalar()
+        )
+
+    forced_axes = [
+        {
+            "axis_type": "champion",
+            "value": "euroleague_champion",
+            "display_label": "EuroLeague champion",
+        },
+        *[
+            {
+                "axis_type": "team",
+                "value": str(team.id),
+                "display_label": team.short_name or team.name,
+            }
+            for team in teams
+        ],
+    ]
+    monkeypatch.setattr(ttt_service, "_select_board_axes", lambda db: forced_axes)
+    game = _create_ttt_game(client)
+
+    response = client.post(
+        f"/quiz/tictactoe/games/{game['id']}/moves",
+        json={
+            "row_index": 0,
+            "col_index": 0,
+            "player_id": bad_player_id,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = _action_payload(response)
+    assert payload["result"] == "incorrect"
+    assert payload["game"]["current_player"] == 2
+    assert payload["feedback"]["message"] == (
+        "Frank Gate did not match either the row clue EuroLeague champion "
+        "or the column clue Gamma Club."
+    )
+    assert payload["feedback"]["failed_axes"] == [
+        {
+            "side": "row",
+            "axis_type": "champion",
+            "value": "euroleague_champion",
+            "display_label": "EuroLeague champion",
+            "label": "EuroLeague champion",
+        },
+        {
+            "side": "column",
+            "axis_type": "team",
+            "value": str(teams[2].id),
+            "display_label": teams[2].short_name or teams[2].name,
+            "label": teams[2].short_name or teams[2].name,
+        },
+    ]
+
+
 def test_draw_offer_accept_starts_new_round(client: TestClient):
     game = _create_ttt_game(client)
     game_id = game["id"]
@@ -2354,6 +2646,90 @@ async def test_anonymous_online_play_stays_tokenless_across_rest_and_websocket(
     assert envelope["payload"]["result"] in {"correct", "round_won"}
     assert player_one.sent[-1]["payload"]["game"]["id"] == game_id
     assert player_two.sent[-1]["payload"]["game"]["id"] == game_id
+
+
+@pytest.mark.asyncio
+async def test_online_incorrect_move_broadcasts_feedback(
+    client: TestClient,
+    monkeypatch,
+):
+    with client.session_local() as db:
+        teams = db.query(Team).order_by(Team.id).limit(5).all()
+        bad_player_id = (
+            db.query(Player.id)
+            .filter(Player.euroleague_code == "P006")
+            .scalar()
+        )
+
+    forced_axes = [
+        {
+            "axis_type": "champion",
+            "value": "euroleague_champion",
+            "display_label": "EuroLeague champion",
+        },
+        *[
+            {
+                "axis_type": "team",
+                "value": str(team.id),
+                "display_label": team.short_name or team.name,
+            }
+            for team in teams
+        ],
+    ]
+    monkeypatch.setattr(ttt_service, "_select_board_axes", lambda db: forced_axes)
+
+    create = client.post(
+        "/quiz/tictactoe/games",
+        json={
+            "mode": "online_friend",
+            "target_wins": 2,
+            "timer_mode": "unlimited",
+            "player1_name": "Anonymous Host",
+        },
+    )
+    assert create.status_code == 200
+    created = _action_payload(create)["game"]
+    join = client.post(
+        "/quiz/tictactoe/games/join",
+        json={"join_code": created["join_code"], "player_name": "Anonymous Joiner"},
+    )
+    assert join.status_code == 200
+    joined = _action_payload(join)["game"]
+    game_id = joined["id"]
+
+    module = OnlineGameRealtimeModule(
+        TicTacToeRealtimeAdapter(),
+        session_factory=client.session_local,
+    )
+    player_one = FakeWebSocket()
+    player_two = FakeWebSocket()
+    await module._send_initial_state(player_one, game_id, 1)
+    await module._send_initial_state(player_two, game_id, 2)
+
+    acting_player = joined["current_player"]
+    acting_socket = player_one if acting_player == 1 else player_two
+    envelope = await module.handle_client_message(
+        acting_socket,
+        game_id,
+        acting_player,
+        {
+            "action": RealtimeClientAction.MOVE.value,
+            "row_index": 0,
+            "col_index": 0,
+            "player_id": bad_player_id,
+        },
+    )
+
+    RealtimeServerMessageAdapter.validate_python(envelope)
+    assert envelope["payload"]["result"] == "incorrect"
+    opponent_socket = player_two if acting_player == 1 else player_one
+    assert envelope["payload"]["feedback"]["message"] == (
+        "Frank Gate did not match either the row clue EuroLeague champion "
+        "or the column clue Gamma Club."
+    )
+    assert acting_socket.sent[-1]["payload"]["feedback"] == envelope["payload"]["feedback"]
+    assert opponent_socket.sent[-1]["payload"]["result"] == "incorrect"
+    assert "feedback" not in opponent_socket.sent[-1]["payload"]
 
 
 def test_online_game_oversized_guest_id_is_clamped_not_rejected(client: TestClient):

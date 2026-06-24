@@ -53,6 +53,7 @@ export function parseRealtimeMessage(raw) {
       state: payload.game,
       result: payload.result || null,
       completedRound: payload.completed_round || null,
+      feedback: payload.feedback || null,
       terminal: Boolean(payload.terminal),
     };
   }

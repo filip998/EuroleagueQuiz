@@ -83,6 +83,7 @@ describe("parseRealtimeMessage", () => {
           game: { id: 1, status: "active" },
           result: "round_won",
           completed_round: { round_number: 1 },
+          feedback: { message: "Wrong clue." },
           terminal: false,
         },
       })
@@ -91,6 +92,7 @@ describe("parseRealtimeMessage", () => {
       state: { id: 1, status: "active" },
       result: "round_won",
       completedRound: { round_number: 1 },
+      feedback: { message: "Wrong clue." },
       terminal: false,
     });
 
