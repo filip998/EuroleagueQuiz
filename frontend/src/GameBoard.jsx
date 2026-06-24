@@ -85,16 +85,16 @@ function SoloAnswerReveal({ round }) {
             key={`${cell.row_index}-${cell.col_index}`}
             className="rounded-xl border border-elq-border bg-elq-bg/70 p-3"
           >
-            <div className="text-xs font-semibold text-elq-dark">
+            <div className="text-sm font-semibold text-elq-dark">
               {clueText(cell.row_axis)} × {clueText(cell.col_axis)}
             </div>
             {cell.claimed_player_name && (
-              <div className="text-xs text-elq-player1 mt-1">
+              <div className="text-sm text-elq-player1 mt-1">
                 Your pick: {cell.claimed_player_name}
               </div>
             )}
             {cell.sample_answers?.length > 0 && (
-              <div className="text-xs text-elq-muted mt-1">
+              <div className="text-sm text-elq-muted mt-1">
                 {cell.claimed_player_name ? "Also works: " : "Examples: "}
                 {cell.sample_answers.join(", ")}
               </div>
@@ -641,57 +641,67 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
             className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-4 sm:p-5 mb-4 animate-fade-in-up"
             aria-label="TicTacToe solo progress"
           >
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div>
-                <div className="text-xs font-bold uppercase tracking-wide text-elq-muted">
-                  Solo run
+            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+              <div className="min-w-0">
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-elq-muted">
+                  Objective
                 </div>
-                <div className="text-sm font-semibold text-elq-player1">
-                  {game.player1_name}
+                <div className="text-base sm:text-lg font-bold text-elq-dark">
+                  Make three in a row
+                </div>
+                {soloProgress.boardsWon > 0 && (
+                  <div className="mt-0.5 text-xs font-semibold text-elq-muted">
+                    Boards won: {soloProgress.boardsWon}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-5 sm:gap-7">
+                <div className="text-center">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-elq-muted">
+                    Claimed
+                  </div>
+                  <div className="font-display text-2xl sm:text-3xl font-bold leading-none text-elq-dark">
+                    {soloProgress.claimedCells}/{soloProgress.totalCells}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-elq-muted">
+                    Strikes left
+                  </div>
+                  <div
+                    className="mt-1 flex items-center justify-center gap-1.5"
+                    role="img"
+                    aria-label={`${soloProgress.strikesUsed} of ${soloProgress.strikeLimit} strikes used, ${soloProgress.strikesRemaining} remaining`}
+                  >
+                    {Array.from({ length: soloProgress.strikeLimit }).map((_, i) => (
+                      <span
+                        key={i}
+                        aria-hidden="true"
+                        className={`h-3 w-3 rounded-full border-2 ${
+                          i < soloProgress.strikesUsed
+                            ? "border-red-600 bg-red-600"
+                            : "border-elq-border bg-transparent"
+                        }`}
+                      />
+                    ))}
+                    <span
+                      aria-hidden="true"
+                      className={`ml-1 font-display text-xl font-bold leading-none ${
+                        soloProgress.strikesRemaining <= 1 ? "text-red-700" : "text-elq-dark"
+                      }`}
+                    >
+                      {soloProgress.strikesRemaining}/{soloProgress.strikeLimit}
+                    </span>
+                  </div>
                 </div>
               </div>
-              {game.turn_seconds && game.status === "active" && timeLeft !== null && (
-                <div
-                  className={`px-3 py-1 rounded-full text-xs font-bold ${
-                    timeLeft <= 5
-                      ? "bg-red-50 text-red-700 border border-red-200"
-                      : "bg-elq-bg text-elq-muted border border-elq-border"
-                  }`}
-                >
-                  {timeLeft}s
-                </div>
-              )}
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-xl bg-elq-bg border border-elq-border p-3 text-center">
-                <div className="text-xs text-elq-muted">Claimed cells</div>
-                <div className="text-xl font-bold text-elq-dark">
-                  {soloProgress.claimedCells}/{soloProgress.totalCells}
-                </div>
-              </div>
-              <div className="rounded-xl bg-elq-bg border border-elq-border p-3 text-center">
-                <div className="text-xs text-elq-muted">Strikes remaining</div>
-                <div
-                  className={`text-xl font-bold ${
-                    soloProgress.strikesRemaining <= 1
-                      ? "text-red-700"
-                      : "text-elq-dark"
-                  }`}
-                >
-                  {soloProgress.strikesRemaining}/{soloProgress.strikeLimit}
-                </div>
-              </div>
-            </div>
-            {soloProgress.boardsWon > 0 && (
-              <div className="mt-3 text-center text-xs font-semibold text-elq-muted">
-                Boards won: {soloProgress.boardsWon}
-              </div>
-            )}
           </div>
         ) : (
         <div className="w-full">
           <OnlineScoreboard
             ariaLabel="TicTacToe multiplayer scoreboard"
+            showSeatBars={false}
             players={[
               {
                 name: game.player1_name,
@@ -825,7 +835,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                 let cellBg = "border-elq-border bg-white";
                 if (claimed === 1) cellBg = "border-elq-player1/30 bg-elq-player1-bg";
                 else if (claimed === 2) cellBg = "border-elq-player2/30 bg-elq-player2-bg";
-                else if (isClickable) cellBg = "border-elq-border bg-white hover:border-elq-orange/40 hover:shadow-md hover:scale-[1.02] cursor-pointer active:scale-95";
+                else if (isClickable) cellBg = "border-elq-border bg-white cursor-pointer group hover:border-elq-orange/50 hover:shadow-md active:bg-elq-orange/5 motion-safe:hover:scale-[1.02] motion-safe:active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange focus-visible:ring-offset-2 focus-visible:z-10";
                 else if (showSamples) cellBg = "border-elq-border bg-sky-50/50";
 
                 return (
@@ -854,11 +864,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                           {cell.claimed_player_name || `P${claimed}`}
                         </div>
                         {showClaimedSamples && (
-                          <div className="mt-1 space-y-0.5">
+                          <div className="mt-1 w-full space-y-0.5">
                             {cell.sample_answers.map((name, i) => (
                               <div
                                 key={i}
-                                className="text-[9px] text-elq-muted italic leading-tight"
+                                className="text-[11px] not-italic text-elq-muted leading-tight truncate"
                               >
                                 {name}
                               </div>
@@ -867,18 +877,20 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                         )}
                       </div>
                     ) : showSamples ? (
-                      <div className="space-y-0.5">
+                      <div className="w-full space-y-0.5">
                         {cell.sample_answers.map((name, i) => (
                           <div
                             key={i}
-                            className="text-[10px] text-elq-muted/70 italic leading-tight"
+                            className="text-[11px] not-italic text-elq-muted leading-tight truncate"
                           >
                             {name}
                           </div>
                         ))}
                       </div>
                     ) : isClickable ? (
-                      <div className="text-elq-muted/30 text-xl">+</div>
+                      <span className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full border-2 border-elq-orange-dark/40 text-elq-orange-dark text-2xl sm:text-3xl font-bold leading-none transition-colors group-hover:border-elq-orange-dark group-hover:bg-elq-orange/10">
+                        +
+                      </span>
                     ) : null}
                   </button>
                 );

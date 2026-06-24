@@ -215,6 +215,21 @@ describe("GameSetup", () => {
     expect(screen.queryByTestId("quick-pick-standard")).not.toBeInTheDocument();
   });
 
+  it("removes the pointless name field in Solo mode", () => {
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+
+    // Default (Online Quick Match) shows the shared name field...
+    expect(screen.getByPlaceholderText("Your name")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Solo"));
+
+    // ...but Solo has no opponent/leaderboard, so the field is gone and a clear
+    // purpose line replaces it. Start Game stays one tap away.
+    expect(screen.queryByPlaceholderText("Your name")).not.toBeInTheDocument();
+    expect(screen.getByText(/Solo challenge/)).toBeInTheDocument();
+    expect(screen.getByText("Start Game")).toBeInTheDocument();
+  });
+
   it("shows player 2 input when local 1v1 is selected", () => {
     render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
 

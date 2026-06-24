@@ -449,12 +449,17 @@ describe("GameBoard solo stakes", () => {
     );
 
     const progress = screen.getByLabelText("TicTacToe solo progress");
-    expect(within(progress).getByText("Solo run")).toBeInTheDocument();
-    expect(within(progress).getByText("Solo Ace")).toBeInTheDocument();
-    expect(within(progress).getByText("Claimed cells")).toBeInTheDocument();
+    expect(within(progress).getByText("Make three in a row")).toBeInTheDocument();
+    expect(within(progress).getByText("Claimed")).toBeInTheDocument();
     expect(within(progress).getByText("4/9")).toBeInTheDocument();
-    expect(within(progress).getByText("Strikes remaining")).toBeInTheDocument();
+    expect(within(progress).getByText("Strikes left")).toBeInTheDocument();
     expect(within(progress).getByText("2/3")).toBeInTheDocument();
+    // The strike pips carry their meaning on an accessible label, not by shape.
+    expect(
+      within(progress).getByLabelText(/strikes used/i)
+    ).toBeInTheDocument();
+    // The pointless solo player name is gone from the scoreboard.
+    expect(within(progress).queryByText("Solo Ace")).not.toBeInTheDocument();
     expect(screen.getByText("Boards won: 1")).toBeInTheDocument();
     expect(screen.getByText("Show answers")).toBeInTheDocument();
     expect(screen.queryByText("Give Up")).not.toBeInTheDocument();

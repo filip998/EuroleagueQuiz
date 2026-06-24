@@ -16,6 +16,9 @@
  * - targetWins:      first-to target (renders a "First to N" pill when present).
  * - timer:           { seconds, critical } | null — center countdown beneath "VS".
  * - statusText:      string | null — center status line (e.g. turn / winner text).
+ * - showSeatBars:     boolean (default true) — render the colored seat stripe on
+ *                    each player panel. TicTacToe opts out (false) so its scoreboard
+ *                    has no side-stripe borders; the other games keep the default.
  */
 
 // Static per-seat class maps. Tailwind must see complete class strings, so never
@@ -41,7 +44,7 @@ const SEAT_STYLES = {
   },
 };
 
-function ScoreboardPlayerPanel({ seat, player, align = "left" }) {
+function ScoreboardPlayerPanel({ seat, player, align = "left", showSeatBar = true }) {
   const styles = SEAT_STYLES[seat];
   const { name, score, subline, active } = player || {};
 
@@ -52,7 +55,7 @@ function ScoreboardPlayerPanel({ seat, player, align = "left" }) {
         active ? styles.ring : ""
       }`}
     >
-      <div className={`absolute inset-y-0 w-1.5 ${styles.bar}`} />
+      {showSeatBar && <div className={`absolute inset-y-0 w-1.5 ${styles.bar}`} />}
       <div
         className={`flex items-end justify-between gap-3 ${
           align === "right" ? "sm:flex-row-reverse sm:text-right" : ""
@@ -108,6 +111,7 @@ export default function OnlineScoreboard({
   targetWins = null,
   timer = null,
   statusText = null,
+  showSeatBars = true,
 }) {
   const validSeat = youPlayerNumber === 1 || youPlayerNumber === 2;
   const youStyles = validSeat ? SEAT_STYLES[youPlayerNumber] : null;
@@ -152,9 +156,9 @@ export default function OnlineScoreboard({
         </div>
 
         <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-[1fr_auto_1fr] sm:gap-4">
-          <ScoreboardPlayerPanel seat={1} player={players[0]} />
+          <ScoreboardPlayerPanel seat={1} player={players[0]} showSeatBar={showSeatBars} />
           <ScoreboardCenter timer={timer} statusText={statusText} />
-          <ScoreboardPlayerPanel seat={2} player={players[1]} align="right" />
+          <ScoreboardPlayerPanel seat={2} player={players[1]} align="right" showSeatBar={showSeatBars} />
         </div>
       </div>
     </section>

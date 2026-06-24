@@ -1501,6 +1501,20 @@ def test_tictactoe_axis_caps_include_generic_achievement_hook():
     )
 
 
+def test_tictactoe_autocomplete_rows_include_nationality_and_era(client: TestClient):
+    response = client.get(
+        "/quiz/tictactoe/players/autocomplete", params={"q": "", "limit": 50}
+    )
+    assert response.status_code == 200
+    players = response.json()["players"]
+    assert players, "Expected autocomplete to return seeded players"
+    # Every seeded player carries disambiguation context: a nationality and the
+    # career era (a single seeded season -> the bare year, not a range).
+    for player in players:
+        assert player["nationality"] == "CountryA"
+        assert player["era"] == "2024"
+
+
 def test_create_tictactoe_game_has_board(client: TestClient):
     payload = _create_ttt_game(client)
     assert payload["mode"] == "local_two_player"
