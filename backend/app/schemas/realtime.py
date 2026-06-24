@@ -60,6 +60,7 @@ class RealtimeStatePayload(BaseModel):
     game: dict[str, Any]
     result: RealtimeResult | None = None
     completed_round: dict[str, Any] | None = None
+    feedback: dict[str, Any] | None = None
     terminal: bool = False
 
 
@@ -106,6 +107,7 @@ def state_message(
     *,
     result: RealtimeResult | str | None = None,
     completed_round: dict[str, Any] | None = None,
+    feedback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     parsed_result = RealtimeResult(result) if result is not None else None
     message = RealtimeStateMessage(
@@ -113,6 +115,7 @@ def state_message(
             game=game_state,
             result=parsed_result,
             completed_round=completed_round,
+            feedback=feedback,
             terminal=is_terminal_result(parsed_result, game_state),
         )
     )

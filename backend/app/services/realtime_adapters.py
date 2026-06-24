@@ -158,17 +158,20 @@ class TicTacToeRealtimeAdapter:
         if action == GameActionName.MOVE:
             acting_player = _online_actor(game, player)
             prev_round_number = game.round_number
-            result = ttt_service.submit_move(
+            move_outcome = ttt_service.submit_move(
                 db,
                 game=game,
                 row_index=_required_int(data, "row_index"),
                 col_index=_required_int(data, "col_index"),
                 player_id=_required_int(data, "player_id"),
                 acting_player=acting_player,
+                include_feedback=True,
             )
+            result = move_outcome.result
             return RealtimeActionOutcome(
                 game=game,
                 result=result,
+                feedback=move_outcome.feedback,
                 completed_round_number=(
                     prev_round_number if result in _TICTACTOE_ROUND_RESULTS else None
                 ),

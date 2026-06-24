@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import GameBoard from "../GameBoard";
-import { giveUpGame, cancelQuickMatchTicTacToe } from "../api";
+import { submitMove, giveUpGame, cancelQuickMatchTicTacToe } from "../api";
 import { clearOnlineInfo } from "../onlineRecovery";
 import { forgetQuickMatchSeat } from "../quickMatchSeats";
 import { buildInviteUrl } from "../inviteLink";
@@ -9,10 +9,27 @@ import { buildInviteUrl } from "../inviteLink";
 // Capture the options GameBoard hands to the realtime hook so tests can drive
 // server-pushed state (e.g. a disconnect forfeit) without a real WebSocket.
 const realtimeHolder = vi.hoisted(() => ({ opts: null }));
+const playerSearchHolder = vi.hoisted(() => ({ props: null }));
 vi.mock("../useOnlineGameRealtime", () => ({
   useOnlineGameRealtime: (opts) => {
     realtimeHolder.opts = opts;
     return {};
+  },
+}));
+
+vi.mock("../PlayerSearch", () => ({
+  default: (props) => {
+    playerSearchHolder.props = props;
+    return (
+      <div data-testid="player-search">
+        <button
+          type="button"
+          onClick={() => props.onSelect({ player_id: 99, full_name: "Nando De Colo" })}
+        >
+          select-player
+        </button>
+      </div>
+    );
   },
 }));
 
@@ -57,6 +74,16 @@ vi.mock("../QuickMatchSearchingLobby", () => ({
 }));
 
 const axis = (label) => ({ axis_type: "season", display_label: label });
+const boardCells = () =>
+  [0, 1, 2].flatMap((row_index) =>
+    [0, 1, 2].map((col_index) => ({
+      row_index,
+      col_index,
+      claimed_by_player: null,
+      claimed_player_id: null,
+      claimed_player_name: null,
+    }))
+  );
 
 function activeGame(overrides = {}) {
   return {
@@ -77,7 +104,7 @@ function activeGame(overrides = {}) {
     round: {
       columns: [axis("A"), axis("B"), axis("C")],
       rows: [axis("1"), axis("2"), axis("3")],
-      cells: [],
+      cells: boardCells(),
     },
     ...overrides,
   };
@@ -86,6 +113,7 @@ function activeGame(overrides = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   realtimeHolder.opts = null;
+  playerSearchHolder.props = null;
 });
 
 describe("GameBoard waiting lobby", () => {
@@ -255,6 +283,86 @@ describe("GameBoard online resign", () => {
     expect(await screen.findByText("Your opponent left the game.")).toBeInTheDocument();
     // The terminal banner is suppressed in favour of the finished-screen subtitle.
     expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
+  });
+});
+
+describe("GameBoard wrong-guess feedback", () => {
+  const feedback = {
+    message:
+      "Nando De Colo matched the row clue EuroLeague champion, but not the column clue Played with Tornike Shengelia.",
+  };
+
+  it("renders backend feedback under the local incorrect banner", async () => {
+    submitMove.mockResolvedValue({
+      state: activeGame({ mode: "local_two_player", current_player: 2 }),
+      result: "incorrect",
+      feedback,
+    });
+
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    await waitFor(() =>
+      expect(submitMove).toHaveBeenCalledWith(7, {
+        row_index: 0,
+        col_index: 0,
+        player_id: 99,
+      })
+    );
+    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
+    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+  });
+
+  it("renders realtime feedback under the online incorrect banner", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ current_player: 2 }),
+        result: "incorrect",
+        feedback,
+      });
+    });
+
+    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
+    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+  });
+
+  it("keeps the legacy terse incorrect copy when feedback is absent", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ current_player: 2 }),
+        result: "incorrect",
+      });
+    });
+
+    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
+    expect(screen.queryByText(/matched EuroLeague champion/)).not.toBeInTheDocument();
   });
 });
 

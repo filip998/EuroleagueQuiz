@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from threading import RLock
 from types import MappingProxyType
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from weakref import WeakKeyDictionary
 
 from sqlalchemy import distinct, func, or_
@@ -82,6 +82,12 @@ class AxisDefinition:
     matcher: Callable[[Session, int, dict], bool]
     use_weighted_candidates: bool = False
     max_per_board: int | None = None
+
+
+@dataclass(frozen=True)
+class TicTacToeMoveOutcome:
+    result: str
+    feedback: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1186,6 +1192,179 @@ def _player_matches_cell_uncached(
     )
 
 
+def _player_display_name(player: Player) -> str:
+    return (
+        f"{player.first_name or ''} {player.last_name or ''}".strip()
+        or "Selected player"
+    )
+
+
+def _axis_feedback_base_label(axis: Mapping[str, object]) -> str:
+    label = str(
+        axis.get("display_label")
+        or axis.get("team_name")
+        or axis.get("value")
+        or "this clue"
+    )
+    if axis.get("axis_type") == "played_with":
+        return f"Played with {label}"
+    return label
+
+
+def _axis_feedback_check(
+    db: Session,
+    player_id: int,
+    axis: dict,
+    other_axis: dict,
+    *,
+    other_axis_matched: bool | None = None,
+) -> tuple[bool, str]:
+    if (
+        other_axis.get("axis_type") == "season"
+        and axis.get("axis_type") in {"team", "played_with"}
+        and other_axis_matched is True
+    ):
+        season_id = int(other_axis["value"])
+        if axis["axis_type"] == "team":
+            matched = (
+                db.query(PlayerSeasonTeam.id)
+                .filter(
+                    PlayerSeasonTeam.player_id == player_id,
+                    PlayerSeasonTeam.team_id == int(axis["value"]),
+                    PlayerSeasonTeam.season_id == season_id,
+                )
+                .first()
+            ) is not None
+        else:
+            matched = _player_is_teammate(
+                db,
+                player_id,
+                int(axis["value"]),
+                season_id=season_id,
+            )
+        return (
+            matched,
+            f"{_axis_feedback_base_label(axis)} in "
+            f"{_axis_feedback_base_label(other_axis)}",
+        )
+
+    return _player_matches_axis(db, player_id, axis), _axis_feedback_base_label(axis)
+
+
+def _join_feedback_labels(labels: list[str], *, conjunction: str) -> str:
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} {conjunction} {labels[1]}"
+    return f"{', '.join(labels[:-1])}, {conjunction} {labels[-1]}"
+
+
+def _axis_feedback_message_label(axis: Mapping[str, Any]) -> str:
+    side = axis.get("side")
+    label = axis.get("label")
+    if side in {"row", "column"} and label:
+        return f"the {side} clue {label}"
+    return str(label or "this clue")
+
+
+def _feedback_axis_payload(
+    axis: Mapping[str, object],
+    *,
+    side: str,
+    label: str,
+) -> dict[str, Any]:
+    return {
+        "side": side,
+        "axis_type": str(axis.get("axis_type", "")),
+        "value": str(axis.get("value", "")),
+        "display_label": str(axis.get("display_label") or axis.get("value") or ""),
+        "label": label,
+    }
+
+
+def _build_incorrect_move_feedback(
+    db: Session,
+    player: Player,
+    row_axis: dict,
+    col_axis: dict,
+) -> dict[str, Any]:
+    row_independent = _player_matches_axis(db, player.id, row_axis)
+    col_independent = _player_matches_axis(db, player.id, col_axis)
+    row_matched, row_label = _axis_feedback_check(
+        db,
+        player.id,
+        row_axis,
+        col_axis,
+        other_axis_matched=col_independent,
+    )
+    col_matched, col_label = _axis_feedback_check(
+        db,
+        player.id,
+        col_axis,
+        row_axis,
+        other_axis_matched=row_independent,
+    )
+    axis_results = [
+        ("row", row_axis, row_matched, row_label),
+        ("column", col_axis, col_matched, col_label),
+    ]
+    failed_axes = [
+        _feedback_axis_payload(axis, side=side, label=label)
+        for side, axis, matched, label in axis_results
+        if not matched
+    ]
+    matched_axes = [
+        _feedback_axis_payload(axis, side=side, label=label)
+        for side, axis, matched, label in axis_results
+        if matched
+    ]
+    player_name = _player_display_name(player)
+    failed_labels = [_axis_feedback_message_label(axis) for axis in failed_axes]
+    matched_labels = [_axis_feedback_message_label(axis) for axis in matched_axes]
+
+    if failed_labels and matched_labels:
+        message = (
+            f"{player_name} matched "
+            f"{_join_feedback_labels(matched_labels, conjunction='and')}, but not "
+            f"{_join_feedback_labels(failed_labels, conjunction='or')}."
+        )
+    elif failed_labels:
+        if len(failed_labels) == 1:
+            message = f"{player_name} did not match {failed_labels[0]}."
+        else:
+            message = (
+                f"{player_name} did not match either "
+                f"{_join_feedback_labels(failed_labels, conjunction='or')}."
+            )
+    else:
+        message = (
+            f"{player_name} matched each clue separately, "
+            "but not this exact combination."
+        )
+
+    return {
+        "kind": "incorrect_move",
+        "player_id": player.id,
+        "player_name": player_name,
+        "message": message,
+        "failed_axes": failed_axes,
+        "matched_axes": matched_axes,
+    }
+
+
+def _move_result(
+    result: str,
+    *,
+    include_feedback: bool,
+    feedback: dict[str, Any] | None = None,
+) -> str | TicTacToeMoveOutcome:
+    if include_feedback:
+        return TicTacToeMoveOutcome(result=result, feedback=feedback)
+    return result
+
+
 def _round_move_load_options():
     return (
         selectinload(QuizTicTacToeRound.axes),
@@ -1326,7 +1505,8 @@ def submit_move(
     col_index: int,
     player_id: int,
     acting_player: Optional[int] = None,
-) -> str:
+    include_feedback: bool = False,
+) -> str | TicTacToeMoveOutcome:
     _ensure_game_playable(game)
     if game.pending_draw_from is not None:
         raise TicTacToeConflictError("Resolve pending draw offer before making a move")
@@ -1356,13 +1536,22 @@ def submit_move(
     is_solo = game.mode == "single_player"
 
     if not is_correct:
+        feedback = (
+            _build_incorrect_move_feedback(db, player, row_axis, col_axis)
+            if include_feedback
+            else None
+        )
         now = datetime.utcnow()
         if not is_solo:
             game.current_player = _other_player(acting_player)
         game.turn_started_at = now
         game.updated_at = now
         db.flush()
-        return "incorrect"
+        return _move_result(
+            "incorrect",
+            include_feedback=include_feedback,
+            feedback=feedback,
+        )
 
     cell.claimed_by_player = acting_player
     cell.claimed_player_id = player_id
@@ -1375,11 +1564,11 @@ def submit_move(
             round_obj.winner_player = acting_player if round_obj.status == "completed" else None
             create_next_round(db, game, started_by_player=1)
             db.flush()
-            return "board_complete"
+            return _move_result("board_complete", include_feedback=include_feedback)
 
         game.updated_at = datetime.utcnow()
         db.flush()
-        return "correct"
+        return _move_result("correct", include_feedback=include_feedback)
 
     if _has_three_in_row(round_obj, acting_player):
         round_obj.status = "completed"
@@ -1396,12 +1585,12 @@ def submit_move(
             game.pending_draw_to = None
             game.updated_at = datetime.utcnow()
             db.flush()
-            return "match_won"
+            return _move_result("match_won", include_feedback=include_feedback)
 
         next_starter = _other_player(round_obj.started_by_player)
         create_next_round(db, game, started_by_player=next_starter)
         db.flush()
-        return "round_won"
+        return _move_result("round_won", include_feedback=include_feedback)
 
     if _is_board_full(round_obj):
         round_obj.status = "drawn"
@@ -1409,14 +1598,14 @@ def submit_move(
         next_starter = _other_player(round_obj.started_by_player)
         create_next_round(db, game, started_by_player=next_starter)
         db.flush()
-        return "round_drawn"
+        return _move_result("round_drawn", include_feedback=include_feedback)
 
     game.current_player = _other_player(acting_player)
     now = datetime.utcnow()
     game.turn_started_at = now
     game.updated_at = now
     db.flush()
-    return "correct"
+    return _move_result("correct", include_feedback=include_feedback)
 
 
 def give_up_round(db: Session, game: QuizTicTacToeGame) -> int:
@@ -1998,8 +2187,16 @@ def _cell_axes(round_obj: QuizTicTacToeRound, row_index: int, col_index: int) ->
         row_a = axes_by_pos[f"row_{row_index}"]
         col_a = axes_by_pos[f"col_{col_index}"]
         return (
-            {"axis_type": row_a.axis_type, "value": row_a.value},
-            {"axis_type": col_a.axis_type, "value": col_a.value},
+            {
+                "axis_type": row_a.axis_type,
+                "value": row_a.value,
+                "display_label": row_a.display_label,
+            },
+            {
+                "axis_type": col_a.axis_type,
+                "value": col_a.value,
+                "display_label": col_a.display_label,
+            },
         )
 
     # Legacy fallback

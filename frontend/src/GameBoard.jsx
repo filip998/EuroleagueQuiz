@@ -94,6 +94,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const [game, setGame] = useState(initialState?.game || initialState);
   const [selectedCell, setSelectedCell] = useState(null);
   const [lastResult, setLastResult] = useState(null);
+  const [lastFeedback, setLastFeedback] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [timeLeft, setTimeLeft] = useState(null);
@@ -109,13 +110,17 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
   function handleRealtimeState(message) {
     const result = message.result;
+    const feedback = message.feedback || null;
     setGame(message.state);
     setError(null);
     if (result && message.completedRound && ["round_won", "round_drawn", "match_won", "board_complete", "draw_accepted"].includes(result)) {
-      startRoundTransition(result, message.completedRound);
+      startRoundTransition(result, message.completedRound, feedback);
     } else if (result) {
       setLastResult(result);
+      setLastFeedback(feedback);
       setSelectedCell(null);
+    } else {
+      setLastFeedback(null);
     }
   }
 
@@ -160,6 +165,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       setTimeLeft(game.turn_seconds);
     }
     setLastResult(null);
+    setLastFeedback(null);
   }, [game?.turn_deadline_utc, game?.current_player, game?.round_number, game?.turn_seconds, game?.status, isOnline]);
 
   // Local-only countdown tick
@@ -174,6 +180,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         }));
       }
       setLastResult("time_expired");
+      setLastFeedback(null);
       setSelectedCell(null);
       return;
     }
@@ -197,11 +204,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     return () => clearTimeout(timer);
   }, [roundTransition]);
 
-  function startRoundTransition(result, completedRound) {
+  function startRoundTransition(result, completedRound, feedback = null) {
     if (completedRound) {
       setRoundTransition({ countdown: 3, completedRound, result });
     }
     setLastResult(result);
+    setLastFeedback(feedback);
     setSelectedCell(null);
   }
 
@@ -213,6 +221,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setSelectedCell(cell);
     setError(null);
     setLastResult(null);
+    setLastFeedback(null);
   }
 
   async function handlePlayerSelect(player) {
@@ -512,6 +521,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
               }`}
             >
               {resultMessages[lastResult] || lastResult}
+              {lastResult === "incorrect" && lastFeedback?.message && (
+                <span className="block mt-1 font-normal">
+                  {lastFeedback.message}
+                </span>
+              )}
               {inTransition && roundTransition.countdown !== null && (
                 <span className="ml-2 font-bold">
                   {isSolo ? `Next board in ${roundTransition.countdown}...` : `Next round in ${roundTransition.countdown}...`}
@@ -521,7 +535,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
             {inTransition && roundTransition.countdown === null && (
               <div className="text-center mt-3">
                 <button
-                  onClick={() => { setRoundTransition(null); setLastResult(null); }}
+                  onClick={() => { setRoundTransition(null); setLastResult(null); setLastFeedback(null); }}
                   className="px-6 py-2.5 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all"
                 >
                   Start New Round
