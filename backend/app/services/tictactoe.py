@@ -2210,9 +2210,21 @@ def _cell_axes(round_obj: QuizTicTacToeRound, row_index: int, col_index: int) ->
         round_obj.col_team_id_2,
         round_obj.col_team_id_3,
     ]
+    row_teams = [round_obj.row_team_1, round_obj.row_team_2, round_obj.row_team_3]
+    col_teams = [round_obj.col_team_1, round_obj.col_team_2, round_obj.col_team_3]
+
+    def _legacy_team_axis(team_id: int | None, team: Team | None) -> dict:
+        label = team.short_name or team.name if team else str(team_id or "")
+        return {
+            "axis_type": "team",
+            "value": str(team_id or ""),
+            "display_label": label,
+            "team_name": label,
+        }
+
     return (
-        {"axis_type": "team", "value": str(row_team_ids[row_index])},
-        {"axis_type": "team", "value": str(col_team_ids[col_index])},
+        _legacy_team_axis(row_team_ids[row_index], row_teams[row_index]),
+        _legacy_team_axis(col_team_ids[col_index], col_teams[col_index]),
     )
 
 

@@ -60,6 +60,7 @@ class RealtimeActionOutcome:
     feedback: dict[str, Any] | None = None
     broadcast: bool = True
     broadcast_to_player: int | None = None
+    broadcast_feedback_to_player: int | None = None
     schedule_timer: bool = False
     cancel_timer: bool = False
 
@@ -73,6 +74,7 @@ class GameActionExecution:
     feedback: dict[str, Any] | None
     broadcast: bool
     broadcast_to_player: int | None
+    broadcast_feedback_to_player: int | None
     schedule_timer: bool
     cancel_timer: bool
 
@@ -280,6 +282,7 @@ class GameActionOrchestrator:
                 feedback=outcome.feedback,
                 broadcast=outcome.broadcast,
                 broadcast_to_player=outcome.broadcast_to_player,
+                broadcast_feedback_to_player=outcome.broadcast_feedback_to_player,
                 schedule_timer=outcome.schedule_timer,
                 cancel_timer=outcome.cancel_timer,
             )
@@ -307,14 +310,32 @@ class GameActionOrchestrator:
             )
         if execution.broadcast:
             try:
-                await self.realtime_effects.broadcast_state(
-                    game_id,
-                    state,
-                    result=execution.result,
-                    completed_round=execution.completed_round,
-                    feedback=execution.feedback,
-                    only_player=execution.broadcast_to_player,
-                )
+                if (
+                    execution.broadcast_feedback_to_player is not None
+                    and execution.broadcast_to_player is None
+                ):
+                    for target_player in (1, 2):
+                        await self.realtime_effects.broadcast_state(
+                            game_id,
+                            state,
+                            result=execution.result,
+                            completed_round=execution.completed_round,
+                            feedback=(
+                                execution.feedback
+                                if target_player == execution.broadcast_feedback_to_player
+                                else None
+                            ),
+                            only_player=target_player,
+                        )
+                else:
+                    await self.realtime_effects.broadcast_state(
+                        game_id,
+                        state,
+                        result=execution.result,
+                        completed_round=execution.completed_round,
+                        feedback=execution.feedback,
+                        only_player=execution.broadcast_to_player,
+                    )
             except Exception:
                 self.log.exception(
                     "Post-commit game action side effect failed: broadcast state"

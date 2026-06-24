@@ -164,8 +164,6 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     } else {
       setTimeLeft(game.turn_seconds);
     }
-    setLastResult(null);
-    setLastFeedback(null);
   }, [game?.turn_deadline_utc, game?.current_player, game?.round_number, game?.turn_seconds, game?.status, isOnline]);
 
   // Local-only countdown tick

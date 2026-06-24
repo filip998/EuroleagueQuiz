@@ -20,7 +20,7 @@ from app.models import (
     Season,
     Team,
 )
-from app.models.tictactoe import QuizTicTacToeGame
+from app.models.tictactoe import QuizTicTacToeGame, QuizTicTacToeRound
 from app.routers import quiz as quiz_router
 from app.services import realtime as realtime_service
 from app.schemas.realtime import RealtimeServerMessageAdapter
@@ -1257,6 +1257,45 @@ def test_tictactoe_feedback_season_context_qualifies_failed_axis(
             "label": "Played with Star Guard in 2023/24",
         }
     ]
+
+
+def test_tictactoe_legacy_team_axes_feedback_uses_team_names(
+    ttt_axis_session,
+):
+    db, data = ttt_axis_session
+    team_a, team_b, team_c, team_d, _team_e, team_f = data["teams"]
+    round_obj = QuizTicTacToeRound(
+        round_number=1,
+        row_team_id_1=team_a.id,
+        row_team_id_2=team_b.id,
+        row_team_id_3=team_c.id,
+        col_team_id_1=team_b.id,
+        col_team_id_2=team_d.id,
+        col_team_id_3=team_f.id,
+    )
+    round_obj.row_team_1 = team_a
+    round_obj.row_team_2 = team_b
+    round_obj.row_team_3 = team_c
+    round_obj.col_team_1 = team_b
+    round_obj.col_team_2 = team_d
+    round_obj.col_team_3 = team_f
+
+    row_axis, col_axis = ttt_service._cell_axes(round_obj, 0, 0)
+    feedback = ttt_service._build_incorrect_move_feedback(
+        db,
+        data["players"]["team_past_only"],
+        row_axis,
+        col_axis,
+    )
+
+    assert row_axis["display_label"] == "Axis Team 1"
+    assert col_axis["display_label"] == "Axis Team 2"
+    assert feedback["message"] == (
+        "Past Team matched the row clue Axis Team 1, "
+        "but not the column clue Axis Team 2."
+    )
+    assert f"row clue {team_a.id}" not in feedback["message"]
+    assert f"column clue {team_b.id}" not in feedback["message"]
 
 
 def test_tictactoe_board_generation_can_include_position_with_cap_and_answers(
@@ -2683,12 +2722,14 @@ async def test_online_incorrect_move_broadcasts_feedback(
 
     RealtimeServerMessageAdapter.validate_python(envelope)
     assert envelope["payload"]["result"] == "incorrect"
+    opponent_socket = player_two if acting_player == 1 else player_one
     assert envelope["payload"]["feedback"]["message"] == (
         "Frank Gate did not match either the row clue EuroLeague champion "
         "or the column clue Gamma Club."
     )
-    assert player_one.sent[-1]["payload"]["feedback"] == envelope["payload"]["feedback"]
-    assert player_two.sent[-1]["payload"]["feedback"] == envelope["payload"]["feedback"]
+    assert acting_socket.sent[-1]["payload"]["feedback"] == envelope["payload"]["feedback"]
+    assert opponent_socket.sent[-1]["payload"]["result"] == "incorrect"
+    assert "feedback" not in opponent_socket.sent[-1]["payload"]
 
 
 def test_online_game_oversized_guest_id_is_clamped_not_rejected(client: TestClient):

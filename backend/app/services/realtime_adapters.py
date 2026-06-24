@@ -172,6 +172,9 @@ class TicTacToeRealtimeAdapter:
                 game=game,
                 result=result,
                 feedback=move_outcome.feedback,
+                broadcast_feedback_to_player=(
+                    acting_player if move_outcome.feedback is not None else None
+                ),
                 completed_round_number=(
                     prev_round_number if result in _TICTACTOE_ROUND_RESULTS else None
                 ),

@@ -322,6 +322,36 @@ describe("GameBoard wrong-guess feedback", () => {
     expect(screen.getByText(feedback.message)).toBeInTheDocument();
   });
 
+  it("keeps timed local feedback visible after the turn timer syncs", async () => {
+    submitMove.mockResolvedValue({
+      state: activeGame({ mode: "local_two_player", current_player: 2, turn_seconds: 40 }),
+      result: "incorrect",
+      feedback,
+    });
+
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player", turn_seconds: 40 })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    await waitFor(() =>
+      expect(submitMove).toHaveBeenCalledWith(7, {
+        row_index: 0,
+        col_index: 0,
+        player_id: 99,
+      })
+    );
+    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
+    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+  });
+
   it("renders realtime feedback under the online incorrect banner", async () => {
     render(
       <GameBoard
