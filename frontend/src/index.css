@@ -118,13 +118,16 @@ html[data-ui="refined"] {
 }
 
 /*
- * Reduced-motion alternative for entrance reveals. These keyframes start at
- * opacity:0 with `both` fill, so disabling the animation must fall back to the
- * element's base (visible) state — never gate content visibility.
+ * Reduced-motion alternative for entrance reveals (page sections plus the
+ * portal dialogs). These keyframes start at opacity:0 with `both` fill, so
+ * disabling the animation must fall back to the element's base (visible)
+ * state — never gate content visibility.
  */
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in-up,
-  .animate-slide-down {
+  .animate-slide-down,
+  .animate-modal-in,
+  .animate-overlay-in {
     animation: none;
   }
 }
