@@ -44,6 +44,13 @@ function collectSourceFiles(dir) {
 // variants like `bg-elq-orange/10` are decorative tints and are allowed).
 const SOLID_ORANGE_BG = /bg-elq-orange(?!\/)/;
 
+// Tailwind utility classes always live inside a string or template literal, so we
+// scan each literal independently. This catches an offender even when the
+// className wraps across multiple lines (template literals can span lines) while
+// never false-positiving a decorative solid `bg-elq-orange` that sits in a
+// different literal than any `text-white`.
+const STRING_LITERAL = /"[^"]*"|'[^']*'|`[^`]*`/g;
+
 describe("no white text on solid brand orange (issue #260)", () => {
   const files = collectSourceFiles(srcDir);
 
@@ -51,15 +58,15 @@ describe("no white text on solid brand orange (issue #260)", () => {
     expect(files.length).toBeGreaterThan(20);
   });
 
-  it("finds no element pairing a solid orange background with white text", () => {
+  it("finds no string literal pairing a solid orange background with white text", () => {
     const offenders = [];
     for (const file of files) {
-      const lines = readFileSync(file, "utf8").split("\n");
-      lines.forEach((line, i) => {
-        if (SOLID_ORANGE_BG.test(line) && line.includes("text-white")) {
-          offenders.push(`${relative(srcDir, file)}:${i + 1}`);
+      const content = readFileSync(file, "utf8");
+      for (const literal of content.match(STRING_LITERAL) || []) {
+        if (SOLID_ORANGE_BG.test(literal) && literal.includes("text-white")) {
+          offenders.push(relative(srcDir, file));
         }
-      });
+      }
     }
     expect(offenders).toEqual([]);
   });
