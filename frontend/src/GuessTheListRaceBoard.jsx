@@ -496,7 +496,7 @@ function CompletedRoundReveal({ round, countdown }) {
 
 function Shell({ children, onHome }) {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="elq-auth-safe-top min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-player1 via-elq-orange to-elq-player2" />
       <div className="bg-white border-b border-elq-border">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">

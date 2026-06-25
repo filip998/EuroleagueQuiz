@@ -69,7 +69,7 @@ function LoadingScreen() {
 
 export function HomePageClassic() {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="elq-auth-safe-top min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
 
       <div className="flex-1 flex items-center justify-center p-4 py-8">
@@ -267,7 +267,7 @@ function GameMiniCard({ to, title, description, tag, icon, accentBar, iconChip, 
 
 function HomePageRefined() {
   return (
-    <div className="relative min-h-screen overflow-hidden">
+    <div className="elq-auth-safe-top relative min-h-screen overflow-hidden">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
 
       {/* Soft backdrop: radial wash + faint court lines. Purely decorative. */}

@@ -72,7 +72,7 @@ export default function GameResult({
   const alignClass =
     align === "top" ? "items-start p-4 pt-12 sm:pt-20" : "items-center p-4";
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="elq-auth-safe-top min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
       <div className={`relative flex-1 flex ${alignClass} justify-center`}>
         {celebrate && <VictoryConfetti />}

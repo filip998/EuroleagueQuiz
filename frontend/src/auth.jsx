@@ -32,6 +32,12 @@ const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY?.trim();
 // Auth is enabled only when a (non-whitespace) publishable key is present.
 const clerkEnabled = Boolean(PUBLISHABLE_KEY);
 
+// Build-time flag mirroring control presence: `AuthMenu` renders iff this is
+// true, so `main.jsx` keys the `data-auth-chrome` top-reserve off it (issue
+// #293) without importing Clerk anywhere else.
+// eslint-disable-next-line react-refresh/only-export-components
+export const authEnabled = clerkEnabled;
+
 if (!clerkEnabled && import.meta.env.DEV) {
   console.info(
     "[auth] VITE_CLERK_PUBLISHABLE_KEY is not set — running anonymously (sign-in disabled)."
@@ -121,9 +127,9 @@ function ClerkProviderWithRouter({ children }) {
 }
 
 const SIGN_IN_BTN_CLASS =
-  "px-4 py-1.5 rounded-full bg-elq-cta text-white text-sm font-semibold shadow-sm hover:bg-elq-cta-dark active:scale-[0.98] transition-all";
+  "px-4 py-1.5 rounded-full bg-elq-cta text-white text-sm font-semibold shadow-sm hover:bg-elq-cta-dark active:scale-[0.98] transition-all whitespace-nowrap";
 const SIGN_UP_BTN_CLASS =
-  "px-4 py-1.5 rounded-full bg-white text-elq-text text-sm font-semibold border border-elq-border shadow-sm hover:border-elq-orange/40 active:scale-[0.98] transition-all";
+  "px-4 py-1.5 rounded-full bg-white text-elq-text text-sm font-semibold border border-elq-border shadow-sm hover:border-elq-orange/40 active:scale-[0.98] transition-all whitespace-nowrap";
 
 // Icon for the custom "Profile" entry in the UserButton menu (labelIcon is
 // required by Clerk).
@@ -146,7 +152,7 @@ function ProfileIcon() {
 export function AuthMenu() {
   if (!clerkEnabled) return null;
   return (
-    <div className="fixed top-3 right-3 z-50 flex items-center gap-2">
+    <div className="fixed top-3 right-3 z-50 flex flex-nowrap items-center gap-2">
       <SignedOut>
         <SignInButton mode="modal">
           <button type="button" className={SIGN_IN_BTN_CLASS}>
@@ -187,7 +193,7 @@ export function ProfileRoute() {
 function ProfileScreen() {
   const navigate = useNavigate();
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="elq-auth-safe-top min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
       <div className="flex-1 flex flex-col items-center p-4 py-8 sm:py-10">
         <div className="w-full max-w-3xl">

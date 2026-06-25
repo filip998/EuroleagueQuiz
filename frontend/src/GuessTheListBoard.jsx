@@ -300,7 +300,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <div className="elq-auth-safe-top h-screen flex flex-col overflow-hidden">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light flex-shrink-0" />
       <div className="bg-white border-b border-elq-border flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2 flex items-center justify-between">

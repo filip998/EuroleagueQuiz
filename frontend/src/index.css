@@ -41,6 +41,28 @@ html[data-ui="refined"] {
   --color-elq-muted: #566677;
 }
 
+/*
+ * Issue #293: the fixed account controls (`AuthMenu`, `fixed top-3 right-3`) are
+ * mounted outside the route layout, so without a reserve they float over the
+ * top-right of every screen and cover game UI (e.g. the TicTacToe solo "Solo"
+ * indicator). `main.jsx` sets `data-auth-chrome="reserve"` on <html> only when
+ * Clerk is configured — exactly when the controls render — and each screen's
+ * outermost root carries `.elq-auth-safe-top` to reserve a small top band so the
+ * controls always sit in dedicated whitespace. The reserve is 0px by default, so
+ * anonymous builds (no key → no attribute) are pixel-identical; it only grows
+ * when auth is enabled. The `html[data-auth-chrome]` attribute selector outranks
+ * `:root`, so the override wins regardless of source order.
+ */
+:root {
+  --elq-auth-safe-top: 0px;
+}
+html[data-auth-chrome="reserve"] {
+  --elq-auth-safe-top: 3.5rem;
+}
+.elq-auth-safe-top {
+  padding-top: var(--elq-auth-safe-top, 0px);
+}
+
 @keyframes fade-in-up {
   from { opacity: 0; transform: translateY(16px); }
   to { opacity: 1; transform: translateY(0); }
