@@ -460,6 +460,65 @@ describe("GuessTheListBoard solo / local never goes online from a stale seat (is
   });
 });
 
+describe("GuessTheListBoard solo header (issue #285)", () => {
+  it("does not render a name-only header bar in solo mode", () => {
+    const { container } = render(
+      <GuessTheListBoard
+        initialState={activeSoloGame({ player1_name: "Solo Player Sentinel" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+      />
+    );
+
+    // The redundant full-width bar that showed only the player's own name is gone.
+    expect(screen.queryByText("Solo Player Sentinel")).not.toBeInTheDocument();
+    // No leftover player-name-styled row in the solo header chrome; with no slots
+    // claimed yet the player-1 accent colour should appear nowhere on the board.
+    expect(container.querySelector(".text-elq-player1")).toBeNull();
+
+    // The useful header chrome stays: team banner and the progress objective that
+    // already lives in the dark bar below where the name bar used to be.
+    expect(screen.getByText("Real Madrid")).toBeInTheDocument();
+    expect(getSpanByTextContent("0/1")).toBeInTheDocument();
+  });
+
+  it("keeps the local 1v1 scoreboard with both names and scores", () => {
+    render(
+      <GuessTheListBoard
+        initialState={activeSoloGame({
+          mode: "local_two_player",
+          player1_name: "Magnus",
+          player2_name: "Tobias",
+          player1_score: 12,
+          player2_score: 7,
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+      />
+    );
+
+    expect(screen.getByText("Magnus")).toBeInTheDocument();
+    expect(screen.getByText("Tobias")).toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("7")).toBeInTheDocument();
+  });
+
+  it("keeps the online scoreboard with both names and scores", () => {
+    render(
+      <GuessTheListBoard
+        initialState={onlineClassicGame({ player1_score: 8, player2_score: 5 })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+      />
+    );
+
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+    expect(screen.getByText("8")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+  });
+});
+
 describe("GuessTheListBoard leaderboard rounds", () => {
   function allTimeSoloGame(overrides = {}) {
     return activeSoloGame({
