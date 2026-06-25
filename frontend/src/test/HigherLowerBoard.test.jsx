@@ -176,6 +176,57 @@ describe("HigherLowerBoard", () => {
 
     expect(screen.getByText("HIGHER OR LOWER")).toBeInTheDocument();
   });
+
+  it("top-anchors and fills the play content on desktop while keeping it centered on mobile", () => {
+    render(
+      <HigherLowerBoard
+        initialState={mockInitialState}
+        onNewGame={mockOnNewGame}
+        onHome={mockOnHome}
+      />
+    );
+
+    const main = screen.getByText("Who has more").closest("div.flex.flex-col");
+    expect(main).not.toBeNull();
+    // Centered on mobile, top-anchored from lg up (no large empty band above the prompt).
+    expect(main).toHaveClass("justify-center", "lg:justify-start");
+
+    const grid = screen.getByText("Luka Doncic").closest("button").parentElement;
+    // The comparison cards grow to use the vertical space on desktop.
+    expect(grid).toHaveClass("grid", "lg:flex-1");
+  });
+
+  it("top-anchors the game over screen", async () => {
+    submitHigherLowerAnswer.mockResolvedValue({
+      correct: false,
+      streak: 2,
+      left_value: 10,
+      right_value: 15,
+      is_personal_best: false,
+      leaderboard_position: 50,
+    });
+
+    render(
+      <HigherLowerBoard
+        initialState={mockInitialState}
+        onNewGame={mockOnNewGame}
+        onHome={mockOnHome}
+      />
+    );
+
+    fireEvent.click(screen.getByText("= Same"));
+
+    await waitFor(() => {
+      expect(screen.getByText("GAME OVER")).toBeInTheDocument();
+    });
+
+    const region = screen
+      .getByRole("heading", { name: "GAME OVER" })
+      .closest("div.flex-1");
+    expect(region).not.toBeNull();
+    expect(region).toHaveClass("items-start");
+    expect(region).not.toHaveClass("items-center");
+  });
 });
 
 describe("HigherLowerBoard header navigation", () => {
