@@ -49,6 +49,7 @@ import {
   createPhotoSoloRound,
   getPhotoGame,
   respondPhotoNoAnswer,
+  revealPhotoSoloAnswer,
   submitPhotoGuess,
   submitPhotoSoloGuess,
   resignPhotoGame,
@@ -573,6 +574,207 @@ describe("PhotoQuizBoard multiplayer reveals", () => {
     await waitFor(() => expect(submitPhotoGuess).toHaveBeenCalledWith(7, 1, 99, 1));
     await waitFor(() => expect(getPhotoGame).toHaveBeenCalledWith(7));
     expect(screen.queryByText("round_stale")).not.toBeInTheDocument();
+  });
+});
+
+describe("PhotoQuizBoard solo HUD", () => {
+  it("shows the solo objective and a starting Solved/Streak score in the top HUD", () => {
+    render(
+      <PhotoQuizBoard
+        soloInitialRound={soloPhotoRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Name the player")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Solved 0" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reveal answer" })).toBeInTheDocument();
+  });
+
+  it("keeps the solo objective and score out of multiplayer", () => {
+    render(
+      <PhotoQuizBoard
+        initialState={activePhotoGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Name the player")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Solved 0" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reveal answer" })).not.toBeInTheDocument();
+  });
+
+  it("increments Solved and Streak on a correct solo guess and carries the score into the next round", async () => {
+    autocompletePhotoPlayer
+      .mockResolvedValueOnce({ players: [{ id: 52, name: "First Hit" }] })
+      .mockResolvedValueOnce({ players: [{ id: 53, name: "Second Hit" }] });
+    submitPhotoSoloGuess
+      .mockResolvedValueOnce({ correct: true, answer: photoAnswer({ id: 52, name: "First Hit" }) })
+      .mockResolvedValueOnce({ correct: true, answer: photoAnswer({ id: 53, name: "Second Hit" }) });
+    createPhotoSoloRound.mockResolvedValueOnce(soloPhotoRound({ round_token: "next-round" }));
+
+    render(
+      <PhotoQuizBoard
+        soloInitialRound={soloPhotoRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("group", { name: "Solved 0" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
+
+    await selectPhotoPlayer("First Hit");
+
+    expect(await screen.findByRole("group", { name: "Solved 1" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 1" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next photo" }));
+    await waitFor(() => expect(createPhotoSoloRound).toHaveBeenCalledWith([52]));
+
+    await selectPhotoPlayer("Second Hit");
+
+    expect(await screen.findByRole("group", { name: "Solved 2" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 2" })).toBeInTheDocument();
+    // The second guess must run against the advanced round token, proving the
+    // score carried forward into a genuinely new round rather than re-scoring
+    // the first one.
+    expect(submitPhotoSoloGuess).toHaveBeenNthCalledWith(1, "solo-round", 52);
+    expect(submitPhotoSoloGuess).toHaveBeenNthCalledWith(2, "next-round", 53);
+  });
+
+  it("keeps the streak intact across a wrong guess before a correct solo answer", async () => {
+    autocompletePhotoPlayer
+      .mockResolvedValueOnce({ players: [{ id: 60, name: "Wrong One" }] })
+      .mockResolvedValueOnce({ players: [{ id: 61, name: "Right One" }] });
+    submitPhotoSoloGuess
+      .mockResolvedValueOnce({ correct: false })
+      .mockResolvedValueOnce({ correct: true, answer: photoAnswer({ id: 61, name: "Right One" }) });
+
+    render(
+      <PhotoQuizBoard
+        soloInitialRound={soloPhotoRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectPhotoPlayer("Wrong One");
+
+    expect(screen.getByRole("group", { name: "Solved 0" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
+
+    await selectPhotoPlayer("Right One");
+
+    expect(await screen.findByRole("group", { name: "Solved 1" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 1" })).toBeInTheDocument();
+  });
+
+  it("resets the streak but keeps Solved when the answer is revealed", async () => {
+    autocompletePhotoPlayer.mockResolvedValueOnce({ players: [{ id: 70, name: "Solved One" }] });
+    submitPhotoSoloGuess.mockResolvedValueOnce({
+      correct: true,
+      answer: photoAnswer({ id: 70, name: "Solved One" }),
+    });
+    createPhotoSoloRound.mockResolvedValueOnce(soloPhotoRound({ round_token: "round-2" }));
+    revealPhotoSoloAnswer.mockResolvedValueOnce({
+      answer: photoAnswer({ id: 71, name: "Revealed One" }),
+    });
+
+    render(
+      <PhotoQuizBoard
+        soloInitialRound={soloPhotoRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectPhotoPlayer("Solved One");
+    expect(await screen.findByRole("group", { name: "Streak 1" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next photo" }));
+    await waitFor(() => expect(createPhotoSoloRound).toHaveBeenCalledWith([70]));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reveal answer" }));
+    });
+
+    expect(await screen.findByRole("group", { name: "Solved 1" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
+    expect(screen.getByText("Revealed One")).toBeInTheDocument();
+  });
+
+  it("locks the solo guess controls while a guess is in flight so a round counts once", async () => {
+    autocompletePhotoPlayer.mockResolvedValueOnce({ players: [{ id: 80, name: "Once Only" }] });
+    let resolveGuess;
+    submitPhotoSoloGuess.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveGuess = resolve;
+      })
+    );
+
+    render(
+      <PhotoQuizBoard
+        soloInitialRound={soloPhotoRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectPhotoPlayer("Once Only");
+
+    // While the guess is in flight the input and Reveal answer are disabled, so
+    // the same round cannot be submitted (or resolved) twice.
+    expect(screen.getByPlaceholderText("Type a player name...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reveal answer" })).toBeDisabled();
+
+    await act(async () => {
+      resolveGuess({ correct: true, answer: photoAnswer({ id: 80, name: "Once Only" }) });
+    });
+
+    expect(await screen.findByRole("group", { name: "Solved 1" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 1" })).toBeInTheDocument();
+    expect(submitPhotoSoloGuess).toHaveBeenCalledTimes(1);
+  });
+
+  it("locks Reveal answer while a reveal is in flight so it resolves once", async () => {
+    let resolveReveal;
+    revealPhotoSoloAnswer.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveReveal = resolve;
+      })
+    );
+
+    render(
+      <PhotoQuizBoard
+        soloInitialRound={soloPhotoRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const revealButton = screen.getByRole("button", { name: "Reveal answer" });
+    await act(async () => {
+      fireEvent.click(revealButton);
+    });
+
+    // The button disables while the reveal is in flight, so a second click
+    // cannot resolve the round twice.
+    expect(revealButton).toBeDisabled();
+    fireEvent.click(revealButton);
+
+    await act(async () => {
+      resolveReveal({ answer: photoAnswer({ id: 90, name: "Revealed Once" }) });
+    });
+
+    expect(await screen.findByText("Revealed Once")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Solved 0" })).toBeInTheDocument();
+    expect(revealPhotoSoloAnswer).toHaveBeenCalledTimes(1);
   });
 });
 
