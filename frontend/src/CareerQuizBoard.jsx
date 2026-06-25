@@ -91,12 +91,17 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const [soloHints, setSoloHints] = useState(createEmptySoloHints);
   const [soloHintLoading, setSoloHintLoading] = useState(false);
   const [soloHintError, setSoloHintError] = useState("");
+  const [soloScore, setSoloScore] = useState({ solved: 0, streak: 0 });
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [cancelling, setCancelling] = useState(false);
   const [resigning, setResigning] = useState(false);
   const [roundTimerAnchor, setRoundTimerAnchor] = useState(null);
   const [lastResult, setLastResult] = useState(null);
   const soloRoundTokenRef = useRef(soloInitialRound?.round_token || null);
+  // Tracks the solo round_token whose terminal outcome (correct guess or reveal)
+  // has already updated the score, so a duplicate/late response can never double
+  // count or reset the Solved/Streak counter for the same round.
+  const soloResolvedRoundRef = useRef(null);
 
   const solo = Boolean(soloRound);
   const isOnline = !solo && Boolean(onlineInfo);
@@ -257,6 +262,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   async function nextSoloRound() {
     const next = await createCareerSoloRound(recentIds);
     soloRoundTokenRef.current = next.round_token || null;
+    soloResolvedRoundRef.current = null;
     setSoloRound(next);
     setAnswer(null);
     setMessage("");
@@ -270,11 +276,19 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     setMessage("");
     setNoAnswerOfferMessageRoundNumber(null);
     if (solo) {
-      const result = await submitCareerSoloGuess(soloRound.round_token, player.id);
+      const requestedRoundToken = soloRound.round_token;
+      const result = await submitCareerSoloGuess(requestedRoundToken, player.id);
+      // Drop a response that resolved after the player already advanced rounds.
+      if (soloRoundTokenRef.current !== requestedRoundToken) return;
       if (result.correct) {
-        setAnswer(result.answer);
-        setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
-        setMessage(CAREER_FEEDBACK_MESSAGES.correct);
+        // Score the round exactly once even if two correct responses arrive.
+        if (soloResolvedRoundRef.current !== requestedRoundToken) {
+          soloResolvedRoundRef.current = requestedRoundToken;
+          setSoloScore((score) => ({ solved: score.solved + 1, streak: score.streak + 1 }));
+          setAnswer(result.answer);
+          setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+          setMessage(CAREER_FEEDBACK_MESSAGES.correct);
+        }
       } else {
         setMessage(CAREER_FEEDBACK_MESSAGES.soloWrong);
       }
@@ -303,9 +317,17 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   }
 
   async function revealSolo() {
-    const result = await revealCareerSoloAnswer(soloRound.round_token);
-    setAnswer(result.answer);
-    setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+    const requestedRoundToken = soloRound.round_token;
+    const result = await revealCareerSoloAnswer(requestedRoundToken);
+    if (soloRoundTokenRef.current !== requestedRoundToken) return;
+    // Revealing without solving ends the round: keep Solved, reset the Streak,
+    // and only once per round.
+    if (soloResolvedRoundRef.current !== requestedRoundToken) {
+      soloResolvedRoundRef.current = requestedRoundToken;
+      setSoloScore((score) => ({ ...score, streak: 0 }));
+      setAnswer(result.answer);
+      setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+    }
   }
 
   async function revealSoloHint() {
@@ -465,28 +487,79 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     );
   }
 
+  if (solo) {
+    return (
+      <Shell
+        onHome={onHome}
+        align="top"
+        headerRight={
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-elq-text">
+            <span className="h-2 w-2 rounded-full bg-elq-orange" aria-hidden="true" />
+            Solo
+          </span>
+        }
+      >
+        <div className="w-full max-w-6xl">
+          <SoloHud
+            solved={soloScore.solved}
+            streak={soloScore.streak}
+            hintsUsed={soloHints.usedCount}
+            hintLoading={soloHintLoading}
+            hintExhausted={soloHints.exhausted}
+            answered={Boolean(answer)}
+            onRevealHint={revealSoloHint}
+            onRevealAnswer={revealSolo}
+          />
+
+          <p className="mt-2 px-1 text-xs text-elq-muted">
+            Career data from Wikipedia and may be incomplete.
+          </p>
+
+          <div className="mt-4 grid gap-6 lg:grid-cols-2 lg:items-start">
+            <div className="lg:max-h-[68vh] lg:overflow-y-auto">
+              <Timeline timeline={timeline} />
+            </div>
+
+            <div>
+              <CareerGuessBox
+                onGuess={handleGuess}
+                disabled={Boolean(answer)}
+                roundKey={roundKey}
+                bare
+              />
+
+              <SoloHintDetails hints={soloHints} error={soloHintError} />
+
+              <CareerFeedbackMessage message={message} />
+
+              {answer && <SoloAnswerReveal answer={answer} onNext={nextSoloRound} />}
+            </div>
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
   return (
     <Shell onHome={onHome}>
       <div className="w-full max-w-5xl">
-        <div className={`flex items-start justify-between gap-4 ${solo ? "mb-6" : "mb-4"}`}>
+        <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <h1 className="font-display text-4xl text-elq-dark">CAREER QUIZ</h1>
             <p className="text-sm text-elq-muted">Career data from Wikipedia and may be incomplete.</p>
           </div>
         </div>
 
-        {!solo && (
-          <CareerMultiplayerScoreboard
-            game={game}
-            playerNumber={playerNumber}
-            roundNumber={currentRoundNumber}
-            timer={
-              showRoundTimer && timerRemaining != null
-                ? { seconds: timerRemaining, critical: timerRemaining <= 5 }
-                : null
-            }
-          />
-        )}
+        <CareerMultiplayerScoreboard
+          game={game}
+          playerNumber={playerNumber}
+          roundNumber={currentRoundNumber}
+          timer={
+            showRoundTimer && timerRemaining != null
+              ? { seconds: timerRemaining, critical: timerRemaining <= 5 }
+              : null
+          }
+        />
 
         <CompletedRoundReveal
           round={completedRound}
@@ -511,19 +584,9 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
             <CareerGuessBox
               onGuess={handleGuess}
-              disabled={Boolean(answer) || roundLocked}
+              disabled={roundLocked}
               roundKey={roundKey}
             />
-
-            {solo && (
-              <SoloHintsPanel
-                hints={soloHints}
-                loading={soloHintLoading}
-                error={soloHintError}
-                disabled={Boolean(answer)}
-                onReveal={revealSoloHint}
-              />
-            )}
 
             <CareerFeedbackMessage message={message} />
 
@@ -533,57 +596,35 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
               player2Name={game?.player2_name}
             />
 
-            {answer ? (
-              <div className="mt-6 rounded-2xl border border-elq-border bg-white p-5">
-                <div className="flex items-center gap-4 mb-4">
-                  <AnswerPlayerImage player={answer} />
-                  <div>
-                    <h2 className="font-display text-3xl text-elq-dark">{answer.name}</h2>
-                    <p className="text-sm text-elq-muted">
-                      {[answer.position, answer.nationality].filter(Boolean).join(" · ")}
-                    </p>
-                  </div>
-                </div>
-                <button onClick={nextSoloRound} className="px-6 py-3 rounded-xl bg-elq-cta text-white font-bold">
-                  Next career
-                </button>
-              </div>
-            ) : (
-              <div className="mt-6 flex flex-wrap gap-3">
-                {solo && (
-                  <button onClick={revealSolo} className="px-5 py-2 rounded-xl border border-elq-border text-elq-text">
-                    Reveal answer
-                  </button>
-                )}
-                {!solo && !isPublicQuickMatch && game?.pending_no_answer_to === playerNumber && (
-                  <>
-                    <button
-                      onClick={() => respondNoAnswer(true)}
-                      disabled={roundLocked}
-                      className="px-5 py-2 rounded-xl bg-elq-cta text-white font-bold disabled:opacity-50"
-                    >
-                      Accept no answer
-                    </button>
-                    <button
-                      onClick={() => respondNoAnswer(false)}
-                      disabled={roundLocked}
-                      className="px-5 py-2 rounded-xl border border-elq-border disabled:opacity-50"
-                    >
-                      Decline
-                    </button>
-                  </>
-                )}
-                {!solo && !isPublicQuickMatch && !game?.pending_no_answer_to && (
+            <div className="mt-6 flex flex-wrap gap-3">
+              {!isPublicQuickMatch && game?.pending_no_answer_to === playerNumber && (
+                <>
                   <button
-                    onClick={offerNoAnswer}
+                    onClick={() => respondNoAnswer(true)}
                     disabled={roundLocked}
-                    className="px-5 py-2 rounded-xl border border-elq-border text-elq-text disabled:opacity-50"
+                    className="px-5 py-2 rounded-xl bg-elq-cta text-white font-bold disabled:opacity-50"
                   >
-                    Nobody knows
+                    Accept no answer
                   </button>
-                )}
-              </div>
-            )}
+                  <button
+                    onClick={() => respondNoAnswer(false)}
+                    disabled={roundLocked}
+                    className="px-5 py-2 rounded-xl border border-elq-border disabled:opacity-50"
+                  >
+                    Decline
+                  </button>
+                </>
+              )}
+              {!isPublicQuickMatch && !game?.pending_no_answer_to && (
+                <button
+                  onClick={offerNoAnswer}
+                  disabled={roundLocked}
+                  className="px-5 py-2 rounded-xl border border-elq-border text-elq-text disabled:opacity-50"
+                >
+                  Nobody knows
+                </button>
+              )}
+            </div>
           </div>
         </div>
         {isOnline && game?.status === "active" && !roundLocked && (
@@ -685,56 +726,110 @@ function addUnique(values, value) {
   return [...values, value];
 }
 
-function SoloHintsPanel({ hints, loading, error, disabled, onReveal }) {
-  const exhausted = hints.exhausted;
-  const buttonDisabled = disabled || loading || exhausted;
-  const buttonLabel = exhausted
+function SoloHud({
+  solved,
+  streak,
+  hintsUsed,
+  hintLoading,
+  hintExhausted,
+  answered,
+  onRevealHint,
+  onRevealAnswer,
+}) {
+  const hintButtonDisabled = answered || hintLoading || hintExhausted;
+  const hintButtonLabel = hintExhausted
     ? "No more hints"
-    : loading ? "Loading hint..." : "Reveal a hint";
+    : hintLoading ? "Loading hint..." : "Reveal a hint";
+
+  return (
+    <section
+      aria-label="Career solo status"
+      className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-2xl border border-elq-border bg-white px-4 py-2.5 shadow-sm"
+    >
+      <p className="text-sm font-bold text-elq-dark sm:text-base">
+        Which player had this career?
+      </p>
+
+      <div className="flex items-baseline gap-2 text-sm">
+        <span className="flex items-baseline gap-1.5" role="group" aria-label={`Solved ${solved}`}>
+          <span className="text-elq-text">Solved</span>
+          <span className="font-bold tabular-nums text-elq-dark">{solved}</span>
+        </span>
+        <span aria-hidden="true" className="text-elq-border">·</span>
+        <span className="flex items-baseline gap-1.5" role="group" aria-label={`Streak ${streak}`}>
+          <span className="text-elq-text">Streak</span>
+          <span className="font-bold tabular-nums text-elq-dark">{streak}</span>
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="text-elq-text">Hints used: {hintsUsed}</span>
+        <button
+          type="button"
+          onClick={onRevealHint}
+          disabled={hintButtonDisabled}
+          className="rounded-xl border border-elq-orange/30 px-4 py-2 font-bold text-elq-cta disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {hintButtonLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onRevealAnswer}
+          disabled={answered}
+          className="rounded-xl border border-elq-border px-4 py-2 font-semibold text-elq-text disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Reveal answer
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function SoloHintDetails({ hints, error }) {
+  const hasContent = Boolean(hints.nationality || hints.position || hints.skeleton);
+  if (!hasContent && !error) return null;
 
   return (
     <section
       aria-label="Solo career hints"
       data-testid="career-solo-hints"
-      className="mt-4 rounded-2xl border border-elq-border bg-white p-4 shadow-sm"
+      className="mt-4 space-y-3"
     >
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="text-xs font-bold uppercase tracking-[0.18em] text-elq-muted">
-            Solo hints
-          </div>
-          <div className="text-sm font-semibold text-elq-dark">
-            Hints used: {hints.usedCount}
-          </div>
-        </div>
-        <button
-          onClick={onReveal}
-          disabled={buttonDisabled}
-          className="rounded-xl border border-elq-orange/30 px-4 py-2 text-sm font-bold text-elq-orange disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {buttonLabel}
-        </button>
-      </div>
-
-      <div className="space-y-3">
-        {hints.nationality && (
-          <HintPill label="Nationality">
-            {hints.countryCode && (
-              <span aria-hidden="true">{countryCodeToFlagEmoji(hints.countryCode)}</span>
-            )}
-            <span>{hints.nationality}</span>
-          </HintPill>
-        )}
-        {hints.position && (
-          <HintPill label="Position">
-            <span>{hints.position}</span>
-          </HintPill>
-        )}
-        {hints.skeleton && <MaskedNameHint hints={hints} />}
-      </div>
-
-      {error && <div className="mt-3 text-sm font-semibold text-red-600">{error}</div>}
+      {hints.nationality && (
+        <HintPill label="Nationality">
+          {hints.countryCode && (
+            <span aria-hidden="true">{countryCodeToFlagEmoji(hints.countryCode)}</span>
+          )}
+          <span>{hints.nationality}</span>
+        </HintPill>
+      )}
+      {hints.position && (
+        <HintPill label="Position">
+          <span>{hints.position}</span>
+        </HintPill>
+      )}
+      {hints.skeleton && <MaskedNameHint hints={hints} />}
+      {error && <div className="text-sm font-semibold text-red-600">{error}</div>}
     </section>
+  );
+}
+
+function SoloAnswerReveal({ answer, onNext }) {
+  return (
+    <div className="mt-6 rounded-2xl border border-elq-border bg-white p-5">
+      <div className="flex items-center gap-4 mb-4">
+        <AnswerPlayerImage player={answer} />
+        <div>
+          <h2 className="font-display text-3xl text-elq-dark">{answer.name}</h2>
+          <p className="text-sm text-elq-muted">
+            {[answer.position, answer.nationality].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+      </div>
+      <button onClick={onNext} className="px-6 py-3 rounded-xl bg-elq-cta text-white font-bold">
+        Next career
+      </button>
+    </div>
   );
 }
 
@@ -923,7 +1018,7 @@ function isCareerActionSyncConflict(error) {
   ].some((code) => code === "round_locked" || code === "round_stale");
 }
 
-function CareerGuessBox({ onGuess, disabled, roundKey }) {
+function CareerGuessBox({ onGuess, disabled, roundKey, bare = false }) {
   const [query, setQuery] = useState("");
   const [players, setPlayers] = useState([]);
   const [prevRoundKey, setPrevRoundKey] = useState(roundKey);
@@ -976,7 +1071,7 @@ function CareerGuessBox({ onGuess, disabled, roundKey }) {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-elq-border p-4">
+    <div className={bare ? "" : "bg-white rounded-2xl border border-elq-border p-4"}>
       <input
         value={query}
         disabled={disabled}
@@ -1006,14 +1101,22 @@ function CareerGuessBox({ onGuess, disabled, roundKey }) {
   );
 }
 
-function Shell({ children, onHome }) {
+function Shell({ children, onHome, align = "center", headerRight = null }) {
+  const alignClass = align === "top" ? "items-start" : "items-center";
   return (
     <div className="min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
       <div className="p-4">
-        <BoardHeaderNav onHome={onHome} />
+        {headerRight ? (
+          <div className="flex items-center justify-between gap-4">
+            <BoardHeaderNav onHome={onHome} />
+            {headerRight}
+          </div>
+        ) : (
+          <BoardHeaderNav onHome={onHome} />
+        )}
       </div>
-      <div className="flex-1 flex items-center justify-center p-4 pt-0">
+      <div className={`flex-1 flex ${alignClass} justify-center p-4 pt-0`}>
         {children}
       </div>
     </div>

@@ -31,6 +31,7 @@ import {
   fetchCareerSoloHint,
   getCareerGame,
   getCareerQuickMatchPools,
+  revealCareerSoloAnswer,
   submitCareerGuess,
   submitCareerSoloGuess,
   resignCareerGame,
@@ -795,6 +796,131 @@ describe("CareerQuizBoard multiplayer reveals", () => {
 
     expect(screen.queryByTestId("career-solo-hints")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reveal a hint" })).not.toBeInTheDocument();
+  });
+
+  it("shows the solo objective and a starting Solved/Streak score in the top HUD", () => {
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Which player had this career?")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Solved 0" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reveal answer" })).toBeInTheDocument();
+  });
+
+  it("keeps the solo objective and score out of multiplayer", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText("Which player had this career?")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Solved 0" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reveal answer" })).not.toBeInTheDocument();
+  });
+
+  it("increments Solved and Streak on a correct solo guess and carries the score into the next round", async () => {
+    autocompleteCareerPlayer
+      .mockResolvedValueOnce({ players: [{ id: 52, name: "First Hit" }] })
+      .mockResolvedValueOnce({ players: [{ id: 53, name: "Second Hit" }] });
+    submitCareerSoloGuess
+      .mockResolvedValueOnce({ correct: true, answer: careerAnswer({ id: 52, name: "First Hit" }) })
+      .mockResolvedValueOnce({ correct: true, answer: careerAnswer({ id: 53, name: "Second Hit" }) });
+    createCareerSoloRound.mockResolvedValueOnce(soloCareerRound({ round_token: "next-round" }));
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("group", { name: "Solved 0" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
+
+    await selectCareerPlayer("First Hit");
+
+    expect(await screen.findByRole("group", { name: "Solved 1" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 1" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next career" }));
+    await waitFor(() => expect(createCareerSoloRound).toHaveBeenCalledWith([52]));
+
+    await selectCareerPlayer("Second Hit");
+
+    expect(await screen.findByRole("group", { name: "Solved 2" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 2" })).toBeInTheDocument();
+  });
+
+  it("keeps the streak intact across a wrong guess before a correct solo answer", async () => {
+    autocompleteCareerPlayer
+      .mockResolvedValueOnce({ players: [{ id: 60, name: "Wrong One" }] })
+      .mockResolvedValueOnce({ players: [{ id: 61, name: "Right One" }] });
+    submitCareerSoloGuess
+      .mockResolvedValueOnce({ correct: false })
+      .mockResolvedValueOnce({ correct: true, answer: careerAnswer({ id: 61, name: "Right One" }) });
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectCareerPlayer("Wrong One");
+
+    expect(screen.getByRole("group", { name: "Solved 0" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
+
+    await selectCareerPlayer("Right One");
+
+    expect(await screen.findByRole("group", { name: "Solved 1" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 1" })).toBeInTheDocument();
+  });
+
+  it("resets the streak but keeps Solved when the answer is revealed", async () => {
+    autocompleteCareerPlayer.mockResolvedValueOnce({ players: [{ id: 70, name: "Solved One" }] });
+    submitCareerSoloGuess.mockResolvedValueOnce({
+      correct: true,
+      answer: careerAnswer({ id: 70, name: "Solved One" }),
+    });
+    createCareerSoloRound.mockResolvedValueOnce(soloCareerRound({ round_token: "round-2" }));
+    revealCareerSoloAnswer.mockResolvedValueOnce({
+      answer: careerAnswer({ id: 71, name: "Revealed One" }),
+    });
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectCareerPlayer("Solved One");
+    expect(await screen.findByRole("group", { name: "Streak 1" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next career" }));
+    await waitFor(() => expect(createCareerSoloRound).toHaveBeenCalledWith([70]));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reveal answer" }));
+    });
+
+    expect(await screen.findByRole("group", { name: "Solved 1" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
+    expect(screen.getByText("Revealed One")).toBeInTheDocument();
   });
 
   it("shows a polled latest completed round once for a non-acting player", async () => {
