@@ -387,7 +387,7 @@ export default function GuessTheListSetup({
           <button
             type="submit"
             disabled={submitDisabled}
-            className="w-full py-3.5 px-6 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg tracking-wide"
+            className="w-full py-3.5 px-6 bg-elq-cta text-white font-bold rounded-xl hover:bg-elq-cta-dark active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg tracking-wide"
           >
             {loading ? loadingLabel : ctaLabel}
           </button>

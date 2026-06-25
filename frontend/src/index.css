@@ -4,8 +4,8 @@
   --color-elq-orange: #FF6600;
   --color-elq-orange-light: #FF8533;
   --color-elq-orange-dark: #E85D00;
-  --color-elq-cta: #FF6600;
-  --color-elq-cta-dark: #E85D00;
+  --color-elq-cta: #C2410C;
+  --color-elq-cta-dark: #9A3412;
   --color-elq-dark: #0F1923;
   --color-elq-bg: #F5F6F8;
   --color-elq-card: #FFFFFF;
@@ -23,19 +23,22 @@
 }
 
 /*
- * Refined Light token overrides. The `@theme` values above stay the classic
- * defaults so `VITE_UI_VARIANT=classic` is pixel-for-pixel the previous look.
- * Under the refined variant we darken the body/label/placeholder muted token to
- * pass WCAG AA (#566677 ≈ 5.9:1 on white, ≈ 5.5:1 on --color-elq-bg) and point
- * the primary-CTA fill at a darker orange so white button text passes AA
- * (#C2410C ≈ 5.2:1). Large/non-text accents keep --color-elq-orange. The
- * `html[data-ui]` selector outranks Tailwind's `:root` theme vars so the
- * override wins regardless of source order, and cascades to every screen.
+ * Accessible primary-CTA fill token. `--color-elq-cta` / `--color-elq-cta-dark`
+ * are the colour for any solid-orange surface that carries white text — primary
+ * buttons plus countdown/status badges — in BOTH UI variants: resting #C2410C
+ * (≈5.18:1) and the darker hover #9A3412 (≈7.31:1) on white both clear WCAG AA for
+ * normal text, where the brand --color-elq-orange (#FF6600) is only 2.94:1.
+ * --color-elq-orange stays #FF6600 for decorative accents (borders, chips,
+ * /opacity fills, icons, focus rings) so the broader look is unchanged.
+ *
+ * Refined Light token override. The refined variant additionally darkens the
+ * body/label/placeholder muted token to pass WCAG AA (#566677 ≈ 5.9:1 on white,
+ * ≈ 5.5:1 on --color-elq-bg). The `html[data-ui]` selector outranks Tailwind's
+ * `:root` theme vars so the override wins regardless of source order, and
+ * cascades to every screen.
  */
 html[data-ui="refined"] {
   --color-elq-muted: #566677;
-  --color-elq-cta: #C2410C;
-  --color-elq-cta-dark: #9A3412;
 }
 
 @keyframes fade-in-up {

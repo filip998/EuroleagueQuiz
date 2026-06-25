@@ -81,7 +81,7 @@ export default function GameResult({
             {onPlayAgain && (
               <button
                 onClick={onPlayAgain}
-                className="px-8 py-3 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all text-lg"
+                className="px-8 py-3 bg-elq-cta text-white font-bold rounded-xl hover:bg-elq-cta-dark active:scale-[0.98] transition-all text-lg"
               >
                 {playAgainLabel}
               </button>

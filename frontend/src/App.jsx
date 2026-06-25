@@ -60,7 +60,8 @@ function LoadingScreen() {
 //
 // Two presentations gated by the UI variant (see uiVariant.js):
 //   - HomePageClassic: the original flat 5-card grid (preserved verbatim so
-//     VITE_UI_VARIANT=classic restores today's look pixel-for-pixel).
+//     VITE_UI_VARIANT=classic restores today's look pixel-for-pixel, apart from
+//     the shared accessible primary-CTA fill token; see index.css).
 //   - HomePageRefined: the "Refined Light" hero + flagship + 2x2 lobby (default).
 // `HomePage` picks one; the `/` route renders it. The `variant` prop defaults to
 // UI_VARIANT and exists so tests can render either presentation deterministically.

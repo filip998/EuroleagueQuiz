@@ -773,7 +773,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                       setLastFeedback(null);
                     }
                   }}
-                  className="px-6 py-2.5 bg-elq-orange text-white font-bold rounded-xl hover:bg-elq-orange-dark active:scale-[0.98] transition-all"
+                  className="px-6 py-2.5 bg-elq-cta text-white font-bold rounded-xl hover:bg-elq-cta-dark active:scale-[0.98] transition-all"
                 >
                   {SOLO_TERMINAL_RESULTS.has(roundTransition.result) ? "See Result" : "Start New Round"}
                 </button>
