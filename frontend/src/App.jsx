@@ -663,8 +663,12 @@ function HigherLowerGamePage() {
 function CareerSetupPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const initialMode =
-    new URLSearchParams(location.search).get("quick") === "1" ? "online" : "solo";
+  const isQuick = new URLSearchParams(location.search).get("quick") === "1";
+  // A `?join=` invite link opens Online -> Play a Friend -> Join with the code
+  // prefilled. Quick Match wins over any invite code, so it never opens a join.
+  const joinCode = isQuick ? "" : parseJoinCode(location.search);
+  const initialMode = isQuick || joinCode ? "online" : "solo";
+  const setupKey = joinCode ? `join-${joinCode}` : initialMode;
 
   function handleSoloRound(round) {
     navigate("/career/play", { state: { soloRound: round } });
@@ -678,8 +682,9 @@ function CareerSetupPage() {
 
   return (
     <CareerQuizSetup
-      key={initialMode}
+      key={setupKey}
       initialMode={initialMode}
+      initialJoinCode={joinCode}
       onSoloRound={handleSoloRound}
       onGameCreated={handleGameCreated}
       onGameJoined={handleGameCreated}
@@ -746,10 +751,14 @@ function PhotoSetupPage() {
   const navigate = useNavigate();
   const location = useLocation();
   // A `?quick=1` deep link (the classic home card, or `/photo?quick=1` directly)
-  // opens setup on Online, which defaults to the Quick Match pool grid. The refined
-  // home card and any plain `/photo` visit keep PhotoQuizSetup's Solo default.
-  const initialMode =
-    new URLSearchParams(location.search).get("quick") === "1" ? "online" : "solo";
+  // opens setup on Online, which defaults to the Quick Match pool grid. A `?join=`
+  // invite link instead opens Online -> Play a Friend -> Join with the code
+  // prefilled. Any plain `/photo` visit keeps PhotoQuizSetup's Solo default.
+  const isQuick = new URLSearchParams(location.search).get("quick") === "1";
+  // Quick Match wins over any invite code, so it never opens a friend join.
+  const joinCode = isQuick ? "" : parseJoinCode(location.search);
+  const initialMode = isQuick || joinCode ? "online" : "solo";
+  const setupKey = joinCode ? `join-${joinCode}` : initialMode;
 
   function handleSoloRound(round) {
     navigate("/photo/play", { state: { soloRound: round } });
@@ -763,8 +772,9 @@ function PhotoSetupPage() {
 
   return (
     <PhotoQuizSetup
-      key={initialMode}
+      key={setupKey}
       initialMode={initialMode}
+      initialJoinCode={joinCode}
       onSoloRound={handleSoloRound}
       onGameCreated={handleGameCreated}
       onGameJoined={handleGameCreated}

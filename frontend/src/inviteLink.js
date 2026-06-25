@@ -1,8 +1,9 @@
 // Helpers for the friend-game shareable invite link (issue #55). Online join
 // codes are six uppercase alphanumerics; an invite link is the game's setup
 // route carrying that code as a `?join=` query param, e.g.
-// `https://host/tictactoe?join=ABC123`. v1 ships TicTacToe only, but the
-// `gamePath` argument keeps this reusable for other game modes later.
+// `https://host/tictactoe?join=ABC123`. TicTacToe, Career Quiz (`/career`),
+// Photo Quiz (`/photo`), and Guess the List (`/list`) all honor invite links;
+// the `gamePath` argument keeps this reusable across those game modes.
 
 export const JOIN_PARAM = "join";
 

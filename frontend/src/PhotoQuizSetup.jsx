@@ -7,6 +7,7 @@ import {
 } from "./api";
 import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
+import { normalizeJoinCode } from "./inviteLink";
 import {
   PHOTO_QUICK_MATCH_PRESETS,
   DEFAULT_PHOTO_QUICK_MATCH_PRESET,
@@ -36,14 +37,16 @@ const FRIEND_SUB_MODES = [
   ["join", "Join"],
 ];
 
-export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack, initialMode = "solo" }) {
-  const [mode, setMode] = useState(initialMode === "online" ? "online" : "solo");
-  // Online sub-mode: "quick" (matchmaking pool) | "friend" (private game).
-  const [onlineSub, setOnlineSub] = useState("quick");
+export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack, initialMode = "solo", initialJoinCode = "" }) {
+  const prefillCode = normalizeJoinCode(initialJoinCode);
+  const [mode, setMode] = useState(initialMode === "online" || prefillCode ? "online" : "solo");
+  // Online sub-mode: "quick" (matchmaking pool) | "friend" (private game). A valid
+  // invite code instead lands on Online -> Play a Friend -> Join, code prefilled.
+  const [onlineSub, setOnlineSub] = useState(prefillCode ? "friend" : "quick");
   // Friend sub-mode: "create" | "join".
-  const [friendSub, setFriendSub] = useState("create");
+  const [friendSub, setFriendSub] = useState(prefillCode ? "join" : "create");
   const [playerName, setPlayerName] = useClerkPrefilledName(getDisplayName);
-  const [joinCode, setJoinCode] = useState("");
+  const [joinCode, setJoinCode] = useState(prefillCode);
   const [targetWins, setTargetWins] = useState(3);
   const [wrongGuessVisibility, setWrongGuessVisibility] = useState("private");
   const [loading, setLoading] = useState(false);

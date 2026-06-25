@@ -91,6 +91,24 @@ describe("buildInviteUrl", () => {
   });
 });
 
+// The board for each online game builds its invite link with buildInviteUrl and
+// the game's own setup path; the matching setup route reads it back with
+// parseJoinCode. This proves the link round-trips for every game mode that
+// renders one (#277).
+describe("invite link round-trip per game path", () => {
+  it.each([
+    ["/tictactoe"],
+    ["/career"],
+    ["/photo"],
+    ["/list"],
+  ])("round-trips a join code through %s", (gamePath) => {
+    const inviteUrl = buildInviteUrl("abc123", gamePath, "https://play.example.com");
+    const url = new URL(inviteUrl);
+    expect(url.pathname).toBe(gamePath);
+    expect(parseJoinCode(url.search)).toBe("ABC123");
+  });
+});
+
 describe("parseInviteMode", () => {
   it("extracts and lowercases the mode param", () => {
     expect(parseInviteMode("?mode=race")).toBe("race");
