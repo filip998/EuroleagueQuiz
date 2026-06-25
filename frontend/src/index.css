@@ -147,3 +147,17 @@ select {
   background-position: right 12px center;
   padding-right: 36px;
 }
+
+/*
+ * Issue #259: the TicTacToe board must fit a laptop viewport without scrolling.
+ * The first-run onboarding card is the tallest piece of optional chrome above
+ * the grid, so on short viewports we drop it from flow and let the always-present
+ * "How to play" affordance carry onboarding. The element stays in the DOM (tests
+ * and tall-screen users keep it) — only its layout cost is removed where height
+ * is scarce.
+ */
+@media (max-height: 920px) {
+  .ttt-howto-firstrun {
+    display: none;
+  }
+}

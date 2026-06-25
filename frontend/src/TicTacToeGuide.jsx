@@ -237,7 +237,7 @@ export default function TicTacToeGuide() {
   const closeDialog = () => setOpenDialog(null);
 
   return (
-    <div className="w-full mb-3">
+    <div className="w-full mb-2">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
         <p data-testid="ttt-objective" className="text-sm text-elq-text">
           Claim three in a row — name a player who matches both clues for a cell.
@@ -273,7 +273,7 @@ export default function TicTacToeGuide() {
           onKeyDown={(e) => {
             if (e.key === "Escape") dismissFirstRun();
           }}
-          className="mt-3 bg-white border border-elq-border rounded-xl p-4 animate-slide-down"
+          className="ttt-howto-firstrun mt-3 bg-white border border-elq-border rounded-xl p-4 animate-slide-down"
         >
           <div className="flex items-start justify-between gap-3 mb-2">
             <h3 className="text-sm font-semibold text-elq-text">New here? How to play</h3>
