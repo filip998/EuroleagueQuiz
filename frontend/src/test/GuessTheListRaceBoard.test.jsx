@@ -547,3 +547,46 @@ describe("GuessTheListRaceBoard Champions rounds", () => {
     expect(screen.queryByTestId("club-logo")).not.toBeInTheDocument();
   });
 });
+
+describe("GuessTheListRaceBoard TicTacToe re-skin (issue #289)", () => {
+  it("renders the team section as a light card (no dark fill) with ink name and tinted chips", () => {
+    const { container } = render(
+      <GuessTheListRaceBoard
+        initialState={activeRaceGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onNewGame={vi.fn()}
+        onHome={vi.fn()}
+      />
+    );
+
+    // The team section is no longer a dark-navy fill.
+    expect(container.querySelector(".bg-elq-dark")).toBeNull();
+
+    // Team name is ink, the season is a violet chip, and the progress is an orange chip.
+    const teamName = screen.getByText("Real Madrid");
+    expect(teamName).toHaveClass("text-elq-dark");
+    expect(teamName).not.toHaveClass("text-white");
+
+    const seasonChip = screen.getByText("2024/25");
+    expect(seasonChip).toHaveClass("bg-violet-50", "text-violet-800");
+
+    const claimedChip = screen.getByText(/0\/1 claimed/);
+    expect(claimedChip).toHaveClass("bg-elq-orange/10");
+    expect(claimedChip).not.toHaveClass("text-white");
+  });
+
+  it("keeps the multiplayer scoreboard's player1/player2 tints unchanged", () => {
+    render(
+      <GuessTheListRaceBoard
+        initialState={activeRaceGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onNewGame={vi.fn()}
+        onHome={vi.fn()}
+      />
+    );
+
+    const scoreboard = screen.getByLabelText("Guess the List Race multiplayer scoreboard");
+    const pill = within(scoreboard).getByText("You are Ace").closest("div");
+    expect(pill.querySelector(".bg-elq-player1")).toBeTruthy();
+  });
+});

@@ -25,7 +25,7 @@ vi.mock("../ClubLogo", () => ({
 }));
 
 import GuessTheListBoard from "../GuessTheListBoard";
-import { offerEndRound, respondEndRound, resignGuessTheListGame } from "../api";
+import { offerEndRound, respondEndRound, resignGuessTheListGame, giveUpGuessTheListRound } from "../api";
 import { buildInviteUrl } from "../inviteLink";
 
 beforeEach(() => {
@@ -836,5 +836,60 @@ describe("GuessTheListBoard Classic friend waiting lobby", () => {
 
     expect(screen.getByText("WAITING FOR OPPONENT")).toBeInTheDocument();
     expect(screen.queryByText("Copy link")).not.toBeInTheDocument();
+  });
+});
+
+describe("GuessTheListBoard TicTacToe re-skin (issue #289)", () => {
+  it("renders the team/scope banner as a light card, not a dark-navy banner", () => {
+    const { container } = render(
+      <GuessTheListBoard initialState={activeSoloGame()} onNewGame={() => {}} onHome={() => {}} />
+    );
+
+    // No full-bleed dark-navy fill anywhere on the board (TicTacToe uses ink as text only).
+    expect(container.querySelector(".bg-elq-dark")).toBeNull();
+
+    // Team name is rendered in ink (not white-on-dark).
+    const teamName = screen.getByText("Real Madrid");
+    expect(teamName).toHaveClass("text-elq-dark");
+    expect(teamName).not.toHaveClass("text-white");
+
+    // The season is a tinted (violet) chip, matching TicTacToe's season axis chip.
+    const seasonChip = screen.getByText("2020/21");
+    expect(seasonChip).toHaveClass("bg-violet-50", "text-violet-800");
+
+    // Progress is an orange `X/Y` chip (orange/10 bg, accessible orange text).
+    const progressChip = getSpanByTextContent("0/1");
+    expect(progressChip).toHaveClass("bg-elq-orange/10");
+    expect(progressChip).not.toHaveClass("text-white");
+  });
+
+  it("renders Give Up as a muted-gray underline link, not a red button", () => {
+    render(
+      <GuessTheListBoard initialState={activeSoloGame()} onNewGame={() => {}} onHome={() => {}} />
+    );
+
+    const giveUp = screen.getByText("Give Up");
+    expect(giveUp).toHaveClass("text-elq-muted", "underline");
+    expect(giveUp).not.toHaveClass("text-red-400");
+    expect(giveUp).not.toHaveClass("text-red-600");
+  });
+
+  it("shows the given-up feedback on an accessible (amber) surface, not gray-on-tint", async () => {
+    const completedRound = { ...activeSoloGame().round, status: "given_up" };
+    giveUpGuessTheListRound.mockResolvedValue({
+      state: { ...activeSoloGame(), round: completedRound },
+      completedRound,
+    });
+
+    render(
+      <GuessTheListBoard initialState={activeSoloGame()} onNewGame={() => {}} onHome={() => {}} />
+    );
+
+    fireEvent.click(screen.getByText("Give Up"));
+
+    const feedback = await screen.findByText(/Gave up/);
+    expect(feedback).toHaveClass("bg-amber-50", "text-amber-700");
+    expect(feedback).not.toHaveClass("bg-slate-100");
+    expect(feedback).not.toHaveClass("text-slate-600");
   });
 });
