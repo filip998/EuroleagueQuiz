@@ -774,6 +774,92 @@ describe("GameBoard claimed-cell colors (issue #262)", () => {
   });
 });
 
+describe("GameBoard claimed-cell name wrapping (issue #263)", () => {
+  // Mirrors the issue #262 helper: pre-claim cells so the board renders the
+  // claimed-cell name we assert wrapping behaviour on.
+  function roundWithClaims(claims) {
+    return {
+      columns: [axis("A"), axis("B"), axis("C")],
+      rows: [axis("1"), axis("2"), axis("3")],
+      cells: boardCells().map((cell) => {
+        const claim = claims.find(
+          (c) => c.row === cell.row_index && c.col === cell.col_index
+        );
+        return claim
+          ? { ...cell, claimed_by_player: claim.player, claimed_player_name: claim.name }
+          : cell;
+      }),
+    };
+  }
+
+  // The claimed name is the reward for a correct answer, so on a narrow mobile
+  // cell it must wrap/scale to stay fully readable instead of clipping. The old
+  // `truncate` (white-space: nowrap) on an unconstrained flex wrapper let the
+  // name overflow the centered, overflow-hidden cell and clip on both sides. The
+  // fix swaps `truncate` for the wrapping `.ttt-claimed-name` class and bounds the
+  // flex wrapper to the cell width with `w-full min-w-0`.
+  function expectWrappingName(nameEl, fullName) {
+    expect(nameEl).toHaveTextContent(fullName);
+    expect(nameEl.className).toContain("ttt-claimed-name");
+    expect(nameEl.className).not.toContain("truncate");
+    const wrapper = nameEl.closest(".animate-cell-claim");
+    expect(wrapper).not.toBeNull();
+    expect(wrapper.className).toContain("w-full");
+    expect(wrapper.className).toContain("min-w-0");
+  }
+
+  it("wraps the full claimed name in solo mode instead of clipping it", () => {
+    render(
+      <GameBoard
+        initialState={soloGame({
+          round: roundWithClaims([{ row: 0, col: 0, player: 1, name: "Nando De Colo" }]),
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    expectWrappingName(screen.getByText("Nando De Colo"), "Nando De Colo");
+  });
+
+  it("wraps the full claimed name in local 1v1 mode", () => {
+    render(
+      <GameBoard
+        initialState={activeGame({
+          mode: "local_two_player",
+          round: roundWithClaims([{ row: 0, col: 0, player: 1, name: "Sergio Rodriguez" }]),
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    expectWrappingName(screen.getByText("Sergio Rodriguez"), "Sergio Rodriguez");
+  });
+
+  it("wraps the full claimed name for both players in online mode", () => {
+    render(
+      <GameBoard
+        initialState={activeGame({
+          mode: "online_friend",
+          round: roundWithClaims([
+            { row: 0, col: 0, player: 1, name: "Nando De Colo" },
+            { row: 0, col: 1, player: 2, name: "Sergio Rodriguez" },
+          ]),
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    expectWrappingName(screen.getByText("Nando De Colo"), "Nando De Colo");
+    expectWrappingName(screen.getByText("Sergio Rodriguez"), "Sergio Rodriguez");
+  });
+});
+
 describe("GameBoard end-of-game result", () => {
   it("reveals the inline result and clears the waiting indicator when the opponent resigns", async () => {
     // Player 2 is the viewer and it is player 1's turn, so the stale-prone
