@@ -360,7 +360,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(screen.queryByLabelText("Shared wrong guesses")).not.toBeInTheDocument();
   });
 
-  it("styles multiplayer correct and wrong guess feedback with distinct tones", async () => {
+  it("styles multiplayer wrong-guess feedback and never bleeds a win banner into the next round", async () => {
     autocompleteCareerPlayer
       .mockResolvedValueOnce({ players: [{ id: 41, name: "Wrong Player" }] })
       .mockResolvedValueOnce({ players: [{ id: 42, name: "Winning Player" }] });
@@ -419,10 +419,69 @@ describe("CareerQuizBoard multiplayer reveals", () => {
       }),
     });
 
-    const successFeedback = await screen.findByTestId("career-feedback-message");
-    expect(successFeedback).toHaveTextContent("Correct!");
-    expect(successFeedback).toHaveClass("bg-emerald-50", "text-emerald-700");
-    expect(successFeedback).not.toHaveClass("bg-red-50");
+    // The won round's outcome is carried by the reveal card; once the round
+    // advances no transient guess banner may persist over the new round (#276).
+    await screen.findByText("Player 1 wins the round");
+    expect(screen.queryByText("Correct!")).not.toBeInTheDocument();
+    expect(screen.queryByText("Wrong guess.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("career-feedback-message")).not.toBeInTheDocument();
+  });
+
+  it("clears a stale wrong-guess banner when a public Quick Match round auto-skips on timeout", async () => {
+    autocompleteCareerPlayer.mockResolvedValueOnce({
+      players: [{ id: 41, name: "Wrong Player" }],
+    });
+
+    const publicGame = (overrides = {}) => activeCareerGame({
+      is_public: true,
+      preset: "standard",
+      ...overrides,
+    });
+
+    render(
+      <CareerQuizBoard
+        initialState={publicGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectCareerPlayer("Wrong Player");
+    emitCareerRealtimeState({
+      state: publicGame(),
+      result: "incorrect",
+    });
+    expect(await screen.findByText("Wrong guess.")).toBeInTheDocument();
+
+    // The shared round timer expiry advances the round with a time_expired
+    // result; the stale "Wrong guess." banner must not bleed into it (#276).
+    emitCareerRealtimeState({
+      state: publicGame({
+        round_number: 2,
+        current_round: {
+          ...publicGame().current_round,
+          round_number: 2,
+        },
+        latest_completed_round: completedRound({
+          round_number: 1,
+          name: "Skipped Player",
+          status: "completed",
+          winner_player: null,
+        }),
+      }),
+      result: "time_expired",
+      completedRound: completedRound({
+        round_number: 1,
+        name: "Skipped Player",
+        status: "completed",
+        winner_player: null,
+      }),
+    });
+
+    await screen.findByText("No answer");
+    expect(screen.queryByText("Wrong guess.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("career-feedback-message")).not.toBeInTheDocument();
   });
 
   it("does not show personal correct feedback for an opponent win broadcast", () => {
@@ -657,6 +716,66 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     const successFeedback = await screen.findByTestId("career-feedback-message");
     expect(successFeedback).toHaveTextContent("Correct!");
     expect(successFeedback).toHaveClass("bg-emerald-50", "text-emerald-700");
+  });
+
+  it("clears the solo wrong-guess banner when the answer is revealed", async () => {
+    autocompleteCareerPlayer.mockResolvedValueOnce({ players: [{ id: 55, name: "Solo Miss" }] });
+    submitCareerSoloGuess.mockResolvedValueOnce({ correct: false });
+    revealCareerSoloAnswer.mockResolvedValueOnce({
+      answer: careerAnswer({ id: 56, name: "Revealed Star" }),
+    });
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectCareerPlayer("Solo Miss");
+    expect(await screen.findByText("Not this player. Keep guessing.")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reveal answer" }));
+    });
+
+    // Revealing the answer must drop the stale wrong-guess banner instead of
+    // leaving it stacked above the revealed player (issue #276).
+    expect(await screen.findByText("Revealed Star")).toBeInTheDocument();
+    expect(screen.queryByText("Not this player. Keep guessing.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("career-feedback-message")).not.toBeInTheDocument();
+  });
+
+  it("leaves no solo feedback banner when advancing to the next career after a reveal", async () => {
+    autocompleteCareerPlayer.mockResolvedValueOnce({ players: [{ id: 57, name: "Solo Miss" }] });
+    submitCareerSoloGuess.mockResolvedValueOnce({ correct: false });
+    revealCareerSoloAnswer.mockResolvedValueOnce({
+      answer: careerAnswer({ id: 58, name: "Revealed Star" }),
+    });
+    createCareerSoloRound.mockResolvedValueOnce(soloCareerRound({ round_token: "next-round" }));
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectCareerPlayer("Solo Miss");
+    expect(await screen.findByText("Not this player. Keep guessing.")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reveal answer" }));
+    });
+    await screen.findByText("Revealed Star");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next career" }));
+    await waitFor(() => expect(createCareerSoloRound).toHaveBeenCalled());
+
+    expect(screen.queryByText("Not this player. Keep guessing.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("career-feedback-message")).not.toBeInTheDocument();
   });
 
   it("reveals solo hints progressively and stops at the hidden-letter cap", async () => {
