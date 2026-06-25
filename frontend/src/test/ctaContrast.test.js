@@ -13,10 +13,29 @@ const here = dirname(fileURLToPath(import.meta.url));
 const srcDir = resolve(here, "..");
 const css = readFileSync(resolve(srcDir, "index.css"), "utf8");
 
+// Extract the base Tailwind `@theme { ... }` block (flat `--var: value;` lines, no
+// nested braces) so we can assert the accessible CTA values live in the BASE theme —
+// which is what makes BOTH UI variants pass AA. Asserting they merely appear somewhere
+// in index.css is not enough: the pre-PR shape (brand orange in @theme, accessible
+// values re-added only under `html[data-ui="refined"]`) would pass a whole-file scan
+// while leaving the classic variant at the failing 2.94:1.
+function themeBlock(cssText) {
+  const match = cssText.match(/@theme\s*\{([\s\S]*?)\}/);
+  if (!match) throw new Error("index.css is missing its @theme block");
+  return match[1];
+}
+
 describe("accessible CTA token (issue #260)", () => {
   it("defines the accessible CTA fill colours in @theme so both UI variants pass AA", () => {
-    expect(css).toMatch(/--color-elq-cta:\s*#C2410C\s*;/);
-    expect(css).toMatch(/--color-elq-cta-dark:\s*#9A3412\s*;/);
+    const theme = themeBlock(css);
+    expect(theme).toMatch(/--color-elq-cta:\s*#C2410C\s*;/);
+    expect(theme).toMatch(/--color-elq-cta-dark:\s*#9A3412\s*;/);
+  });
+
+  it("never assigns the low-contrast brand orange to the CTA token in any variant", () => {
+    // #FF6600 (2.94:1) and #E85D00 (3.50:1) both fail AA for white text, so the CTA
+    // token must never resolve to them — including via a `html[data-ui]` override.
+    expect(css).not.toMatch(/--color-elq-cta(?:-dark)?:\s*#(?:FF6600|E85D00)\s*;/i);
   });
 
   it("keeps the brand orange unchanged for decorative accents", () => {
