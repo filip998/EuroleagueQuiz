@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { Routes, Route, useNavigate, useParams, useLocation, Link, Navigate } from "react-router-dom";
 import GameSetup from "./GameSetup";
 import GameBoard from "./GameBoard";
@@ -14,7 +14,7 @@ import PhotoQuizBoard from "./PhotoQuizBoard";
 import HomeQuickMatchCta, { HomePlayCta } from "./HomeQuickMatchCta";
 import { LogoFull } from "./Logo";
 import { UI_VARIANT } from "./uiVariant";
-import { getCareerGame, getGame, getPhotoGame, getGuessTheListGame } from "./api";
+import { createGame, getCareerGame, getGame, getPhotoGame, getGuessTheListGame } from "./api";
 import { parseJoinCode, parseInviteMode, RACE_INVITE_MODE } from "./inviteLink";
 import {
   saveOnlineInfo,
@@ -505,30 +505,66 @@ function TicTacToeSetupPage() {
   );
 }
 
-function TicTacToeGamePage() {
+export function TicTacToeGamePage() {
   const { gameId } = useParams();
   const navigate = useNavigate();
   const [game, setGame] = useState(null);
   const [onlineInfo, setOnlineInfo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const replayingRef = useRef(false);
 
   useEffect(() => {
+    let cancelled = false;
+    replayingRef.current = false;
     getGame(gameId)
       .then((data) => {
+        if (cancelled) return;
         setGame(data);
         setOnlineInfo(recoverOnlineInfo(gameId, data));
       })
-      .catch(() => navigate("/tictactoe", { replace: true }))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) navigate("/tictactoe", { replace: true });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [gameId, navigate]);
 
-  if (loading) return <LoadingScreen />;
-  if (!game) return null;
+  async function handleNewGame() {
+    // Local 1v1 and online matches return to the setup screen to reconfigure.
+    if (game?.mode !== "single_player") {
+      navigate("/tictactoe");
+      return;
+    }
+    // Solo "Play Again" starts a fresh solo board with the same solo defaults and
+    // drops the player straight into it, instead of returning to the setup screen
+    // (which defaults to Online -> Quick Match). The ref guards against double-taps.
+    if (replayingRef.current) return;
+    replayingRef.current = true;
+    try {
+      const resp = await createGame({ mode: "single_player", timer_mode: "unlimited" });
+      navigate(`/tictactoe/${resp.state.id}`);
+    } catch {
+      // Creating the solo board failed (rare, local insert). Fall back to setup so
+      // the player can retry rather than being stuck on the finished result screen.
+      replayingRef.current = false;
+      navigate("/tictactoe");
+    }
+  }
+
+  // Hold on the loading screen until the fetched game matches the current route
+  // id. This hides the previous finished board during a solo replay and forces a
+  // fresh GameBoard mount (with key) so its internal state re-initializes.
+  if (loading || !game || String(game.id) !== String(gameId)) return <LoadingScreen />;
 
   return (
     <GameBoard
+      key={game.id}
       initialState={game}
-      onNewGame={() => navigate("/tictactoe")}
+      onNewGame={handleNewGame}
       onHome={() => navigate("/")}
       onlineInfo={onlineInfo}
     />
