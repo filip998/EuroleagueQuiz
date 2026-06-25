@@ -1399,6 +1399,64 @@ def test_tictactoe_board_generation_rejects_second_achievement_axis(
             assert ttt_service._get_player_set_for_cell(db, row_axis, col_axis)
 
 
+def test_tictactoe_played_with_axis_cap_allows_two_rejects_three():
+    axes = [
+        {"axis_type": "played_with", "value": "1"},
+        {"axis_type": "played_with", "value": "2"},
+    ]
+
+    assert ttt_service.PLAYED_WITH_MAX_PER_BOARD == 2
+    assert ttt_service._axis_counts_within_board_caps(axes)
+    assert not ttt_service._axis_counts_within_board_caps(
+        [*axes, {"axis_type": "played_with", "value": "3"}]
+    )
+    assert not ttt_service._axis_type_can_be_added(axes, "played_with")
+
+
+def test_tictactoe_board_generation_caps_played_with_axes(monkeypatch):
+    candidates_by_type = {
+        "team": [
+            {
+                "axis_type": "team",
+                "value": str(index),
+                "display_label": f"Team {index}",
+            }
+            for index in range(1, 7)
+        ],
+        "played_with": [
+            {
+                "axis_type": "played_with",
+                "value": str(index),
+                "display_label": f"Player {index}",
+            }
+            for index in range(1, 4)
+        ],
+    }
+    checked_cells = []
+
+    def choose_played_with(*args, **kwargs):
+        return ["played_with"]
+
+    def cell_has_answers(row_axis, col_axis):
+        checked_cells.append((row_axis, col_axis))
+        return True
+
+    monkeypatch.setattr(ttt_service.random, "choices", choose_played_with)
+
+    axes = ttt_service._select_board_axes_from_candidates(
+        candidates_by_type,
+        cell_has_answers,
+    )
+
+    assert sum(axis["axis_type"] == "played_with" for axis in axes) == (
+        ttt_service.PLAYED_WITH_MAX_PER_BOARD
+    )
+    assert sum(axis["axis_type"] == "team" for axis in axes) == (
+        6 - ttt_service.PLAYED_WITH_MAX_PER_BOARD
+    )
+    assert len(checked_cells) == 9
+
+
 def test_tictactoe_season_position_submit_move_accepts_valid_player(
     ttt_axis_session,
     monkeypatch,

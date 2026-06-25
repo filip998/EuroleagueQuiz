@@ -73,6 +73,7 @@ def _clean_guest_id(guest_id: Optional[str]) -> Optional[str]:
 POSITION_AXIS_VALUES = ("Guard", "Forward", "Center")
 ACHIEVEMENT_LIMITED_AXIS_TYPES = frozenset({"champion", "stat_milestone"})
 ACHIEVEMENT_MAX_PER_BOARD = 1
+PLAYED_WITH_MAX_PER_BOARD = 2
 
 
 @dataclass(frozen=True)
@@ -627,6 +628,7 @@ AXIS_REGISTRY: dict[str, AxisDefinition] = {
         candidate_provider=_get_played_with_candidates,
         player_set_builder=_get_played_with_player_set,
         matcher=_player_matches_played_with_axis,
+        max_per_board=PLAYED_WITH_MAX_PER_BOARD,
     ),
     "season": AxisDefinition(
         axis_type="season",
