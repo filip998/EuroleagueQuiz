@@ -136,7 +136,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
 
       {/* Header */}
       <div className="bg-white border-b border-elq-border">
-        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="max-w-2xl lg:max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
           <BoardHeaderNav onHome={onHome} />
           <span className="font-display text-lg tracking-wide text-elq-dark">
             HIGHER OR LOWER
@@ -149,7 +149,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col items-center justify-center lg:justify-start px-4 py-6 sm:py-10 lg:pt-12 max-w-3xl mx-auto w-full">
+      <div className="flex-1 flex flex-col items-center justify-center lg:justify-start px-4 py-6 sm:py-10 lg:pt-12 max-w-2xl lg:max-w-3xl mx-auto w-full">
         {/* Category label */}
         <div className="mb-6 text-center animate-fade-in-up">
           <div className="inline-flex items-center gap-2 bg-white border border-elq-border rounded-full px-5 py-2 shadow-sm">
