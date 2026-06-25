@@ -90,3 +90,89 @@ describe("HigherLowerSetup nickname persistence", () => {
     expect(globalThis.localStorage.getItem("elq_nickname")).toBe("Bob");
   });
 });
+
+describe("HigherLowerSetup replay preferences", () => {
+  const mockOnGameCreated = vi.fn();
+  const mockOnBack = vi.fn();
+  const PREFS_KEY = "elq_setup_prefs_v1_higherlower";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const store = new Map();
+    globalThis.localStorage = {
+      getItem: (key) => (store.has(key) ? store.get(key) : null),
+      setItem: (key, value) => store.set(key, String(value)),
+      removeItem: (key) => store.delete(key),
+      clear: () => store.clear(),
+    };
+    getHigherLowerLeaderboard.mockResolvedValue({ entries: [] });
+    createHigherLowerGame.mockResolvedValue({ id: 1, status: "active" });
+  });
+
+  afterEach(() => {
+    globalThis.localStorage = originalLocalStorage;
+  });
+
+  function pressedTierLabels() {
+    return screen
+      .getAllByRole("button")
+      .filter((b) => b.getAttribute("aria-pressed") === "true")
+      .map((b) => b.textContent);
+  }
+
+  // The reported bug: Play Again reset Hard back to Easy. With the replay flag
+  // the previous difficulty and season range must be restored.
+  it("restores the last-used difficulty and season range on replay", async () => {
+    globalThis.localStorage.setItem(
+      PREFS_KEY,
+      JSON.stringify({ tier: "hard", seasonStart: 2010, seasonEnd: 2020 })
+    );
+
+    render(
+      <HigherLowerSetup
+        onGameCreated={mockOnGameCreated}
+        onBack={mockOnBack}
+        applyPreferences
+      />
+    );
+
+    expect(pressedTierLabels().some((t) => t.includes("Hard"))).toBe(true);
+    const [from, to] = screen.getAllByRole("combobox");
+    expect(from.value).toBe("2010");
+    expect(to.value).toBe("2020");
+    // Let the async leaderboard effect settle inside act().
+    await screen.findByText("No scores yet. Be the first!");
+  });
+
+  // A fresh/home visit (no replay flag) must keep the intentional defaults even
+  // when preferences are stored from a prior game.
+  it("ignores stored preferences on a fresh visit (no replay flag)", async () => {
+    globalThis.localStorage.setItem(
+      PREFS_KEY,
+      JSON.stringify({ tier: "hard", seasonStart: 2010, seasonEnd: 2020 })
+    );
+
+    render(
+      <HigherLowerSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />
+    );
+
+    expect(pressedTierLabels().some((t) => t.includes("Easy"))).toBe(true);
+    const [from, to] = screen.getAllByRole("combobox");
+    expect(from.value).toBe("2007");
+    expect(to.value).toBe("2025");
+    await screen.findByText("No scores yet. Be the first!");
+  });
+
+  it("persists the chosen difficulty and range on a successful start", async () => {
+    render(
+      <HigherLowerSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />
+    );
+
+    fireEvent.click(screen.getByText("Hard"));
+    fireEvent.click(screen.getByText("Start Game"));
+    await waitFor(() => expect(createHigherLowerGame).toHaveBeenCalled());
+
+    const stored = JSON.parse(globalThis.localStorage.getItem(PREFS_KEY));
+    expect(stored).toMatchObject({ tier: "hard" });
+  });
+});

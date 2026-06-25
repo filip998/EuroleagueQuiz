@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   careerQuickMatch,
   createCareerGame,
@@ -8,6 +8,7 @@ import {
 import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
 import { normalizeJoinCode } from "./inviteLink";
+import { loadSetupPreferences, saveSetupPreferences } from "./setupPreferences";
 import GameSetupShell, { SectionCaption } from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 import NameField from "./NameField";
@@ -36,17 +37,30 @@ const FRIEND_SUB_MODES = [
   ["join", "Join"],
 ];
 
-export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack, initialMode = "solo", initialJoinCode = "" }) {
+export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack, initialMode = "solo", initialJoinCode = "", applyPreferences = false }) {
   const prefillCode = normalizeJoinCode(initialJoinCode);
-  const [mode, setMode] = useState(initialMode === "online" || prefillCode ? "online" : "solo");
+  // A `?quick=1` deep link (initialMode==="online") or an invite code must win
+  // over stored prefs, so prefs are only loaded for a plain replay.
+  const hasDeepLink = initialMode === "online" || Boolean(prefillCode);
+  const prefs = useMemo(
+    () => (applyPreferences && !hasDeepLink ? loadSetupPreferences("career") : null),
+    [applyPreferences, hasDeepLink],
+  );
+  const [mode, setMode] = useState(() =>
+    initialMode === "online" || prefillCode ? "online" : prefs?.mode ?? "solo",
+  );
   // A valid invite code lands on Online -> Play a Friend -> Join with the code
   // prefilled; otherwise Online defaults to the Quick Match pool grid.
-  const [onlineSub, setOnlineSub] = useState(prefillCode ? "friend" : "quick");
-  const [friendSub, setFriendSub] = useState(prefillCode ? "join" : "create");
+  const [onlineSub, setOnlineSub] = useState(() =>
+    prefillCode ? "friend" : prefs?.onlineSub ?? "quick",
+  );
+  const [friendSub, setFriendSub] = useState(() =>
+    prefillCode ? "join" : prefs?.friendSub ?? "create",
+  );
   const [playerName, setPlayerName] = useClerkPrefilledName(getDisplayName);
   const [joinCode, setJoinCode] = useState(prefillCode);
-  const [targetWins, setTargetWins] = useState(3);
-  const [wrongGuessVisibility, setWrongGuessVisibility] = useState("private");
+  const [targetWins, setTargetWins] = useState(() => prefs?.targetWins ?? 3);
+  const [wrongGuessVisibility, setWrongGuessVisibility] = useState(() => prefs?.wrongGuessVisibility ?? "private");
   const [loading, setLoading] = useState(false);
   const [pendingPreset, setPendingPreset] = useState(null);
   const [error, setError] = useState("");
@@ -76,6 +90,14 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
         await careerQuickMatch({ preset, player_name: playerName || null })
       );
       const playerNumber = resolveQuickMatchSeat(careerSeatKey(state.id), state.status);
+      saveSetupPreferences("career", {
+        mode: "online",
+        onlineSub: "quick",
+        friendSub,
+        targetWins,
+        wrongGuessVisibility,
+        quickPreset: preset,
+      });
       onGameCreated(state, { playerNumber, isOnline: true });
     } catch (err) {
       setError(err.message || "Could not start Career Quiz");
@@ -96,7 +118,15 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
     setLoading(true);
     try {
       if (mode === "solo") {
-        onSoloRound(await createCareerSoloRound([]));
+        const round = await createCareerSoloRound([]);
+        saveSetupPreferences("career", {
+          mode,
+          onlineSub,
+          friendSub,
+          targetWins,
+          wrongGuessVisibility,
+        });
+        onSoloRound(round);
       } else if (isJoin) {
         const state = careerGameStateFromResponse(
           await joinCareerGame(code, playerName || "Player 2")
@@ -110,6 +140,13 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
             player1_name: playerName || "Player 1",
           })
         );
+        saveSetupPreferences("career", {
+          mode,
+          onlineSub,
+          friendSub,
+          targetWins,
+          wrongGuessVisibility,
+        });
         onGameCreated(state, { playerNumber: 1, isOnline: true });
       }
     } catch (err) {
@@ -193,7 +230,7 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
                     onPick={handleQuickPick}
                     disabled={loading}
                     pendingPreset={pendingPreset}
-                    defaultPreset={DEFAULT_CAREER_QUICK_MATCH_PRESET}
+                    defaultPreset={prefs?.quickPreset ?? DEFAULT_CAREER_QUICK_MATCH_PRESET}
                   />
                 ) : (
                   <div>
