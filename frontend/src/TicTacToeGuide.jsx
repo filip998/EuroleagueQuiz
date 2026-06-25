@@ -224,6 +224,36 @@ function GuideDialog({ open, onClose, title, testId, children }) {
 const AFFORDANCE_CLASS =
   "text-sm font-medium text-elq-text underline underline-offset-2 hover:text-elq-orange focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-elq-dark rounded transition-colors";
 
+// Standalone "How to play" control + dialog for surfaces that want the how-to
+// without the objective line, clue legend, or first-run card — the desktop Solo
+// command rail (issue #266). It reuses the same GuideDialog + HowToSteps and the
+// same `ttt-howto-trigger` / `ttt-howto-dialog` testids as the full guide, so the
+// copy can never drift and behaviour stays identical; only the always-on legend
+// is dropped on this surface, per the product decision.
+export function HowToPlayControl({ className = AFFORDANCE_CLASS }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="ttt-howto-trigger"
+        onClick={() => setOpen(true)}
+        className={className}
+      >
+        How to play
+      </button>
+      <GuideDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title="HOW TO PLAY"
+        testId="ttt-howto-dialog"
+      >
+        <HowToSteps />
+      </GuideDialog>
+    </>
+  );
+}
+
 export default function TicTacToeGuide() {
   const [howToSeen, setHowToSeen] = useState(readHowToSeen);
   // null | "howto" | "legend" — only ever one dialog open at a time.
