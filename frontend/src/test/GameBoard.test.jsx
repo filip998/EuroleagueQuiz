@@ -1311,7 +1311,7 @@ describe("GameBoard desktop Solo command rail (issue #266)", () => {
   it("keeps Local 1v1 on the stacked layout even at desktop width", () => {
     render(
       <GameBoard
-        initialState={activeGame({ mode: "local_multiplayer", player2_name: "Bob" })}
+        initialState={activeGame({ mode: "local_two_player", player2_name: "Bob" })}
         onNewGame={() => {}}
         onHome={() => {}}
         onlineInfo={{ isOnline: false }}
