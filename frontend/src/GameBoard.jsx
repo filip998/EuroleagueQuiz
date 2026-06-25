@@ -882,17 +882,17 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                     className={`relative aspect-square rounded-xl border-2 flex items-center justify-center transition-all duration-200 text-center p-1.5 overflow-hidden min-w-0 ${cellBg}`}
                   >
                     {claimed ? (
-                      <div className="animate-cell-claim flex flex-col items-center gap-0.5">
+                      <div className="animate-cell-claim flex flex-col items-center gap-0.5 w-full min-w-0">
                         {cell.claimed_player_image_url && !inTransition && (
                           <img
                             src={optimizeHeadshot(cell.claimed_player_image_url, { width: HEADSHOT_WIDTHS.cell })}
                             alt={cell.claimed_player_name || ""}
-                            className="w-6 h-6 rounded-full object-cover object-top border border-slate-200"
+                            className="ttt-claimed-headshot w-5 h-5 sm:w-6 sm:h-6 rounded-full object-cover object-top border border-slate-200"
                             onError={(e) => handleHeadshotError(e, cell.claimed_player_image_url, (ev) => { ev.currentTarget.style.display = "none"; })}
                           />
                         )}
                         <div
-                          className={`text-xs sm:text-sm font-bold truncate w-full ${
+                          className={`ttt-claimed-name font-bold w-full min-w-0 ${
                             isSolo && claimed
                               ? "text-emerald-800"
                               : claimed === 1

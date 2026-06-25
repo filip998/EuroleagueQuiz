@@ -164,3 +164,38 @@ select {
     display: none;
   }
 }
+
+/*
+ * Issue #263: a claimed Tic-Tac-Toe cell shows the player's name as the reward
+ * for a correct answer, so it must stay fully readable inside the small mobile
+ * board cells instead of clipping. The name wraps across lines and scales down on
+ * narrow cells; `overflow-wrap: anywhere` guarantees even a long single token
+ * breaks rather than overflowing the `overflow-hidden` cell (the old `truncate`
+ * forced `white-space: nowrap`, so the centered name was clipped on both sides).
+ * Desktop keeps the original text-sm size/line-height via the >=640px override.
+ */
+.ttt-claimed-name {
+  font-size: clamp(0.625rem, 3.1vw, 0.75rem);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 640px) {
+  .ttt-claimed-name {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+}
+
+/*
+ * On phones narrower than the common ~360px baseline (e.g. iPhone SE 1st gen at
+ * 320px) the small decorative claimed-cell headshot competes with the wrapped
+ * name for the few vertical pixels in the cell. The name is the reward and must
+ * stay fully readable, so drop the headshot below 360px and give the name the
+ * full cell height. Every common 360px+ device keeps the headshot.
+ */
+@media (max-width: 359.98px) {
+  .ttt-claimed-headshot {
+    display: none;
+  }
+}
