@@ -124,6 +124,7 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
     setLoading(true);
     try {
       if (mode === "solo") {
+        const round = await createPhotoSoloRound([]);
         saveSetupPreferences("photo", {
           mode,
           onlineSub,
@@ -131,7 +132,7 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
           targetWins,
           wrongGuessVisibility,
         });
-        onSoloRound(await createPhotoSoloRound([]));
+        onSoloRound(round);
       } else if (isJoin) {
         const game = photoGameStateFromResponse(
           await joinPhotoGame(code, playerName || "Player 2")

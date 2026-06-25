@@ -118,6 +118,7 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
     setLoading(true);
     try {
       if (mode === "solo") {
+        const round = await createCareerSoloRound([]);
         saveSetupPreferences("career", {
           mode,
           onlineSub,
@@ -125,7 +126,7 @@ export default function CareerQuizSetup({ onSoloRound, onGameCreated, onGameJoin
           targetWins,
           wrongGuessVisibility,
         });
-        onSoloRound(await createCareerSoloRound([]));
+        onSoloRound(round);
       } else if (isJoin) {
         const state = careerGameStateFromResponse(
           await joinCareerGame(code, playerName || "Player 2")
