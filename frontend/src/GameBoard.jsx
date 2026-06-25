@@ -590,7 +590,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const boardSizingStyle = {
     animationDelay: "100ms",
     containerType: "inline-size",
-    "--ttt-reserve": boardReserve,
+    // Issue #293: fold the auth top-reserve into the board's vertical budget so
+    // the page header can shift down by the safe-area band without forcing the
+    // board to scroll. `--elq-auth-safe-top` is 0px when auth is off, so the
+    // sizing math is identical for anonymous builds.
+    "--ttt-reserve": `calc(${boardReserve} + var(--elq-auth-safe-top, 0px))`,
     "--ttt-axis": "clamp(72px, 14cqw, 92px)",
     "--ttt-cell": `min(calc((100cqw - var(--ttt-axis) - 18px) / 3), clamp(72px, calc((100svh - var(--ttt-reserve)) / 3), ${boardCellMax}))`,
   };
@@ -990,7 +994,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     ) : null;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="elq-auth-safe-top min-h-screen flex flex-col">
       {/* Orange accent bar */}
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
 
@@ -1003,7 +1007,10 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         >
           <BoardHeaderNav onHome={onHome} />
           {isSoloDesktop ? (
-            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-elq-text">
+            <span
+              data-testid="ttt-mode-indicator"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-elq-text"
+            >
               <span className="h-2 w-2 rounded-full bg-elq-orange" aria-hidden="true" />
               Solo
             </span>

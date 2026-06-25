@@ -130,7 +130,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
   const showValues = !!result;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="elq-auth-safe-top min-h-screen flex flex-col">
       {/* Orange accent */}
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
 

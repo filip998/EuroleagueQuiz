@@ -39,6 +39,7 @@ vi.mock("@clerk/clerk-react", async () => {
 
 let AuthMenu;
 let ProfileRoute;
+let authEnabled;
 
 beforeAll(async () => {
   // Enable Clerk by stubbing the publishable key BEFORE importing auth.jsx so
@@ -47,6 +48,7 @@ beforeAll(async () => {
   const mod = await import("../auth.jsx");
   AuthMenu = mod.AuthMenu;
   ProfileRoute = mod.ProfileRoute;
+  authEnabled = mod.authEnabled;
 });
 
 afterAll(() => {
@@ -58,6 +60,10 @@ beforeEach(() => {
 });
 
 describe("AuthMenu profile entry", () => {
+  it("reports auth as enabled when a publishable key is configured", () => {
+    expect(authEnabled).toBe(true);
+  });
+
   it("exposes a Profile link to /profile in the user menu when signed in", () => {
     render(
       <MemoryRouter>

@@ -162,3 +162,74 @@ test.describe.serial("Accounts auth e2e", () => {
     }
   });
 });
+
+// Rectangle intersection: true when the two boxes share any area. Used to assert
+// the fixed account controls never cover game UI (issue #293).
+function overlaps(a, b) {
+  return !(
+    a.x + a.width <= b.x ||
+    b.x + b.width <= a.x ||
+    a.y + a.height <= b.y ||
+    b.y + b.height <= a.y
+  );
+}
+
+test.describe("Account controls never cover game UI (issue #293)", () => {
+  test("clears the TicTacToe solo board indicator at 1366px (signed out)", async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto("/tictactoe");
+
+    // Clerk is enabled in e2e and defaults to signed out, so the Sign in / Sign
+    // up controls float top-right — the exact overlay the fix must keep off UI.
+    const signIn = page.getByRole("button", { name: "Sign in" });
+    const signUp = page.getByRole("button", { name: "Sign up" });
+    await expect(signIn).toBeVisible();
+
+    // Start a solo board; at >=1024px it shows the "Solo" header indicator that
+    // issue #293 reported as covered.
+    await page.getByRole("button", { name: "Solo" }).click();
+    await page.getByRole("button", { name: "Start Game" }).click();
+    const indicator = page.getByTestId("ttt-mode-indicator");
+    await expect(indicator).toBeVisible();
+
+    const signInBox = await signIn.boundingBox();
+    const signUpBox = await signUp.boundingBox();
+    const indicatorBox = await indicator.boundingBox();
+    expect(signInBox).not.toBeNull();
+    expect(signUpBox).not.toBeNull();
+    expect(indicatorBox).not.toBeNull();
+
+    // Neither control rectangle intersects the indicator, and the reserved top
+    // band keeps both controls entirely above it.
+    expect(overlaps(signInBox, indicatorBox)).toBe(false);
+    expect(overlaps(signUpBox, indicatorBox)).toBe(false);
+    expect(signInBox.y + signInBox.height).toBeLessThanOrEqual(indicatorBox.y);
+    expect(signUpBox.y + signUpBox.height).toBeLessThanOrEqual(indicatorBox.y);
+  });
+
+  test("clears the setup card on a narrow viewport (signed out)", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/tictactoe");
+
+    const signIn = page.getByRole("button", { name: "Sign in" });
+    const signUp = page.getByRole("button", { name: "Sign up" });
+    await expect(signIn).toBeVisible();
+
+    // On a phone-width viewport the setup content spans nearly the full width, so
+    // its top-right would sit under the controls without the reserve.
+    const content = page.getByTestId("game-setup-content");
+    await expect(content).toBeVisible();
+
+    const signInBox = await signIn.boundingBox();
+    const signUpBox = await signUp.boundingBox();
+    const contentBox = await content.boundingBox();
+    expect(signInBox).not.toBeNull();
+    expect(signUpBox).not.toBeNull();
+    expect(contentBox).not.toBeNull();
+
+    expect(overlaps(signInBox, contentBox)).toBe(false);
+    expect(overlaps(signUpBox, contentBox)).toBe(false);
+    expect(signInBox.y + signInBox.height).toBeLessThanOrEqual(contentBox.y);
+    expect(signUpBox.y + signUpBox.height).toBeLessThanOrEqual(contentBox.y);
+  });
+});

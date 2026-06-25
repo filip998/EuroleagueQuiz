@@ -1174,7 +1174,7 @@ function CareerGuessBox({ onGuess, disabled, roundKey, bare = false }) {
 function Shell({ children, onHome, align = "center", headerRight = null }) {
   const alignClass = align === "top" ? "items-start" : "items-center";
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="elq-auth-safe-top min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
       <div className="p-4">
         {headerRight ? (

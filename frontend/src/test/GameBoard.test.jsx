@@ -1168,6 +1168,14 @@ describe("GameBoard solo / local never shows the online Resign control (issue #1
   });
 });
 
+// `--ttt-reserve` folds the auth top safe-area (#293) into
+// `calc(<base>px + var(--elq-auth-safe-top, 0px))`, so pull the leading base
+// chrome height for numeric assertions (jsdom does not resolve calc()).
+function baseReservePx(value) {
+  const match = String(value).match(/(\d+)px/);
+  return match ? parseInt(match[1], 10) : NaN;
+}
+
 describe("GameBoard height-aware board sizing (issue #259)", () => {
   // The board must fit a laptop viewport without scrolling. We assert the
   // height-aware sizing wiring is present (not pixel sizes, which jsdom does
@@ -1198,7 +1206,10 @@ describe("GameBoard height-aware board sizing (issue #259)", () => {
     expect(sizing).toBeTruthy();
     // Cell height is bounded by the viewport height so short laptops shrink it.
     expect(sizing.style.getPropertyValue("--ttt-cell")).toContain("svh");
-    expect(sizing.style.getPropertyValue("--ttt-reserve")).toMatch(/px$/);
+    const reserveValue = sizing.style.getPropertyValue("--ttt-reserve");
+    expect(reserveValue).toMatch(/\d+px/);
+    // The reserve folds in the auth top safe-area (#293); 0px when auth is off.
+    expect(reserveValue).toContain("var(--elq-auth-safe-top");
 
     // Every header/cell row references the shared cell track, not 1fr columns.
     const rows = boardRows(container);
@@ -1214,9 +1225,8 @@ describe("GameBoard height-aware board sizing (issue #259)", () => {
         onlineInfo={{ isOnline: false }}
       />
     );
-    const soloReserve = parseInt(
-      sizingContainer(solo.container).style.getPropertyValue("--ttt-reserve"),
-      10
+    const soloReserve = baseReservePx(
+      sizingContainer(solo.container).style.getPropertyValue("--ttt-reserve")
     );
     solo.unmount();
 
@@ -1228,9 +1238,8 @@ describe("GameBoard height-aware board sizing (issue #259)", () => {
         onlineInfo={{ isOnline: true, playerNumber: 1 }}
       />
     );
-    const onlineReserve = parseInt(
-      sizingContainer(online.container).style.getPropertyValue("--ttt-reserve"),
-      10
+    const onlineReserve = baseReservePx(
+      sizingContainer(online.container).style.getPropertyValue("--ttt-reserve")
     );
 
     expect(onlineReserve).toBeGreaterThan(soloReserve);
@@ -1329,9 +1338,11 @@ describe("GameBoard desktop Solo command rail (issue #266)", () => {
     );
 
     const reserve = sizingContainer(container).style.getPropertyValue("--ttt-reserve");
-    expect(reserve).toMatch(/px$/);
+    expect(reserve).toMatch(/\d+px/);
+    // The reserve folds in the auth top safe-area (#293); 0px when auth is off.
+    expect(reserve).toContain("var(--elq-auth-safe-top");
     // Less chrome above the board than the 404px stacked solo reserve.
-    expect(parseInt(reserve, 10)).toBeLessThan(404);
+    expect(baseReservePx(reserve)).toBeLessThan(404);
     // Cell var still height-aware so short laptops shrink the board to fit.
     expect(sizingContainer(container).style.getPropertyValue("--ttt-cell")).toContain("svh");
   });

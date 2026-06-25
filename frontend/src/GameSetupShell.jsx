@@ -46,11 +46,11 @@ export default function GameSetupShell({
   const a = ACCENTS[accent] ?? ACCENTS.player1;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="elq-auth-safe-top min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
 
       <div className="flex-1 flex items-start justify-center p-4 py-8 sm:py-10">
-        <div className="w-full max-w-lg">
+        <div className="w-full max-w-lg" data-testid="game-setup-content">
           {onHome && (
             <div className="mb-4 animate-fade-in-up">
               <LogoMini onClick={onHome} />

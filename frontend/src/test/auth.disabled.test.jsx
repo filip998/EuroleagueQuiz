@@ -29,6 +29,7 @@ vi.mock("@clerk/clerk-react", async () => {
 let AuthMenu;
 let AuthProvider;
 let ProfileRoute;
+let authEnabled;
 
 beforeAll(async () => {
   // Force Clerk OFF: an empty key trims to falsy, so `clerkEnabled` is false.
@@ -37,6 +38,7 @@ beforeAll(async () => {
   AuthMenu = mod.AuthMenu;
   AuthProvider = mod.AuthProvider;
   ProfileRoute = mod.ProfileRoute;
+  authEnabled = mod.authEnabled;
 });
 
 afterAll(() => {
@@ -44,6 +46,10 @@ afterAll(() => {
 });
 
 describe("auth without Clerk configured (anonymous build)", () => {
+  it("reports auth as disabled so no top reserve is applied", () => {
+    expect(authEnabled).toBe(false);
+  });
+
   it("AuthMenu renders nothing", () => {
     const { container } = render(
       <MemoryRouter>
