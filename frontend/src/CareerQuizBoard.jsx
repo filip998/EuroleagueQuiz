@@ -202,6 +202,9 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
   function handleRealtimeState(result) {
     if (!result?.state) return;
+    // Snapshot the round the client is currently showing before swapping in the
+    // incoming state so we can detect when this broadcast advances the round.
+    const previousRoundNumber = currentRoundNumber;
     setGame(result.state);
 
     if (result.result === "opponent_left") {
@@ -211,6 +214,23 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
 
     if (result.result === "resigned") {
       setLastResult("resigned");
+      return;
+    }
+
+    // A round boundary drops any transient guess feedback so a resolved round's
+    // "Correct!"/"Wrong guess." banner never bleeds onto the next round's clues
+    // (issue #276). This covers every way a round advances: a correct guess
+    // (round_won), a public Quick Match timeout (time_expired), a no-answer skip,
+    // or a resync that lands on a later round. The CompletedRoundReveal card
+    // carries the resolved round's outcome instead.
+    const incomingRoundNumber = getCareerGameRoundNumber(result.state);
+    if (
+      incomingRoundNumber != null
+      && previousRoundNumber != null
+      && incomingRoundNumber !== previousRoundNumber
+    ) {
+      setNoAnswerOfferMessageRoundNumber(null);
+      setMessage("");
       return;
     }
 
@@ -353,6 +373,9 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
         soloResolvedRoundRef.current = requestedRoundToken;
         setSoloScore((score) => ({ ...score, streak: 0 }));
         setAnswer(result.answer);
+        // Clear any stale "Keep guessing." feedback from a prior wrong guess so
+        // it never sits above the revealed answer (issue #276).
+        setMessage("");
         setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
       }
     } finally {
