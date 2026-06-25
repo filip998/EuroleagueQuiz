@@ -216,7 +216,7 @@ export function AxisLabel({ axis }) {
         <img
           src={optimizeHeadshot(imageUrl, { width: HEADSHOT_WIDTHS.avatar })}
           alt={label}
-          className="w-7 h-7 rounded-full object-cover object-top border border-amber-300"
+          className="w-6 h-6 rounded-full object-cover object-top border border-amber-300"
           onError={(e) => handleHeadshotError(e, imageUrl, (ev) => { ev.currentTarget.style.display = "none"; })}
         />
       )}
@@ -539,23 +539,30 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const isMyTurn = !isOnline || game.current_player === myPlayer;
 
   // Height-aware board sizing (issue #259): the full 3x3 grid + axis headers must
-  // fit a laptop viewport without scrolling. We size each cell as the min of a
-  // width-derived and a height-derived value so the board scales down on short
-  // viewports. `--ttt-reserve` is every non-cell vertical pixel (page/header
-  // chrome + scoreboard + guide + a transient feedback line + the column-header
-  // row + grid gaps + the control beneath the board); it is mode-aware because
-  // the shared multiplayer scoreboard (local/online) is taller than the solo
-  // card and online adds the "Online" status bar. Calibrated against 1366x768 /
-  // 1280x900 measurements; natural page scroll stays as the ultimate fallback so
-  // nothing is ever clipped, and large desktops keep the original ~176px cells.
-  const boardReserve = isSolo ? "408px" : isOnline ? "506px" : "476px";
+  // fit a laptop viewport without scrolling. Each cell is the MIN of a
+  // width-derived track and a height-derived track:
+  //   width  = (100cqw - axis - gaps) / 3   -> a hard upper bound, so the board
+  //            can never be wider than its container (no mobile h-overflow at any
+  //            width), and
+  //   height = clamp(72px, (100svh - reserve) / 3, 176px) -> shrinks the board on
+  //            short viewports, floored so cells stay tappable and capped so
+  //            large desktops keep the original ~176px cells.
+  // `--ttt-reserve` is every non-cell vertical pixel (page/header chrome +
+  // scoreboard + guide + a transient feedback line + the column-header row + grid
+  // gaps + the control(s) beneath the board). It is mode-aware because the shared
+  // multiplayer scoreboard (local/online) is much taller than the solo card and
+  // online additionally stacks the "Online" status bar plus both the Offer Draw
+  // and Resign controls under the board. Calibrated against real 1366x768 /
+  // 1280x900 measurements; natural page scroll remains the ultimate fallback so
+  // nothing is ever clipped.
+  const boardReserve = isSolo ? "404px" : isOnline ? "540px" : "476px";
   const boardSizingStyle = {
     animationDelay: "100ms",
     containerType: "inline-size",
     "--ttt-reserve": boardReserve,
     "--ttt-axis": "clamp(72px, 14cqw, 92px)",
     "--ttt-cell":
-      "clamp(80px, min(calc((100cqw - var(--ttt-axis) - 18px) / 3), calc((100svh - var(--ttt-reserve)) / 3)), 176px)",
+      "min(calc((100cqw - var(--ttt-axis) - 18px) / 3), clamp(72px, calc((100svh - var(--ttt-reserve)) / 3), 176px))",
   };
   const boardGridStyle = {
     gridTemplateColumns: "var(--ttt-axis) repeat(3, var(--ttt-cell))",
@@ -647,7 +654,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
       {/* Online indicator */}
       {isOnline && (
-        <div className="bg-elq-bg text-center py-1.5 text-xs text-elq-muted border-b border-elq-border">
+        <div className="bg-elq-bg text-center py-1 text-xs text-elq-muted border-b border-elq-border">
           <span className="inline-flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             Online
@@ -931,11 +938,14 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           </div>
         )}
 
-        {/* Draw controls */}
+        {/* Draw + resign controls. For online, "Offer Draw" and "Resign" share a
+            single wrapping row so the board plus both controls fit a laptop
+            viewport without scrolling (issue #259); the wider draw-response panel
+            takes its own line via w-full. Local 1v1 shows only the draw control. */}
         {!isSolo && game.status === "active" && !inTransition && (
-          <div className="mt-4 text-center">
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-center">
             {game.pending_draw ? (
-              <div className="bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
+              <div className="w-full bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
                 <p className="text-sm text-elq-text mb-3">
                   <strong>
                     {game.pending_draw.offered_by === 1
@@ -980,12 +990,10 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                 </button>
               )
             )}
+            {isOnline && (
+              <ResignControl onResign={handleResign} disabled={loading} inline />
+            )}
           </div>
-        )}
-
-        {/* Resign control for online games */}
-        {isOnline && game.status === "active" && !inTransition && (
-          <ResignControl onResign={handleResign} disabled={loading} />
         )}
       </div>
 

@@ -4,11 +4,14 @@ import { useState } from "react";
 // Career Quiz, Photo Quiz, Guess the List Race). Renders a subtle "Resign" link
 // that expands into a confirm card. `onResign` is invoked when the player
 // confirms; `disabled` freezes the buttons while the request is in flight.
-export default function ResignControl({ onResign, disabled = false }) {
+// `inline` drops the default top margin so the caller can place the control in a
+// shared row (TicTacToe pairs it with "Offer Draw"); it defaults to the original
+// stacked spacing so the other games are unaffected.
+export default function ResignControl({ onResign, disabled = false, inline = false }) {
   const [confirming, setConfirming] = useState(false);
 
   return (
-    <div className="mt-4 text-center">
+    <div className={inline ? "text-center" : "mt-4 text-center"}>
       {confirming ? (
         <div className="inline-flex flex-col items-center gap-2 bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
           <p className="text-sm text-elq-text">Resign the match? Your opponent wins.</p>

@@ -316,6 +316,24 @@ describe("GameBoard online resign", () => {
     // The terminal banner is suppressed in favour of the finished-screen subtitle.
     expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
   });
+
+  it("offers draw and resign together so neither control falls below the fold (issue #259)", () => {
+    // The viewport-fit fix combines the online Offer Draw and Resign controls
+    // into one wrapping row. On the viewer's turn both must remain present and
+    // reachable; dropping or re-stacking either is what pushed row 3 / controls
+    // below the fold at 1366x768.
+    render(
+      <GameBoard
+        initialState={activeGame({ current_player: 1 })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    expect(screen.getByText("Offer Draw")).toBeInTheDocument();
+    expect(screen.getByText("Resign")).toBeInTheDocument();
+  });
 });
 
 describe("GameBoard wrong-guess feedback", () => {
