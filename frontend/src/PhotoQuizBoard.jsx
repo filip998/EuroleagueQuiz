@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useListKeyboardNav } from "./useListKeyboardNav";
 import {
   autocompletePhotoPlayer,
@@ -89,6 +89,24 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
   const [resigning, setResigning] = useState(false);
   const [roundTimerAnchor, setRoundTimerAnchor] = useState(null);
   const [lastResult, setLastResult] = useState(null);
+  const [soloScore, setSoloScore] = useState({ solved: 0, streak: 0 });
+  // Drives the disabled state of the solo guess input and "Reveal answer" while
+  // a terminal solo action is in flight, so the controls give in-progress
+  // feedback instead of silently dropping a second click.
+  const [soloPending, setSoloPending] = useState(false);
+  // Tracks the active solo round_token so a response that resolves after the
+  // player has already advanced rounds can be dropped instead of mutating the
+  // new round's state.
+  const soloRoundTokenRef = useRef(soloInitialRound?.round_token || null);
+  // Tracks the solo round_token whose terminal outcome (correct guess or reveal)
+  // has already updated the score, so a duplicate/late response can never double
+  // count or reset the Solved/Streak counter for the same round.
+  const soloResolvedRoundRef = useRef(null);
+  // Serializes the two terminal solo actions (a correct guess and reveal) so
+  // they can never race to resolve the same round: whichever the player
+  // triggers first runs to completion and a concurrent second action is ignored
+  // until it settles.
+  const soloPendingRef = useRef(false);
 
   const solo = Boolean(soloRound);
   const isOnline = !solo && Boolean(onlineInfo);
@@ -130,6 +148,10 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
         Math.max(0, Math.ceil((roundTimerAnchor.deadlineMs - nowMs) / 1000))
       )
     : null;
+
+  useEffect(() => {
+    soloRoundTokenRef.current = soloRound?.round_token || null;
+  }, [soloRound?.round_token]);
 
   useEffect(() => {
     if (!revealNextRoundStartsAt && !showRoundTimer) return undefined;
@@ -260,6 +282,8 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
 
   async function nextSoloRound() {
     const next = await createPhotoSoloRound(recentIds);
+    soloRoundTokenRef.current = next.round_token || null;
+    soloResolvedRoundRef.current = null;
     setSoloRound(next);
     setAnswer(null);
     setMessage("");
@@ -270,13 +294,33 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
     setMessage("");
     setNoAnswerOfferMessageRoundNumber(null);
     if (solo) {
-      const result = await submitPhotoSoloGuess(soloRound.round_token, player.id);
-      if (result.correct) {
-        setAnswer(result.answer);
-        setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
-        setMessage(PHOTO_FEEDBACK_MESSAGES.correct);
-      } else {
-        setMessage(PHOTO_FEEDBACK_MESSAGES.soloWrong);
+      // Ignore a guess while another terminal solo action (guess or reveal) is
+      // still in flight so the two can never race to resolve the same round.
+      if (soloPendingRef.current) return;
+      const requestedRoundToken = soloRound.round_token;
+      soloPendingRef.current = true;
+      setSoloPending(true);
+      try {
+        const result = await submitPhotoSoloGuess(requestedRoundToken, player.id);
+        // Drop a response that resolved after the player already advanced rounds.
+        if (soloRoundTokenRef.current !== requestedRoundToken) return;
+        if (result.correct) {
+          // Score the round exactly once even if two correct responses arrive.
+          if (soloResolvedRoundRef.current !== requestedRoundToken) {
+            soloResolvedRoundRef.current = requestedRoundToken;
+            setSoloScore((score) => ({ solved: score.solved + 1, streak: score.streak + 1 }));
+            setAnswer(result.answer);
+            setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+            setMessage(PHOTO_FEEDBACK_MESSAGES.correct);
+          }
+        } else if (soloResolvedRoundRef.current !== requestedRoundToken) {
+          // Never surface a stale "wrong" message for a round that another
+          // action (reveal) has already resolved.
+          setMessage(PHOTO_FEEDBACK_MESSAGES.soloWrong);
+        }
+      } finally {
+        soloPendingRef.current = false;
+        setSoloPending(false);
       }
       return;
     }
@@ -303,9 +347,27 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
   }
 
   async function revealSolo() {
-    const result = await revealPhotoSoloAnswer(soloRound.round_token);
-    setAnswer(result.answer);
-    setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+    // Ignore a reveal while another terminal solo action (guess or reveal) is
+    // still in flight so the two can never race to resolve the same round.
+    if (soloPendingRef.current) return;
+    const requestedRoundToken = soloRound.round_token;
+    soloPendingRef.current = true;
+    setSoloPending(true);
+    try {
+      const result = await revealPhotoSoloAnswer(requestedRoundToken);
+      if (soloRoundTokenRef.current !== requestedRoundToken) return;
+      // Revealing without solving ends the round: keep Solved, reset the Streak,
+      // and only once per round.
+      if (soloResolvedRoundRef.current !== requestedRoundToken) {
+        soloResolvedRoundRef.current = requestedRoundToken;
+        setSoloScore((score) => ({ ...score, streak: 0 }));
+        setAnswer(result.answer);
+        setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+      }
+    } finally {
+      soloPendingRef.current = false;
+      setSoloPending(false);
+    }
   }
 
   async function offerNoAnswer() {
@@ -458,28 +520,74 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
     );
   }
 
+  if (solo) {
+    return (
+      <Shell
+        onHome={onHome}
+        align="top"
+        headerRight={
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-elq-text">
+            <span className="h-2 w-2 rounded-full bg-elq-orange" aria-hidden="true" />
+            Solo
+          </span>
+        }
+      >
+        <div className="w-full max-w-6xl">
+          <PhotoSoloHud
+            solved={soloScore.solved}
+            streak={soloScore.streak}
+            answered={Boolean(answer)}
+            pending={soloPending}
+            onRevealAnswer={revealSolo}
+          />
+
+          <div className="mt-4 grid gap-6 lg:grid-cols-2 lg:items-start">
+            <div>
+              <PhotoClue
+                key={`${roundKey ?? "none"}|${imageUrl ?? "none"}`}
+                imageUrl={imageUrl}
+                bare
+              />
+            </div>
+
+            <div>
+              <PhotoGuessBox
+                onGuess={handleGuess}
+                disabled={Boolean(answer) || soloPending}
+                roundKey={roundKey}
+                bare
+              />
+
+              <PhotoFeedbackMessage message={message} />
+
+              {answer && <SoloAnswerReveal answer={answer} onNext={nextSoloRound} />}
+            </div>
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
   return (
     <Shell onHome={onHome}>
       <div className="w-full max-w-5xl">
-        <div className={`flex items-start justify-between gap-4 ${solo ? "mb-6" : "mb-4"}`}>
+        <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <h1 className="font-display text-4xl text-elq-dark">PHOTO QUIZ</h1>
             <p className="text-sm text-elq-muted">Name the EuroLeague player in the photo.</p>
           </div>
         </div>
 
-        {!solo && (
-          <PhotoMultiplayerScoreboard
-            game={game}
-            playerNumber={playerNumber}
-            roundNumber={currentRoundNumber}
-            timer={
-              showRoundTimer && timerRemaining != null
-                ? { seconds: timerRemaining, critical: timerRemaining <= 5 }
-                : null
-            }
-          />
-        )}
+        <PhotoMultiplayerScoreboard
+          game={game}
+          playerNumber={playerNumber}
+          roundNumber={currentRoundNumber}
+          timer={
+            showRoundTimer && timerRemaining != null
+              ? { seconds: timerRemaining, critical: timerRemaining <= 5 }
+              : null
+          }
+        />
 
         <CompletedRoundReveal
           round={completedRound}
@@ -504,7 +612,7 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
 
             <PhotoGuessBox
               onGuess={handleGuess}
-              disabled={Boolean(answer) || roundLocked}
+              disabled={roundLocked}
               roundKey={roundKey}
             />
 
@@ -516,67 +624,45 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
               player2Name={game?.player2_name}
             />
 
-            {answer ? (
-              <div className="mt-6 rounded-2xl border border-elq-border bg-white p-5">
-                <div className="flex items-center gap-4 mb-4">
-                  <AnswerPlayerImage player={answer} />
-                  <div>
-                    <h2 className="font-display text-3xl text-elq-dark">{answer.name}</h2>
-                    <p className="text-sm text-elq-muted">
-                      {[answer.position, answer.nationality].filter(Boolean).join(" · ")}
-                    </p>
-                  </div>
-                </div>
-                <button onClick={nextSoloRound} className="px-6 py-3 rounded-xl bg-elq-cta text-white font-bold">
-                  Next photo
-                </button>
-              </div>
-            ) : (
-              <div className="mt-6 flex flex-wrap gap-3">
-                {solo && (
-                  <button onClick={revealSolo} className="px-5 py-2 rounded-xl border border-elq-border text-elq-text">
-                    Reveal answer
-                  </button>
-                )}
-                {!solo && canRespondNoAnswer && (
-                  <>
-                    <p
-                      id="photo-no-answer-offer-prompt"
-                      data-testid="photo-no-answer-offer-prompt"
-                      role="status"
-                      className="basis-full text-sm font-semibold text-elq-text"
-                    >
-                      {NO_ANSWER_OFFER_RECEIVED_MESSAGE}
-                    </p>
-                    <button
-                      onClick={() => respondNoAnswer(true)}
-                      disabled={roundLocked}
-                      aria-describedby="photo-no-answer-offer-prompt"
-                      className="px-5 py-2 rounded-xl bg-elq-cta text-white font-bold disabled:opacity-50"
-                    >
-                      Accept no answer
-                    </button>
-                    <button
-                      onClick={() => respondNoAnswer(false)}
-                      disabled={roundLocked}
-                      aria-describedby="photo-no-answer-offer-prompt"
-                      className="px-5 py-2 rounded-xl border border-elq-border disabled:opacity-50"
-                    >
-                      Decline
-                    </button>
-                  </>
-                )}
-                {!solo && !game?.pending_no_answer_to && (
-                  <button
-                    onClick={offerNoAnswer}
-                    disabled={roundLocked}
-                    className="px-5 py-2 rounded-xl border border-elq-border text-elq-text disabled:opacity-50"
+            <div className="mt-6 flex flex-wrap gap-3">
+              {canRespondNoAnswer && (
+                <>
+                  <p
+                    id="photo-no-answer-offer-prompt"
+                    data-testid="photo-no-answer-offer-prompt"
+                    role="status"
+                    className="basis-full text-sm font-semibold text-elq-text"
                   >
-                    Nobody knows
+                    {NO_ANSWER_OFFER_RECEIVED_MESSAGE}
+                  </p>
+                  <button
+                    onClick={() => respondNoAnswer(true)}
+                    disabled={roundLocked}
+                    aria-describedby="photo-no-answer-offer-prompt"
+                    className="px-5 py-2 rounded-xl bg-elq-cta text-white font-bold disabled:opacity-50"
+                  >
+                    Accept no answer
                   </button>
-                )}
-              </div>
-            )}
+                  <button
+                    onClick={() => respondNoAnswer(false)}
+                    disabled={roundLocked}
+                    aria-describedby="photo-no-answer-offer-prompt"
+                    className="px-5 py-2 rounded-xl border border-elq-border disabled:opacity-50"
+                  >
+                    Decline
+                  </button>
+                </>
+              )}
+              {!game?.pending_no_answer_to && (
+                <button
+                  onClick={offerNoAnswer}
+                  disabled={roundLocked}
+                  className="px-5 py-2 rounded-xl border border-elq-border text-elq-text disabled:opacity-50"
+                >
+                  Nobody knows
+                </button>
+              )}
+            </div>
           </div>
         </div>
         {isOnline && game?.status === "active" && !roundLocked && (
@@ -584,6 +670,61 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
         )}
       </div>
     </Shell>
+  );
+}
+
+function PhotoSoloHud({ solved, streak, answered, pending, onRevealAnswer }) {
+  return (
+    <section
+      aria-label="Photo solo status"
+      className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-2xl border border-elq-border bg-white px-4 py-2.5 shadow-sm"
+    >
+      <p className="text-sm font-bold text-elq-dark sm:text-base">
+        Name the player
+      </p>
+
+      <div className="flex items-baseline gap-2 text-sm">
+        <span className="flex items-baseline gap-1.5" role="group" aria-label={`Solved ${solved}`}>
+          <span className="text-elq-text">Solved</span>
+          <span className="font-bold tabular-nums text-elq-dark">{solved}</span>
+        </span>
+        <span aria-hidden="true" className="text-elq-border">·</span>
+        <span className="flex items-baseline gap-1.5" role="group" aria-label={`Streak ${streak}`}>
+          <span className="text-elq-text">Streak</span>
+          <span className="font-bold tabular-nums text-elq-dark">{streak}</span>
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <button
+          type="button"
+          onClick={onRevealAnswer}
+          disabled={answered || pending}
+          className="rounded-xl border border-elq-border px-4 py-2 font-semibold text-elq-text disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Reveal answer
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function SoloAnswerReveal({ answer, onNext }) {
+  return (
+    <div className="mt-6 rounded-2xl border border-elq-border bg-white p-5">
+      <div className="flex items-center gap-4 mb-4">
+        <AnswerPlayerImage player={answer} />
+        <div>
+          <h2 className="font-display text-3xl text-elq-dark">{answer.name}</h2>
+          <p className="text-sm text-elq-muted">
+            {[answer.position, answer.nationality].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+      </div>
+      <button onClick={onNext} className="px-6 py-3 rounded-xl bg-elq-cta text-white font-bold">
+        Next photo
+      </button>
+    </div>
   );
 }
 
@@ -710,35 +851,48 @@ function AnswerPlayerImage({ player }) {
   );
 }
 
-function PhotoClue({ imageUrl }) {
+function PhotoClue({ imageUrl, bare = false }) {
   // The parent remounts this component (via `key`) whenever the clue identity
   // changes, so the broken-image state resets per round without an effect.
   const [errored, setErrored] = useState(false);
   const optimized = optimizeHeadshot(imageUrl, { width: HEADSHOT_WIDTHS.clue });
   const srcSet = headshotSrcSet(imageUrl, [HEADSHOT_WIDTHS.clue, HEADSHOT_WIDTHS.clue2x]);
+  // Solo (bare) renders the photo larger on desktop so it balances the input
+  // column; the existing high-DPI candidate (768w) keeps it crisp at 448px.
+  const sizes = srcSet
+    ? bare
+      ? "(min-width: 1024px) 448px, (max-width: 480px) 100vw, 384px"
+      : "(max-width: 480px) 100vw, 384px"
+    : undefined;
+
+  const frame = (
+    <div
+      className={`relative mx-auto flex w-full ${bare ? "max-w-sm lg:max-w-md" : "max-w-sm"} items-center justify-center overflow-hidden rounded-2xl bg-elq-bg`}
+      style={{ aspectRatio: "3 / 4" }}
+    >
+      {!imageUrl ? (
+        <PhotoCluePlaceholder testId="photo-clue-loading" label="Loading photo…" />
+      ) : errored ? (
+        <PhotoCluePlaceholder testId="photo-clue-fallback" label="Photo unavailable" />
+      ) : (
+        <img
+          data-testid="photo-clue-image"
+          src={optimized}
+          srcSet={srcSet}
+          sizes={sizes}
+          alt="Mystery player"
+          className="h-full w-full object-cover object-top"
+          onError={(e) => handleHeadshotError(e, imageUrl, () => setErrored(true))}
+        />
+      )}
+    </div>
+  );
+
+  if (bare) return frame;
 
   return (
     <div className="bg-white rounded-3xl border border-elq-border shadow-sm p-5 mb-5">
-      <div
-        className="relative mx-auto flex w-full max-w-sm items-center justify-center overflow-hidden rounded-2xl bg-elq-bg"
-        style={{ aspectRatio: "3 / 4" }}
-      >
-        {!imageUrl ? (
-          <PhotoCluePlaceholder testId="photo-clue-loading" label="Loading photo…" />
-        ) : errored ? (
-          <PhotoCluePlaceholder testId="photo-clue-fallback" label="Photo unavailable" />
-        ) : (
-          <img
-            data-testid="photo-clue-image"
-            src={optimized}
-            srcSet={srcSet}
-            sizes={srcSet ? "(max-width: 480px) 100vw, 384px" : undefined}
-            alt="Mystery player"
-            className="h-full w-full object-cover object-top"
-            onError={(e) => handleHeadshotError(e, imageUrl, () => setErrored(true))}
-          />
-        )}
-      </div>
+      {frame}
     </div>
   );
 }
@@ -779,7 +933,7 @@ function isPhotoActionSyncConflict(error) {
   );
 }
 
-function PhotoGuessBox({ onGuess, disabled, roundKey }) {
+function PhotoGuessBox({ onGuess, disabled, roundKey, bare = false }) {
   const [query, setQuery] = useState("");
   const [players, setPlayers] = useState([]);
   const [prevRoundKey, setPrevRoundKey] = useState(roundKey);
@@ -832,7 +986,7 @@ function PhotoGuessBox({ onGuess, disabled, roundKey }) {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-elq-border p-4">
+    <div className={bare ? "" : "bg-white rounded-2xl border border-elq-border p-4"}>
       <input
         value={query}
         disabled={disabled}
@@ -862,14 +1016,22 @@ function PhotoGuessBox({ onGuess, disabled, roundKey }) {
   );
 }
 
-function Shell({ children, onHome }) {
+function Shell({ children, onHome, align = "center", headerRight = null }) {
+  const alignClass = align === "top" ? "items-start" : "items-center";
   return (
     <div className="min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
       <div className="p-4">
-        <BoardHeaderNav onHome={onHome} />
+        {headerRight ? (
+          <div className="flex items-center justify-between gap-4">
+            <BoardHeaderNav onHome={onHome} />
+            {headerRight}
+          </div>
+        ) : (
+          <BoardHeaderNav onHome={onHome} />
+        )}
       </div>
-      <div className="flex-1 flex items-center justify-center p-4 pt-0">
+      <div className={`flex-1 flex ${alignClass} justify-center p-4 pt-0`}>
         {children}
       </div>
     </div>

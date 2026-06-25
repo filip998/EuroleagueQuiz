@@ -22,7 +22,7 @@ async function apiJson(path, options = {}) {
 async function startPhotoSolo(page) {
   await page.goto("/photo");
   await page.getByRole("button", { name: "Start Game" }).click();
-  await expect(page.getByText("PHOTO QUIZ")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole("button", { name: "Reveal answer" })).toBeVisible({ timeout: 10000 });
   await expect(photoClue(page)).toBeVisible({ timeout: 10000 });
 }
 
