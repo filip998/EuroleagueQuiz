@@ -860,6 +860,11 @@ describe("CareerQuizBoard multiplayer reveals", () => {
 
     expect(await screen.findByRole("group", { name: "Solved 2" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Streak 2" })).toBeInTheDocument();
+    // The second guess must run against the advanced round token, proving the
+    // score carried forward into a genuinely new round rather than re-scoring
+    // the first one.
+    expect(submitCareerSoloGuess).toHaveBeenNthCalledWith(1, "solo-round", 52);
+    expect(submitCareerSoloGuess).toHaveBeenNthCalledWith(2, "next-round", 53);
   });
 
   it("keeps the streak intact across a wrong guess before a correct solo answer", async () => {
@@ -921,6 +926,70 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(await screen.findByRole("group", { name: "Solved 1" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
     expect(screen.getByText("Revealed One")).toBeInTheDocument();
+  });
+
+  it("counts a correct solo guess once even if it is submitted twice in quick succession", async () => {
+    autocompleteCareerPlayer
+      .mockResolvedValueOnce({ players: [{ id: 80, name: "Once Only" }] })
+      .mockResolvedValueOnce({ players: [{ id: 80, name: "Once Only" }] });
+    let resolveGuess;
+    submitCareerSoloGuess.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveGuess = resolve;
+      })
+    );
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectCareerPlayer("Once Only");
+    // Submitting again while the first guess is still in flight must be ignored
+    // so the round is scored exactly once.
+    await selectCareerPlayer("Once Only");
+
+    await act(async () => {
+      resolveGuess({ correct: true, answer: careerAnswer({ id: 80, name: "Once Only" }) });
+    });
+
+    expect(await screen.findByRole("group", { name: "Solved 1" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 1" })).toBeInTheDocument();
+    expect(submitCareerSoloGuess).toHaveBeenCalledTimes(1);
+  });
+
+  it("reveals the solo answer once even if Reveal answer is clicked repeatedly", async () => {
+    let resolveReveal;
+    revealCareerSoloAnswer.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveReveal = resolve;
+      })
+    );
+
+    render(
+      <CareerQuizBoard
+        soloInitialRound={soloCareerRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    const revealButton = screen.getByRole("button", { name: "Reveal answer" });
+    fireEvent.click(revealButton);
+    // A second click while the reveal is still in flight must be ignored.
+    fireEvent.click(revealButton);
+
+    await act(async () => {
+      resolveReveal({ answer: careerAnswer({ id: 90, name: "Revealed Once" }) });
+    });
+
+    expect(await screen.findByText("Revealed Once")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Solved 0" })).toBeInTheDocument();
+    expect(revealCareerSoloAnswer).toHaveBeenCalledTimes(1);
   });
 
   it("shows a polled latest completed round once for a non-acting player", async () => {

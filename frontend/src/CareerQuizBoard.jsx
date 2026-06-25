@@ -102,6 +102,11 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   // has already updated the score, so a duplicate/late response can never double
   // count or reset the Solved/Streak counter for the same round.
   const soloResolvedRoundRef = useRef(null);
+  // Serializes the two terminal solo actions (a correct guess and reveal) so
+  // they can never race to resolve the same round: whichever the player
+  // triggers first runs to completion and a concurrent second action is ignored
+  // until it settles.
+  const soloPendingRef = useRef(false);
 
   const solo = Boolean(soloRound);
   const isOnline = !solo && Boolean(onlineInfo);
@@ -276,21 +281,31 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     setMessage("");
     setNoAnswerOfferMessageRoundNumber(null);
     if (solo) {
+      // Ignore a guess while another terminal solo action (guess or reveal) is
+      // still in flight so the two can never race to resolve the same round.
+      if (soloPendingRef.current) return;
       const requestedRoundToken = soloRound.round_token;
-      const result = await submitCareerSoloGuess(requestedRoundToken, player.id);
-      // Drop a response that resolved after the player already advanced rounds.
-      if (soloRoundTokenRef.current !== requestedRoundToken) return;
-      if (result.correct) {
-        // Score the round exactly once even if two correct responses arrive.
-        if (soloResolvedRoundRef.current !== requestedRoundToken) {
-          soloResolvedRoundRef.current = requestedRoundToken;
-          setSoloScore((score) => ({ solved: score.solved + 1, streak: score.streak + 1 }));
-          setAnswer(result.answer);
-          setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
-          setMessage(CAREER_FEEDBACK_MESSAGES.correct);
+      soloPendingRef.current = true;
+      try {
+        const result = await submitCareerSoloGuess(requestedRoundToken, player.id);
+        // Drop a response that resolved after the player already advanced rounds.
+        if (soloRoundTokenRef.current !== requestedRoundToken) return;
+        if (result.correct) {
+          // Score the round exactly once even if two correct responses arrive.
+          if (soloResolvedRoundRef.current !== requestedRoundToken) {
+            soloResolvedRoundRef.current = requestedRoundToken;
+            setSoloScore((score) => ({ solved: score.solved + 1, streak: score.streak + 1 }));
+            setAnswer(result.answer);
+            setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+            setMessage(CAREER_FEEDBACK_MESSAGES.correct);
+          }
+        } else if (soloResolvedRoundRef.current !== requestedRoundToken) {
+          // Never surface a stale "wrong" message for a round that another
+          // action (reveal) has already resolved.
+          setMessage(CAREER_FEEDBACK_MESSAGES.soloWrong);
         }
-      } else {
-        setMessage(CAREER_FEEDBACK_MESSAGES.soloWrong);
+      } finally {
+        soloPendingRef.current = false;
       }
       return;
     }
@@ -317,16 +332,24 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   }
 
   async function revealSolo() {
+    // Ignore a reveal while another terminal solo action (guess or reveal) is
+    // still in flight so the two can never race to resolve the same round.
+    if (soloPendingRef.current) return;
     const requestedRoundToken = soloRound.round_token;
-    const result = await revealCareerSoloAnswer(requestedRoundToken);
-    if (soloRoundTokenRef.current !== requestedRoundToken) return;
-    // Revealing without solving ends the round: keep Solved, reset the Streak,
-    // and only once per round.
-    if (soloResolvedRoundRef.current !== requestedRoundToken) {
-      soloResolvedRoundRef.current = requestedRoundToken;
-      setSoloScore((score) => ({ ...score, streak: 0 }));
-      setAnswer(result.answer);
-      setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+    soloPendingRef.current = true;
+    try {
+      const result = await revealCareerSoloAnswer(requestedRoundToken);
+      if (soloRoundTokenRef.current !== requestedRoundToken) return;
+      // Revealing without solving ends the round: keep Solved, reset the Streak,
+      // and only once per round.
+      if (soloResolvedRoundRef.current !== requestedRoundToken) {
+        soloResolvedRoundRef.current = requestedRoundToken;
+        setSoloScore((score) => ({ ...score, streak: 0 }));
+        setAnswer(result.answer);
+        setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
+      }
+    } finally {
+      soloPendingRef.current = false;
     }
   }
 
@@ -786,14 +809,16 @@ function SoloHud({
 }
 
 function SoloHintDetails({ hints, error }) {
-  const hasContent = Boolean(hints.nationality || hints.position || hints.skeleton);
-  if (!hasContent && !error) return null;
+  // Keep the section (and its data-testid) mounted on every solo round so the
+  // testid is stable from the first render; only take vertical space once there
+  // is a revealed hint or an error to show.
+  const hasContent = Boolean(hints.nationality || hints.position || hints.skeleton || error);
 
   return (
     <section
       aria-label="Solo career hints"
       data-testid="career-solo-hints"
-      className="mt-4 space-y-3"
+      className={hasContent ? "mt-4 space-y-3" : ""}
     >
       {hints.nationality && (
         <HintPill label="Nationality">
