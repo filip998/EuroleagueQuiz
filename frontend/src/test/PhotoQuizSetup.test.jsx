@@ -222,4 +222,35 @@ describe("PhotoQuizSetup", () => {
     expect(screen.queryByText("First to 1")).not.toBeInTheDocument();
     expect(screen.queryByTestId("quick-pick-quick")).not.toBeInTheDocument();
   });
+
+  it("prefills Online -> Play a Friend -> Join from a valid initialJoinCode", async () => {
+    joinPhotoGame.mockResolvedValue({ state: { id: 7, status: "active" } });
+
+    renderSetup({ initialMode: "online", initialJoinCode: "abc123" });
+
+    // Landed directly on the Join sub-flow with the code prefilled and enabled.
+    const codeInput = screen.getByPlaceholderText("ABC123");
+    expect(codeInput).toHaveValue("ABC123");
+    const joinButton = screen.getByText("Join Game");
+    expect(joinButton).not.toBeDisabled();
+
+    fireEvent.click(joinButton);
+
+    await waitFor(() => expect(mockOnGameJoined).toHaveBeenCalled());
+    expect(joinPhotoGame).toHaveBeenCalledWith("ABC123", expect.any(String));
+  });
+
+  it("opens the join flow even when initialMode is not online if a code is present", () => {
+    renderSetup({ initialMode: "solo", initialJoinCode: "abc123" });
+
+    expect(screen.getByPlaceholderText("ABC123")).toHaveValue("ABC123");
+    expect(screen.getByText("Join Game")).toBeInTheDocument();
+  });
+
+  it("ignores an invalid initialJoinCode and keeps the Solo default", () => {
+    renderSetup({ initialJoinCode: "bad" });
+
+    expect(screen.getByText("Start Game")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("ABC123")).not.toBeInTheDocument();
+  });
 });

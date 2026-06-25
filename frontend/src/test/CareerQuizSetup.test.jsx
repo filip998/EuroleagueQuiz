@@ -164,4 +164,35 @@ describe("CareerQuizSetup", () => {
       { playerNumber: 2, isOnline: true }
     );
   });
+
+  it("prefills Online -> Play a Friend -> Join from a valid initialJoinCode", async () => {
+    joinCareerGame.mockResolvedValue({ state: { id: 7, status: "active" } });
+
+    renderSetup({ initialMode: "online", initialJoinCode: "abc123" });
+
+    // Landed directly on the Join sub-flow with the code prefilled and enabled.
+    const codeInput = screen.getByPlaceholderText("ABC123");
+    expect(codeInput).toHaveValue("ABC123");
+    const joinButton = screen.getByText("Join Game");
+    expect(joinButton).not.toBeDisabled();
+
+    fireEvent.click(joinButton);
+
+    await waitFor(() => expect(onGameJoined).toHaveBeenCalled());
+    expect(joinCareerGame).toHaveBeenCalledWith("ABC123", "Ace");
+  });
+
+  it("opens the join flow even when initialMode is not online if a code is present", () => {
+    renderSetup({ initialMode: "solo", initialJoinCode: "abc123" });
+
+    expect(screen.getByPlaceholderText("ABC123")).toHaveValue("ABC123");
+    expect(screen.getByText("Join Game")).toBeInTheDocument();
+  });
+
+  it("ignores an invalid initialJoinCode and keeps the Solo default", () => {
+    renderSetup({ initialJoinCode: "bad" });
+
+    expect(screen.getByText("Start Game")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("ABC123")).not.toBeInTheDocument();
+  });
 });

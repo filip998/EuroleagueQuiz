@@ -303,4 +303,27 @@ test.describe.serial("Photo Quiz Flow", () => {
       await contextB.close();
     }
   });
+
+  test("invite link prefills the Play a Friend join code on /photo?join= (#277)", async ({ browser }) => {
+    const contextA = await browser.newContext();
+    const contextB = await browser.newContext();
+    const playerA = await contextA.newPage();
+    const playerB = await contextB.newPage();
+
+    try {
+      const joinCode = await startPhotoFriendHost(playerA, {
+        nickname: "Invite Photo Alice",
+        targetWins: "3",
+      });
+
+      await playerB.goto(`/photo?join=${joinCode}`);
+
+      // Landed on Online -> Play a Friend -> Join with the code prefilled.
+      await expect(playerB.getByPlaceholder("ABC123")).toHaveValue(joinCode);
+      await expect(playerB.getByRole("button", { name: "Join Game" })).toBeVisible();
+    } finally {
+      await contextA.close();
+      await contextB.close();
+    }
+  });
 });

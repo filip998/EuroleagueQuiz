@@ -43,8 +43,12 @@ vi.mock("../HigherLowerBoard", () => ({
   default: () => <div data-testid="hl-board" />,
 }));
 vi.mock("../CareerQuizSetup", () => ({
-  default: ({ onBack, initialMode }) => (
-    <div data-testid="career-setup" data-initial-mode={initialMode || ""}>
+  default: ({ onBack, initialMode, initialJoinCode }) => (
+    <div
+      data-testid="career-setup"
+      data-initial-mode={initialMode || ""}
+      data-initial-join-code={initialJoinCode || ""}
+    >
       <button onClick={onBack}>Back</button>
     </div>
   ),
@@ -53,8 +57,12 @@ vi.mock("../CareerQuizBoard", () => ({
   default: () => <div data-testid="career-board" />,
 }));
 vi.mock("../PhotoQuizSetup", () => ({
-  default: ({ onBack, initialMode }) => (
-    <div data-testid="photo-setup" data-initial-mode={initialMode || ""}>
+  default: ({ onBack, initialMode, initialJoinCode }) => (
+    <div
+      data-testid="photo-setup"
+      data-initial-mode={initialMode || ""}
+      data-initial-join-code={initialJoinCode || ""}
+    >
       <button onClick={onBack}>Back</button>
     </div>
   ),
@@ -277,6 +285,72 @@ describe("App", () => {
       "data-initial-join-code",
       ""
     );
+  });
+
+  it("opens Career Online with a prefilled code from /career?join=", () => {
+    render(
+      <MemoryRouter initialEntries={["/career?join=abc123"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("career-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-join-code", "ABC123");
+  });
+
+  it("ignores an invalid /career?join= code and falls back to Solo setup", () => {
+    render(
+      <MemoryRouter initialEntries={["/career?join=bad"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("career-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "solo");
+    expect(setup).toHaveAttribute("data-initial-join-code", "");
+  });
+
+  it("keeps /career?quick=1 on Quick Match and ignores any invite code", () => {
+    render(
+      <MemoryRouter initialEntries={["/career?quick=1&join=abc123"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("career-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-join-code", "");
+  });
+
+  it("opens Photo Online with a prefilled code from /photo?join=", () => {
+    render(
+      <MemoryRouter initialEntries={["/photo?join=abc123"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("photo-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-join-code", "ABC123");
+  });
+
+  it("ignores an invalid /photo?join= code and falls back to Solo setup", () => {
+    render(
+      <MemoryRouter initialEntries={["/photo?join=bad"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("photo-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "solo");
+    expect(setup).toHaveAttribute("data-initial-join-code", "");
+  });
+
+  it("keeps /photo?quick=1 on Quick Match and ignores any invite code", () => {
+    render(
+      <MemoryRouter initialEntries={["/photo?quick=1&join=abc123"]}>
+        <App />
+      </MemoryRouter>
+    );
+    const setup = screen.getByTestId("photo-setup");
+    expect(setup).toHaveAttribute("data-initial-mode", "online");
+    expect(setup).toHaveAttribute("data-initial-join-code", "");
   });
 });
 
