@@ -487,6 +487,7 @@ function TicTacToeSetupPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const initialJoinCode = parseJoinCode(location.search);
+  const applyPreferences = Boolean(location.state?.replay);
 
   function handleGameCreated(resp, online) {
     const gameData = resp.state || resp.game || resp;
@@ -499,6 +500,7 @@ function TicTacToeSetupPage() {
     <GameSetup
       key={initialJoinCode || "no-invite"}
       initialJoinCode={initialJoinCode}
+      applyPreferences={applyPreferences}
       onGameCreated={handleGameCreated}
       onBack={() => navigate("/")}
     />
@@ -535,8 +537,9 @@ export function TicTacToeGamePage() {
 
   async function handleNewGame() {
     // Local 1v1 and online matches return to the setup screen to reconfigure.
+    // The replay flag tells the setup screen to prefill the last-used choices.
     if (game?.mode !== "single_player") {
-      navigate("/tictactoe");
+      navigate("/tictactoe", { state: { replay: true } });
       return;
     }
     // Solo "Play Again" starts a fresh solo board with the same solo defaults and
@@ -550,8 +553,10 @@ export function TicTacToeGamePage() {
     } catch {
       // Creating the solo board failed (rare, local insert). Fall back to setup so
       // the player can retry rather than being stuck on the finished result screen.
+      // Carry the replay flag so the setup restores the player's Solo choice
+      // instead of defaulting to Online -> Quick Match.
       replayingRef.current = false;
-      navigate("/tictactoe");
+      navigate("/tictactoe", { state: { replay: true } });
     }
   }
 
@@ -598,6 +603,7 @@ function GuessTheListSetupPage() {
     : joinCode
       ? `join-${initialOnlineGameType}-${joinCode}`
       : "default";
+  const applyPreferences = Boolean(location.state?.replay);
 
   function handleGameCreated(resp, online) {
     const gameData = resp.state || resp.game || resp;
@@ -612,6 +618,7 @@ function GuessTheListSetupPage() {
       initialMode={initialMode}
       initialOnlineGameType={initialOnlineGameType}
       initialJoinCode={joinCode}
+      applyPreferences={applyPreferences}
       onGameCreated={handleGameCreated}
       onBack={() => navigate("/")}
     />
@@ -642,14 +649,14 @@ function GuessTheListGamePage() {
     game?.is_race ? (
       <GuessTheListRaceBoard
         initialState={game}
-        onNewGame={() => navigate("/list")}
+        onNewGame={() => navigate("/list", { state: { replay: true } })}
         onHome={() => navigate("/")}
         onlineInfo={onlineInfo}
       />
     ) : (
       <GuessTheListBoard
         initialState={game}
-        onNewGame={() => navigate("/list")}
+        onNewGame={() => navigate("/list", { state: { replay: true } })}
         onHome={() => navigate("/")}
         onlineInfo={onlineInfo}
       />
@@ -664,12 +671,20 @@ function GuessTheListGamePage() {
 
 function HigherLowerSetupPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const applyPreferences = Boolean(location.state?.replay);
 
   function handleGameCreated(resp) {
     navigate("/higherlower/play", { state: { initialState: resp } });
   }
 
-  return <HigherLowerSetup onGameCreated={handleGameCreated} onBack={() => navigate("/")} />;
+  return (
+    <HigherLowerSetup
+      applyPreferences={applyPreferences}
+      onGameCreated={handleGameCreated}
+      onBack={() => navigate("/")}
+    />
+  );
 }
 
 function HigherLowerGamePage() {
@@ -686,7 +701,7 @@ function HigherLowerGamePage() {
   return (
     <HigherLowerBoard
       initialState={initialState}
-      onNewGame={() => navigate("/higherlower")}
+      onNewGame={() => navigate("/higherlower", { state: { replay: true } })}
       onHome={() => navigate("/")}
     />
   );
@@ -705,6 +720,7 @@ function CareerSetupPage() {
   const joinCode = isQuick ? "" : parseJoinCode(location.search);
   const initialMode = isQuick || joinCode ? "online" : "solo";
   const setupKey = joinCode ? `join-${joinCode}` : initialMode;
+  const applyPreferences = Boolean(location.state?.replay);
 
   function handleSoloRound(round) {
     navigate("/career/play", { state: { soloRound: round } });
@@ -721,6 +737,7 @@ function CareerSetupPage() {
       key={setupKey}
       initialMode={initialMode}
       initialJoinCode={joinCode}
+      applyPreferences={applyPreferences}
       onSoloRound={handleSoloRound}
       onGameCreated={handleGameCreated}
       onGameJoined={handleGameCreated}
@@ -743,7 +760,7 @@ function CareerSoloPage() {
   return (
     <CareerQuizBoard
       soloInitialRound={soloRound}
-      onNewGame={() => navigate("/career")}
+      onNewGame={() => navigate("/career", { state: { replay: true } })}
       onHome={() => navigate("/")}
     />
   );
@@ -773,7 +790,7 @@ function CareerGamePage() {
     <CareerQuizBoard
       initialState={game}
       onlineInfo={onlineInfo}
-      onNewGame={() => navigate("/career")}
+      onNewGame={() => navigate("/career", { state: { replay: true } })}
       onHome={() => navigate("/")}
     />
   );
@@ -795,6 +812,7 @@ function PhotoSetupPage() {
   const joinCode = isQuick ? "" : parseJoinCode(location.search);
   const initialMode = isQuick || joinCode ? "online" : "solo";
   const setupKey = joinCode ? `join-${joinCode}` : initialMode;
+  const applyPreferences = Boolean(location.state?.replay);
 
   function handleSoloRound(round) {
     navigate("/photo/play", { state: { soloRound: round } });
@@ -811,6 +829,7 @@ function PhotoSetupPage() {
       key={setupKey}
       initialMode={initialMode}
       initialJoinCode={joinCode}
+      applyPreferences={applyPreferences}
       onSoloRound={handleSoloRound}
       onGameCreated={handleGameCreated}
       onGameJoined={handleGameCreated}
@@ -833,7 +852,7 @@ function PhotoSoloPage() {
   return (
     <PhotoQuizBoard
       soloInitialRound={soloRound}
-      onNewGame={() => navigate("/photo")}
+      onNewGame={() => navigate("/photo", { state: { replay: true } })}
       onHome={() => navigate("/")}
     />
   );
@@ -863,7 +882,7 @@ function PhotoGamePage() {
     <PhotoQuizBoard
       initialState={game}
       onlineInfo={onlineInfo}
-      onNewGame={() => navigate("/photo")}
+      onNewGame={() => navigate("/photo", { state: { replay: true } })}
       onHome={() => navigate("/")}
     />
   );

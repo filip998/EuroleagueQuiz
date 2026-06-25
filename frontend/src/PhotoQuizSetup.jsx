@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   createPhotoGame,
   createPhotoSoloRound,
@@ -15,6 +15,7 @@ import {
   photoSeatKey,
 } from "./photoQuickMatch";
 import { resolveQuickMatchSeat } from "./quickMatchSeats";
+import { loadSetupPreferences, saveSetupPreferences } from "./setupPreferences";
 import GameSetupShell, { SectionCaption } from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 import NameField from "./NameField";
@@ -37,18 +38,31 @@ const FRIEND_SUB_MODES = [
   ["join", "Join"],
 ];
 
-export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack, initialMode = "solo", initialJoinCode = "" }) {
+export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoined, onBack, initialMode = "solo", initialJoinCode = "", applyPreferences = false }) {
   const prefillCode = normalizeJoinCode(initialJoinCode);
-  const [mode, setMode] = useState(initialMode === "online" || prefillCode ? "online" : "solo");
+  // A `?quick=1` deep link (initialMode==="online") or an invite code must win
+  // over stored prefs, so prefs are only loaded for a plain replay.
+  const hasDeepLink = initialMode === "online" || Boolean(prefillCode);
+  const prefs = useMemo(
+    () => (applyPreferences && !hasDeepLink ? loadSetupPreferences("photo") : null),
+    [applyPreferences, hasDeepLink],
+  );
+  const [mode, setMode] = useState(() =>
+    initialMode === "online" || prefillCode ? "online" : prefs?.mode ?? "solo",
+  );
   // Online sub-mode: "quick" (matchmaking pool) | "friend" (private game). A valid
   // invite code instead lands on Online -> Play a Friend -> Join, code prefilled.
-  const [onlineSub, setOnlineSub] = useState(prefillCode ? "friend" : "quick");
+  const [onlineSub, setOnlineSub] = useState(() =>
+    prefillCode ? "friend" : prefs?.onlineSub ?? "quick",
+  );
   // Friend sub-mode: "create" | "join".
-  const [friendSub, setFriendSub] = useState(prefillCode ? "join" : "create");
+  const [friendSub, setFriendSub] = useState(() =>
+    prefillCode ? "join" : prefs?.friendSub ?? "create",
+  );
   const [playerName, setPlayerName] = useClerkPrefilledName(getDisplayName);
   const [joinCode, setJoinCode] = useState(prefillCode);
-  const [targetWins, setTargetWins] = useState(3);
-  const [wrongGuessVisibility, setWrongGuessVisibility] = useState("private");
+  const [targetWins, setTargetWins] = useState(() => prefs?.targetWins ?? 3);
+  const [wrongGuessVisibility, setWrongGuessVisibility] = useState(() => prefs?.wrongGuessVisibility ?? "private");
   const [loading, setLoading] = useState(false);
   const [pendingPreset, setPendingPreset] = useState(null);
   const [error, setError] = useState("");
@@ -81,6 +95,14 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
         await photoQuickMatch({ preset, player_name: playerName || null })
       );
       const playerNumber = resolveQuickMatchSeat(photoSeatKey(game.id), game.status);
+      saveSetupPreferences("photo", {
+        mode: "online",
+        onlineSub: "quick",
+        friendSub,
+        targetWins,
+        wrongGuessVisibility,
+        quickPreset: preset,
+      });
       onGameCreated(game, { playerNumber, isOnline: true });
     } catch (err) {
       setError(err.message || "Could not start Photo Quiz");
@@ -102,6 +124,13 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
     setLoading(true);
     try {
       if (mode === "solo") {
+        saveSetupPreferences("photo", {
+          mode,
+          onlineSub,
+          friendSub,
+          targetWins,
+          wrongGuessVisibility,
+        });
         onSoloRound(await createPhotoSoloRound([]));
       } else if (isJoin) {
         const game = photoGameStateFromResponse(
@@ -116,6 +145,13 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
             player1_name: playerName || "Player 1",
           })
         );
+        saveSetupPreferences("photo", {
+          mode,
+          onlineSub,
+          friendSub,
+          targetWins,
+          wrongGuessVisibility,
+        });
         onGameCreated(game, { playerNumber: 1, isOnline: true });
       }
     } catch (err) {
@@ -204,7 +240,7 @@ export default function PhotoQuizSetup({ onSoloRound, onGameCreated, onGameJoine
                     onPick={handleQuickPick}
                     disabled={loading}
                     pendingPreset={pendingPreset}
-                    defaultPreset={DEFAULT_PHOTO_QUICK_MATCH_PRESET}
+                    defaultPreset={prefs?.quickPreset ?? DEFAULT_PHOTO_QUICK_MATCH_PRESET}
                   />
                 )}
 

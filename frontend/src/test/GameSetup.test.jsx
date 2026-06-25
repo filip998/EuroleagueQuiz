@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import GameSetup from "../GameSetup";
-import { createGame, quickMatchTicTacToe } from "../api";
+import { createGame, joinGame, quickMatchTicTacToe } from "../api";
 import { AuthContext } from "../identityBridge";
 
 vi.mock("../api", () => ({
@@ -482,5 +482,125 @@ describe("GameSetup", () => {
         player1_name: guestName,
       })
     );
+  });
+});
+
+describe("GameSetup replay preferences", () => {
+  const mockOnGameCreated = vi.fn();
+  const mockOnBack = vi.fn();
+  const PREFS_KEY = "elq_setup_prefs_v1_tictactoe";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const store = new Map();
+    globalThis.localStorage = {
+      getItem: (key) => (store.has(key) ? store.get(key) : null),
+      setItem: (key, value) => store.set(key, String(value)),
+      removeItem: (key) => store.delete(key),
+      clear: () => store.clear(),
+    };
+  });
+
+  afterEach(() => {
+    globalThis.localStorage = originalLocalStorage;
+  });
+
+  function seed(prefs) {
+    globalThis.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  }
+
+  it("restores Online -> Play a Friend -> Create on replay", () => {
+    seed({ mode: "online", onlineSub: "friend", friendSub: "create", targetWins: 5, timerMode: "15s" });
+
+    render(
+      <GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} applyPreferences />
+    );
+
+    // Landed on Friend -> Create (the create CTA + settings), not the Quick grid.
+    expect(screen.getByText("Create Online Game")).toBeInTheDocument();
+    expect(screen.queryByTestId("quick-pick-standard")).not.toBeInTheDocument();
+  });
+
+  it("restores Solo on replay", () => {
+    seed({ mode: "solo" });
+
+    render(
+      <GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} applyPreferences />
+    );
+
+    expect(screen.getByText("Start Game")).toBeInTheDocument();
+    expect(screen.queryByTestId("quick-pick-standard")).not.toBeInTheDocument();
+  });
+
+  it("recommends the last-used quick preset on replay", () => {
+    seed({ mode: "online", onlineSub: "quick", quickPreset: "blitz" });
+
+    render(
+      <GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} applyPreferences />
+    );
+
+    // The recommended badge moves to the last-used preset (blitz) instead of the
+    // default (standard). The badge is purely cosmetic; Quick Match stays one-tap.
+    const blitz = screen.getByTestId("quick-pick-blitz");
+    expect(blitz).toHaveTextContent("Recommended");
+  });
+
+  it("ignores stored preferences on a fresh visit (no replay flag)", () => {
+    seed({ mode: "solo" });
+
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+
+    // Default Online -> Quick Match landing, not the stored Solo choice.
+    expect(screen.getByTestId("quick-pick-standard")).toBeInTheDocument();
+  });
+
+  it("lets a join-invite deep link win over stored preferences", () => {
+    seed({ mode: "solo" });
+
+    render(
+      <GameSetup
+        onGameCreated={mockOnGameCreated}
+        onBack={mockOnBack}
+        initialJoinCode="ABC123"
+        applyPreferences
+      />
+    );
+
+    // The invite code lands on Join with the code prefilled, ignoring the
+    // stored Solo preference entirely.
+    const codeInput = screen.getByPlaceholderText("ABC123");
+    expect(codeInput).toHaveValue("ABC123");
+    expect(screen.getByText("Join Game")).toBeInTheDocument();
+  });
+
+  it("persists choices on a successful create but never on a join", async () => {
+    createGame.mockResolvedValue({ state: { id: 1, status: "waiting_for_opponent" } });
+
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+    fireEvent.click(screen.getByText("Play a Friend"));
+    fireEvent.click(screen.getByText("Create Online Game"));
+
+    await waitFor(() => expect(createGame).toHaveBeenCalled());
+    const stored = JSON.parse(globalThis.localStorage.getItem(PREFS_KEY));
+    expect(stored).toMatchObject({ mode: "online", onlineSub: "friend", friendSub: "create" });
+    // A join is configured by the host, so it must NOT overwrite stored prefs
+    // (and must never store the join code).
+    expect(stored).not.toHaveProperty("joinCode");
+  });
+
+  it("does not persist preferences when joining a friend's game", async () => {
+    joinGame.mockResolvedValue({ state: { id: 2, status: "active" } });
+
+    render(
+      <GameSetup
+        onGameCreated={mockOnGameCreated}
+        onBack={mockOnBack}
+        initialJoinCode="ABC123"
+      />
+    );
+    fireEvent.click(screen.getByText("Join Game"));
+
+    await waitFor(() => expect(joinGame).toHaveBeenCalled());
+    expect(globalThis.localStorage.getItem(PREFS_KEY)).toBeNull();
   });
 });

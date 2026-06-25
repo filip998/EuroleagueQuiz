@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createHigherLowerGame, getHigherLowerLeaderboard } from "./api";
 import { getDisplayName, getGuestName, setNickname as saveNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
+import { loadSetupPreferences, saveSetupPreferences } from "./setupPreferences";
 import GameSetupShell from "./GameSetupShell";
 import NameField from "./NameField";
 
@@ -40,10 +41,14 @@ const TIERS = [
   },
 ];
 
-export default function HigherLowerSetup({ onGameCreated, onBack }) {
-  const [tier, setTier] = useState("easy");
-  const [seasonStart, setSeasonStart] = useState(2007);
-  const [seasonEnd, setSeasonEnd] = useState(2025);
+export default function HigherLowerSetup({ onGameCreated, onBack, applyPreferences = false }) {
+  const prefs = useMemo(
+    () => (applyPreferences ? loadSetupPreferences("higherlower") : null),
+    [applyPreferences],
+  );
+  const [tier, setTier] = useState(() => prefs?.tier ?? "easy");
+  const [seasonStart, setSeasonStart] = useState(() => prefs?.seasonStart ?? 2007);
+  const [seasonEnd, setSeasonEnd] = useState(() => prefs?.seasonEnd ?? 2025);
   const [nickname, setNickname] = useClerkPrefilledName(getDisplayName);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -69,6 +74,7 @@ export default function HigherLowerSetup({ onGameCreated, onBack }) {
         season_range_end: seasonEnd,
         nickname: nickname.trim() || getGuestName(),
       });
+      saveSetupPreferences("higherlower", { tier, seasonStart, seasonEnd });
       onGameCreated(resp);
     } catch (err) {
       setError(err.message);

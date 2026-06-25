@@ -33,14 +33,18 @@ vi.mock("../GuessTheListRaceBoard", () => ({
   default: () => <div data-testid="guess-the-list-race-board" />,
 }));
 vi.mock("../HigherLowerSetup", () => ({
-  default: ({ onBack }) => (
-    <div data-testid="hl-setup">
+  default: ({ onBack, applyPreferences }) => (
+    <div data-testid="hl-setup" data-apply-preferences={String(Boolean(applyPreferences))}>
       <button onClick={onBack}>Back</button>
     </div>
   ),
 }));
 vi.mock("../HigherLowerBoard", () => ({
-  default: () => <div data-testid="hl-board" />,
+  default: ({ onNewGame }) => (
+    <div data-testid="hl-board">
+      <button onClick={onNewGame}>Play Again</button>
+    </div>
+  ),
 }));
 vi.mock("../CareerQuizSetup", () => ({
   default: ({ onBack, initialMode, initialJoinCode }) => (
@@ -239,6 +243,40 @@ describe("App", () => {
     expect(cta.className).not.toContain("group-hover:opacity-100");
     fireEvent.click(cta);
     expect(screen.getByTestId("hl-setup")).toBeInTheDocument();
+  });
+
+  it("does not set applyPreferences on a fresh Higher or Lower setup visit", () => {
+    render(
+      <MemoryRouter initialEntries={["/higherlower"]}>
+        <App />
+      </MemoryRouter>
+    );
+    expect(screen.getByTestId("hl-setup")).toHaveAttribute(
+      "data-apply-preferences",
+      "false"
+    );
+  });
+
+  it("preserves replay settings: Play Again returns to setup with applyPreferences set", () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          { pathname: "/higherlower/play", state: { initialState: { id: 1 } } },
+        ]}
+      >
+        <App />
+      </MemoryRouter>
+    );
+
+    // The board renders from the passed-in game state.
+    expect(screen.getByTestId("hl-board")).toBeInTheDocument();
+
+    // Play Again routes back to setup with the replay flag, so the setup screen
+    // is told to restore the player's last-used choices.
+    fireEvent.click(screen.getByText("Play Again"));
+    const setup = screen.getByTestId("hl-setup");
+    expect(setup).toBeInTheDocument();
+    expect(setup).toHaveAttribute("data-apply-preferences", "true");
   });
 
   it("navigates to Career Quiz setup when clicking the card", () => {

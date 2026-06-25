@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { createGame, joinGame, quickMatchTicTacToe } from "./api";
 import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
@@ -9,6 +9,7 @@ import {
   useQuickMatchPools,
 } from "./quickMatch";
 import { resolveQuickMatchSeat } from "./quickMatchSeats";
+import { loadSetupPreferences, saveSetupPreferences } from "./setupPreferences";
 import GameSetupShell, { SectionCaption } from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 import NameField from "./NameField";
@@ -36,18 +37,29 @@ const BACKEND_MODE = {
   online: "online_friend",
 };
 
-export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" }) {
+export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "", applyPreferences = false }) {
   const prefillCode = normalizeJoinCode(initialJoinCode);
+  // A join invite is a deep link that must win over stored prefs, so prefs are
+  // only loaded for a plain replay (no invite code).
+  const hasDeepLink = Boolean(prefillCode);
+  const prefs = useMemo(
+    () => (applyPreferences && !hasDeepLink ? loadSetupPreferences("tictactoe") : null),
+    [applyPreferences, hasDeepLink],
+  );
   // Online is the default landing so Quick Match (the prominent, near-one-click
   // way to play online) is the first thing shown. A valid invite code instead
   // lands on Online -> Play a Friend -> Join with the code prefilled.
-  const [mode, setMode] = useState("online");
+  const [mode, setMode] = useState(() => prefs?.mode ?? "online");
   // Online sub-mode: "quick" (matchmaking pool) | "friend" (private game).
-  const [onlineSub, setOnlineSub] = useState(prefillCode ? "friend" : "quick");
+  const [onlineSub, setOnlineSub] = useState(() =>
+    prefillCode ? "friend" : prefs?.onlineSub ?? "quick",
+  );
   // Friend sub-mode: "create" | "join".
-  const [friendSub, setFriendSub] = useState(prefillCode ? "join" : "create");
-  const [targetWins, setTargetWins] = useState(3);
-  const [timerMode, setTimerMode] = useState("40s");
+  const [friendSub, setFriendSub] = useState(() =>
+    prefillCode ? "join" : prefs?.friendSub ?? "create",
+  );
+  const [targetWins, setTargetWins] = useState(() => prefs?.targetWins ?? 3);
+  const [timerMode, setTimerMode] = useState(() => prefs?.timerMode ?? "40s");
   const [player1Name, setPlayer1Name] = useClerkPrefilledName(getDisplayName);
   // Local 1v1's "Player 1" gets its own non-prefilled state so both local fields
   // stay neutral placeholders ("Player 1"/"Player 2") instead of seeding the
@@ -99,6 +111,14 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
       });
       const game = resp.state;
       const playerNumber = resolveQuickMatchSeat(game.id, game.status);
+      saveSetupPreferences("tictactoe", {
+        mode: "online",
+        onlineSub: "quick",
+        friendSub,
+        targetWins,
+        timerMode,
+        quickPreset: presetKey,
+      });
       onGameCreated(resp, { playerNumber, isOnline: true });
       // On success the parent navigates away (this component unmounts), so we
       // intentionally leave the panel disabled instead of touching state on an
@@ -134,6 +154,15 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
           timer_mode: mode === "solo" ? "unlimited" : timerMode,
           player1_name: (isLocal ? localPlayer1Name : player1Name).trim() || null,
           player2_name: isLocal ? player2Name.trim() || null : null,
+        });
+        // Persist on success only (not on Join, where there's nothing the player
+        // configured). A later Play Again replays these create/local/solo choices.
+        saveSetupPreferences("tictactoe", {
+          mode,
+          onlineSub,
+          friendSub,
+          targetWins,
+          timerMode,
         });
         if (isOnline) {
           onGameCreated(resp, { playerNumber: 1, isOnline: true });
@@ -209,7 +238,7 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
               onPick={handleQuickPick}
               disabled={picking}
               pendingPreset={pendingPreset}
-              defaultPreset={DEFAULT_QUICK_MATCH_PRESET}
+              defaultPreset={prefs?.quickPreset ?? DEFAULT_QUICK_MATCH_PRESET}
             />
           </>
         ) : (

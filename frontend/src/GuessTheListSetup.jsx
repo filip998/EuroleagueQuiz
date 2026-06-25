@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   createGuessTheListGame,
   createGuessTheListRaceGame,
@@ -9,6 +9,7 @@ import {
 import { getDisplayName, setNickname } from "./identity";
 import { useClerkPrefilledName } from "./identityBridge";
 import { normalizeJoinCode } from "./inviteLink";
+import { loadSetupPreferences, saveSetupPreferences } from "./setupPreferences";
 import GameSetupShell, { SectionCaption } from "./GameSetupShell";
 import GameModeSelector from "./GameModeSelector";
 import NameField from "./NameField";
@@ -79,20 +80,38 @@ export default function GuessTheListSetup({
   initialMode = "solo",
   initialOnlineGameType = "classic",
   initialJoinCode = "",
+  applyPreferences = false,
 }) {
   const prefillCode = normalizeJoinCode(initialJoinCode);
   const startRace = initialOnlineGameType === "race";
-  const [mode, setMode] = useState(initialMode === "online" ? "online" : "solo");
-  const [onlineGameType, setOnlineGameType] = useState(startRace ? "race" : "classic");
-  const [classicSub, setClassicSub] = useState(prefillCode && !startRace ? "join" : "create");
-  const [raceSub, setRaceSub] = useState(prefillCode && startRace ? "friend" : "quick");
-  const [friendSub, setFriendSub] = useState(prefillCode && startRace ? "join" : "create");
-  const [targetWins, setTargetWins] = useState(3);
-  const [raceTargetWins, setRaceTargetWins] = useState(2);
-  const [timerMode, setTimerMode] = useState("40s");
-  const [categoryType, setCategoryType] = useState("roster");
-  const [seasonStart, setSeasonStart] = useState(2000);
-  const [seasonEnd, setSeasonEnd] = useState(2025);
+  // `?quick=1` (Online -> Race -> Quick Match) and invite codes are deep links
+  // that must win over stored prefs, so prefs are only loaded for a plain replay.
+  const hasDeepLink = initialMode === "online" || startRace || Boolean(prefillCode);
+  const prefs = useMemo(
+    () => (applyPreferences && !hasDeepLink ? loadSetupPreferences("guessTheList") : null),
+    [applyPreferences, hasDeepLink],
+  );
+  const [mode, setMode] = useState(() =>
+    initialMode === "online" ? "online" : prefs?.mode ?? "solo",
+  );
+  const [onlineGameType, setOnlineGameType] = useState(() =>
+    startRace ? "race" : prefs?.onlineGameType ?? "classic",
+  );
+  const [classicSub, setClassicSub] = useState(() =>
+    prefillCode && !startRace ? "join" : prefs?.classicSub ?? "create",
+  );
+  const [raceSub, setRaceSub] = useState(() =>
+    prefillCode && startRace ? "friend" : prefs?.raceSub ?? "quick",
+  );
+  const [friendSub, setFriendSub] = useState(() =>
+    prefillCode && startRace ? "join" : prefs?.friendSub ?? "create",
+  );
+  const [targetWins, setTargetWins] = useState(() => prefs?.targetWins ?? 3);
+  const [raceTargetWins, setRaceTargetWins] = useState(() => prefs?.raceTargetWins ?? 2);
+  const [timerMode, setTimerMode] = useState(() => prefs?.timerMode ?? "40s");
+  const [categoryType, setCategoryType] = useState(() => prefs?.categoryType ?? "roster");
+  const [seasonStart, setSeasonStart] = useState(() => prefs?.seasonStart ?? 2000);
+  const [seasonEnd, setSeasonEnd] = useState(() => prefs?.seasonEnd ?? 2025);
   const [player1Name, setPlayer1Name] = useClerkPrefilledName(getDisplayName);
   const [player2Name, setPlayer2Name] = useState("");
   const [joinCode, setJoinCode] = useState(startRace ? "" : prefillCode);
@@ -122,6 +141,25 @@ export default function GuessTheListSetup({
     if (!isLocal) setNickname(value);
   }
 
+  // Full snapshot of the non-sensitive setup choices to restore on a later Play
+  // Again. Join codes, names, and ids are intentionally excluded (the prefs
+  // module would drop them anyway).
+  function setupSnapshot() {
+    return {
+      mode,
+      onlineGameType,
+      classicSub,
+      raceSub,
+      friendSub,
+      targetWins,
+      raceTargetWins,
+      timerMode,
+      categoryType,
+      seasonStart,
+      seasonEnd,
+    };
+  }
+
   async function handleQuickPick(preset) {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
@@ -139,6 +177,13 @@ export default function GuessTheListSetup({
         game.status,
         [legacyGuessTheListRaceSeatKey(game.id)]
       );
+      saveSetupPreferences("guessTheList", {
+        ...setupSnapshot(),
+        mode: "online",
+        onlineGameType: "race",
+        raceSub: "quick",
+        quickPreset: preset,
+      });
       onGameCreated(game, { playerNumber, isOnline: true });
     } catch (err) {
       setError(err.message);
@@ -177,6 +222,7 @@ export default function GuessTheListSetup({
           season_range_start: range.start,
           season_range_end: range.end,
         });
+        saveSetupPreferences("guessTheList", setupSnapshot());
         onGameCreated(resp, { playerNumber: 1, isOnline: true });
       } else {
         const range = effectiveSeasonRange(categoryType, seasonStart, seasonEnd);
@@ -190,6 +236,7 @@ export default function GuessTheListSetup({
           season_range_start: range.start,
           season_range_end: range.end,
         });
+        saveSetupPreferences("guessTheList", setupSnapshot());
         if (isOnline) {
           onGameCreated(resp, { playerNumber: 1, isOnline: true });
         } else {
@@ -272,7 +319,7 @@ export default function GuessTheListSetup({
                   onPick={handleQuickPick}
                   disabled={loading}
                   pendingPreset={pendingPreset}
-                  defaultPreset={DEFAULT_GUESS_THE_LIST_RACE_QUICK_MATCH_PRESET}
+                  defaultPreset={prefs?.quickPreset ?? DEFAULT_GUESS_THE_LIST_RACE_QUICK_MATCH_PRESET}
                 />
               </>
             ) : isRaceJoin ? (
