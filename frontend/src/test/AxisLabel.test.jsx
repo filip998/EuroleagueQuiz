@@ -68,7 +68,7 @@ describe("AxisLabel stat_milestone axis", () => {
   it("renders whatever label the server sends (no hardcoded milestone strings)", () => {
     // A deliberately non-shipped label proves the chip is purely data-driven, so
     // backend calibration changes need no frontend edit.
-    render(
+    const { container } = render(
       <AxisLabel
         axis={{
           axis_type: "stat_milestone",
@@ -78,7 +78,9 @@ describe("AxisLabel stat_milestone axis", () => {
       />
     );
 
-    expect(screen.getByText(/42\+ steals \(career\)/)).toBeInTheDocument();
+    // The long trailing word is split for mobile wrap-safety (#265), so assert
+    // the full visible text via textContent rather than a single text node.
+    expect(container.firstChild).toHaveTextContent("42+ steals (career)");
   });
 
   it("keeps long milestone labels wrap-friendly so the grid can't overflow", () => {
@@ -175,5 +177,82 @@ describe("AxisLabel fallback handling", () => {
     );
 
     expect(screen.getByText("Something new")).toBeInTheDocument();
+  });
+});
+
+describe("AxisLabel mobile word-break guard (#265)", () => {
+  const labelSpan = (container) =>
+    container.querySelector("span.break-words");
+
+  it("keeps the last two letters of a long club name unbreakable", () => {
+    const { container } = render(
+      <AxisLabel
+        axis={{
+          axis_type: "team",
+          value: "1",
+          display_label: "Olympiacos",
+          team_name: "Olympiacos",
+        }}
+      />
+    );
+
+    // A nowrap span holds the trailing 2 chars so a forced break can't strand
+    // a lone "s" ("Olympiaco" / "s").
+    const nowrap = container.querySelector("span.whitespace-nowrap");
+    expect(nowrap).not.toBeNull();
+    expect(nowrap).toHaveTextContent("os");
+    // The full name is still present (accessible name + copy/paste intact).
+    expect(container.firstChild).toHaveTextContent("Olympiacos");
+    // The outer label span keeps emergency wrapping so the head can break.
+    expect(labelSpan(container).className).toContain("break-words");
+  });
+
+  it("protects long teammate names in played_with chips too", () => {
+    const { container } = render(
+      <AxisLabel
+        axis={{
+          axis_type: "played_with",
+          value: "9",
+          display_label: "Spanoulis",
+        }}
+      />
+    );
+
+    const nowrap = container.querySelector("span.whitespace-nowrap");
+    expect(nowrap).toHaveTextContent("is");
+    expect(container.firstChild).toHaveTextContent("Spanoulis");
+  });
+
+  it("leaves short labels unfragmented (no nowrap tail span)", () => {
+    const { container } = render(
+      <AxisLabel
+        axis={{
+          axis_type: "team",
+          value: "1",
+          display_label: "Real Madrid",
+          team_name: "Real Madrid",
+        }}
+      />
+    );
+
+    expect(container.querySelector("span.whitespace-nowrap")).toBeNull();
+    expect(screen.getByText("Real Madrid")).toBeInTheDocument();
+  });
+
+  it("does not split a multi-word label whose long word is non-terminal", () => {
+    const { container } = render(
+      <AxisLabel
+        axis={{
+          axis_type: "team",
+          value: "1",
+          display_label: "Fortitudo Bologna",
+          team_name: "Fortitudo Bologna",
+        }}
+      />
+    );
+
+    // Trailing word "Bologna" (7) stays intact; the label wraps at the space.
+    expect(container.querySelector("span.whitespace-nowrap")).toBeNull();
+    expect(screen.getByText("Fortitudo Bologna")).toBeInTheDocument();
   });
 });

@@ -14,6 +14,7 @@ import ResignControl from "./ResignControl";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
 import TicTacToeGuide from "./TicTacToeGuide";
 import { buildInviteUrl } from "./inviteLink";
+import { splitTrailingGroup } from "./labelWrap";
 import { clearOnlineInfo } from "./onlineRecovery";
 import { forgetQuickMatchSeat } from "./quickMatchSeats";
 
@@ -188,6 +189,9 @@ export function AxisLabel({ axis }) {
   // Milestone labels (e.g. "15+ PPG season", "1,000+ career points") come from
   // the backend display_label so calibration changes need no frontend edit.
   const label = axis?.display_label || axis?.team_name || "\u2014";
+  // Keep the trailing two characters of a long label unbreakable so the narrow
+  // mobile grid tracks can't strand a single letter on the last line (#265).
+  const { head, tail } = splitTrailingGroup(label);
   const prefix =
     isNationality && !countryCode
       ? "\ud83c\udf0d "
@@ -230,7 +234,8 @@ export function AxisLabel({ axis }) {
       )}
       <span className="max-w-full break-words">
         {prefix}
-        {label}
+        {head}
+        {tail ? <span className="whitespace-nowrap">{tail}</span> : null}
       </span>
     </div>
   );
