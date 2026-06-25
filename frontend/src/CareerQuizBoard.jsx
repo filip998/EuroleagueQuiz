@@ -92,6 +92,10 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
   const [soloHintLoading, setSoloHintLoading] = useState(false);
   const [soloHintError, setSoloHintError] = useState("");
   const [soloScore, setSoloScore] = useState({ solved: 0, streak: 0 });
+  // Drives the disabled state of the solo guess input and "Reveal answer" while
+  // a terminal solo action is in flight, so the controls give in-progress
+  // feedback instead of silently dropping a second click.
+  const [soloPending, setSoloPending] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [cancelling, setCancelling] = useState(false);
   const [resigning, setResigning] = useState(false);
@@ -286,6 +290,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
       if (soloPendingRef.current) return;
       const requestedRoundToken = soloRound.round_token;
       soloPendingRef.current = true;
+      setSoloPending(true);
       try {
         const result = await submitCareerSoloGuess(requestedRoundToken, player.id);
         // Drop a response that resolved after the player already advanced rounds.
@@ -306,6 +311,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
         }
       } finally {
         soloPendingRef.current = false;
+        setSoloPending(false);
       }
       return;
     }
@@ -337,6 +343,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
     if (soloPendingRef.current) return;
     const requestedRoundToken = soloRound.round_token;
     soloPendingRef.current = true;
+    setSoloPending(true);
     try {
       const result = await revealCareerSoloAnswer(requestedRoundToken);
       if (soloRoundTokenRef.current !== requestedRoundToken) return;
@@ -350,6 +357,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
       }
     } finally {
       soloPendingRef.current = false;
+      setSoloPending(false);
     }
   }
 
@@ -530,6 +538,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
             hintLoading={soloHintLoading}
             hintExhausted={soloHints.exhausted}
             answered={Boolean(answer)}
+            pending={soloPending}
             onRevealHint={revealSoloHint}
             onRevealAnswer={revealSolo}
           />
@@ -546,7 +555,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
             <div>
               <CareerGuessBox
                 onGuess={handleGuess}
-                disabled={Boolean(answer)}
+                disabled={Boolean(answer) || soloPending}
                 roundKey={roundKey}
                 bare
               />
@@ -756,6 +765,7 @@ function SoloHud({
   hintLoading,
   hintExhausted,
   answered,
+  pending,
   onRevealHint,
   onRevealAnswer,
 }) {
@@ -798,7 +808,7 @@ function SoloHud({
         <button
           type="button"
           onClick={onRevealAnswer}
-          disabled={answered}
+          disabled={answered || pending}
           className="rounded-xl border border-elq-border px-4 py-2 font-semibold text-elq-text disabled:cursor-not-allowed disabled:opacity-50"
         >
           Reveal answer
@@ -816,7 +826,7 @@ function SoloHintDetails({ hints, error }) {
 
   return (
     <section
-      aria-label="Solo career hints"
+      aria-label={hasContent ? "Solo career hints" : undefined}
       data-testid="career-solo-hints"
       className={hasContent ? "mt-4 space-y-3" : ""}
     >

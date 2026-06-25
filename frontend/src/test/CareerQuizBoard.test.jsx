@@ -928,10 +928,8 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(screen.getByText("Revealed One")).toBeInTheDocument();
   });
 
-  it("counts a correct solo guess once even if it is submitted twice in quick succession", async () => {
-    autocompleteCareerPlayer
-      .mockResolvedValueOnce({ players: [{ id: 80, name: "Once Only" }] })
-      .mockResolvedValueOnce({ players: [{ id: 80, name: "Once Only" }] });
+  it("locks the solo guess controls while a guess is in flight so a round counts once", async () => {
+    autocompleteCareerPlayer.mockResolvedValueOnce({ players: [{ id: 80, name: "Once Only" }] });
     let resolveGuess;
     submitCareerSoloGuess.mockReturnValueOnce(
       new Promise((resolve) => {
@@ -948,9 +946,11 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     );
 
     await selectCareerPlayer("Once Only");
-    // Submitting again while the first guess is still in flight must be ignored
-    // so the round is scored exactly once.
-    await selectCareerPlayer("Once Only");
+
+    // While the guess is in flight the input and Reveal answer are disabled, so
+    // the same round cannot be submitted (or resolved) twice.
+    expect(screen.getByPlaceholderText("Type a player name...")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reveal answer" })).toBeDisabled();
 
     await act(async () => {
       resolveGuess({ correct: true, answer: careerAnswer({ id: 80, name: "Once Only" }) });
@@ -961,7 +961,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(submitCareerSoloGuess).toHaveBeenCalledTimes(1);
   });
 
-  it("reveals the solo answer once even if Reveal answer is clicked repeatedly", async () => {
+  it("locks Reveal answer while a reveal is in flight so it resolves once", async () => {
     let resolveReveal;
     revealCareerSoloAnswer.mockReturnValueOnce(
       new Promise((resolve) => {
@@ -978,8 +978,13 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     );
 
     const revealButton = screen.getByRole("button", { name: "Reveal answer" });
-    fireEvent.click(revealButton);
-    // A second click while the reveal is still in flight must be ignored.
+    await act(async () => {
+      fireEvent.click(revealButton);
+    });
+
+    // The button disables while the reveal is in flight, so a second click
+    // cannot resolve the round twice.
+    expect(revealButton).toBeDisabled();
     fireEvent.click(revealButton);
 
     await act(async () => {
