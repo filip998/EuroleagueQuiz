@@ -287,6 +287,7 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     expect(screen.queryByText("Accept no answer")).not.toBeInTheDocument();
     expect(screen.queryByText("Decline")).not.toBeInTheDocument();
     expect(screen.queryByText("Nobody knows")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("career-no-answer-offer-prompt")).not.toBeInTheDocument();
   });
 
   it("does not show Player 2 as the winner when an unattended public game has no winner", () => {
@@ -684,6 +685,39 @@ describe("CareerQuizBoard multiplayer reveals", () => {
     });
 
     expect(screen.getByText("No-answer offer sent.")).toBeInTheDocument();
+    expect(screen.queryByTestId("career-no-answer-offer-prompt")).not.toBeInTheDocument();
+  });
+
+  it("prompts the receiver to explain the Accept/Decline no-answer offer", () => {
+    render(
+      <CareerQuizBoard
+        initialState={activeCareerGame()}
+        onlineInfo={{ playerNumber: 2 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTestId("career-no-answer-offer-prompt")).not.toBeInTheDocument();
+    expect(screen.getByText("Nobody knows")).toBeInTheDocument();
+
+    emitCareerRealtimeState({
+      state: activeCareerGame({
+        pending_no_answer_from: 1,
+        pending_no_answer_to: 2,
+      }),
+      result: "no_answer_offered",
+    });
+
+    expect(screen.getByTestId("career-no-answer-offer-prompt")).toHaveTextContent(
+      "Your opponent doesn't know — accept to reveal the answer and skip this round, or decline to keep playing."
+    );
+    const accept = screen.getByRole("button", { name: "Accept no answer" });
+    const decline = screen.getByRole("button", { name: "Decline" });
+    expect(accept).toHaveAttribute("aria-describedby", "career-no-answer-offer-prompt");
+    expect(decline).toHaveAttribute("aria-describedby", "career-no-answer-offer-prompt");
+    expect(screen.queryByText("Nobody knows")).not.toBeInTheDocument();
+    expect(screen.queryByText("No-answer offer sent.")).not.toBeInTheDocument();
   });
 
   it("uses the same feedback tones in solo mode", async () => {

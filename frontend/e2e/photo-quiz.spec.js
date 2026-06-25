@@ -279,6 +279,9 @@ test.describe.serial("Photo Quiz Flow", () => {
       await expect(playerB.getByRole("button", { name: "Accept no answer" })).toBeVisible({
         timeout: 10000,
       });
+      await expect(
+        playerB.getByText("accept to reveal the answer and skip this round", { exact: false })
+      ).toBeVisible();
       await playerB.getByRole("button", { name: "Decline" }).click();
       await expect(playerA.getByRole("button", { name: "Nobody knows" })).toBeVisible({
         timeout: 10000,
