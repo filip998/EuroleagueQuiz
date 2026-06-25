@@ -46,6 +46,8 @@ const PHOTO_FEEDBACK_MESSAGES = {
 };
 const PHOTO_MULTIPLAYER_SUCCESS_RESULTS = new Set(["round_won", "match_won"]);
 const NO_ANSWER_OFFER_SENT_MESSAGE = PHOTO_FEEDBACK_MESSAGES.noAnswerOfferSent;
+const NO_ANSWER_OFFER_RECEIVED_MESSAGE =
+  "Your opponent doesn't know — accept to reveal the answer and skip this round, or decline to keep playing.";
 const PHOTO_FEEDBACK_TONES = {
   [PHOTO_FEEDBACK_MESSAGES.correct]: "success",
   [PHOTO_FEEDBACK_MESSAGES.soloWrong]: "error",
@@ -538,9 +540,18 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
                 )}
                 {!solo && canRespondNoAnswer && (
                   <>
+                    <p
+                      id="photo-no-answer-offer-prompt"
+                      data-testid="photo-no-answer-offer-prompt"
+                      role="status"
+                      className="basis-full text-sm font-semibold text-elq-text"
+                    >
+                      {NO_ANSWER_OFFER_RECEIVED_MESSAGE}
+                    </p>
                     <button
                       onClick={() => respondNoAnswer(true)}
                       disabled={roundLocked}
+                      aria-describedby="photo-no-answer-offer-prompt"
                       className="px-5 py-2 rounded-xl bg-elq-cta text-white font-bold disabled:opacity-50"
                     >
                       Accept no answer
@@ -548,6 +559,7 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
                     <button
                       onClick={() => respondNoAnswer(false)}
                       disabled={roundLocked}
+                      aria-describedby="photo-no-answer-offer-prompt"
                       className="px-5 py-2 rounded-xl border border-elq-border disabled:opacity-50"
                     >
                       Decline

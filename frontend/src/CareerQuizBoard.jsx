@@ -47,6 +47,8 @@ const CAREER_FEEDBACK_MESSAGES = {
 };
 const CAREER_MULTIPLAYER_SUCCESS_RESULTS = new Set(["round_won", "match_won"]);
 const NO_ANSWER_OFFER_SENT_MESSAGE = CAREER_FEEDBACK_MESSAGES.noAnswerOfferSent;
+const NO_ANSWER_OFFER_RECEIVED_MESSAGE =
+  "Your opponent doesn't know — accept to reveal the answer and skip this round, or decline to keep playing.";
 const CAREER_FEEDBACK_TONES = {
   [CAREER_FEEDBACK_MESSAGES.correct]: "success",
   [CAREER_FEEDBACK_MESSAGES.soloWrong]: "error",
@@ -654,9 +656,18 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
             <div className="mt-6 flex flex-wrap gap-3">
               {!isPublicQuickMatch && game?.pending_no_answer_to === playerNumber && (
                 <>
+                  <p
+                    id="career-no-answer-offer-prompt"
+                    data-testid="career-no-answer-offer-prompt"
+                    role="status"
+                    className="basis-full text-sm font-semibold text-elq-text"
+                  >
+                    {NO_ANSWER_OFFER_RECEIVED_MESSAGE}
+                  </p>
                   <button
                     onClick={() => respondNoAnswer(true)}
                     disabled={roundLocked}
+                    aria-describedby="career-no-answer-offer-prompt"
                     className="px-5 py-2 rounded-xl bg-elq-cta text-white font-bold disabled:opacity-50"
                   >
                     Accept no answer
@@ -664,6 +675,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
                   <button
                     onClick={() => respondNoAnswer(false)}
                     disabled={roundLocked}
+                    aria-describedby="career-no-answer-offer-prompt"
                     className="px-5 py-2 rounded-xl border border-elq-border disabled:opacity-50"
                   >
                     Decline

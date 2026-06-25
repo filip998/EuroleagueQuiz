@@ -643,6 +643,7 @@ describe("PhotoQuizBoard no-answer responses", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Accept no answer" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("photo-no-answer-offer-prompt")).not.toBeInTheDocument();
   });
 });
 
@@ -997,6 +998,17 @@ describe("PhotoQuizBoard Quick Match", () => {
 
     expect(screen.getByRole("button", { name: "Accept no answer" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Decline" })).toBeInTheDocument();
+    expect(screen.getByTestId("photo-no-answer-offer-prompt")).toHaveTextContent(
+      "Your opponent doesn't know — accept to reveal the answer and skip this round, or decline to keep playing."
+    );
+    expect(screen.getByRole("button", { name: "Accept no answer" })).toHaveAttribute(
+      "aria-describedby",
+      "photo-no-answer-offer-prompt"
+    );
+    expect(screen.getByRole("button", { name: "Decline" })).toHaveAttribute(
+      "aria-describedby",
+      "photo-no-answer-offer-prompt"
+    );
   });
 });
 
