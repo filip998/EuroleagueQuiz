@@ -89,7 +89,7 @@ function SoloAnswerReveal({ round }) {
               {clueText(cell.row_axis)} × {clueText(cell.col_axis)}
             </div>
             {cell.claimed_player_name && (
-              <div className="text-sm text-elq-player1 mt-1">
+              <div className="text-sm text-emerald-700 mt-1">
                 Your pick: {cell.claimed_player_name}
               </div>
             )}
@@ -863,8 +863,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                 const showClaimedSamples =
                   inTransition && claimed && cell?.sample_answers?.length > 0;
 
+                // Solo has no opponent, so a claimed cell uses a neutral/positive
+                // green accent instead of the Player-1 blue identity color (which
+                // implies a second player). Local 1v1 / Online keep blue/red.
                 let cellBg = "border-elq-border bg-white";
-                if (claimed === 1) cellBg = "border-elq-player1/30 bg-elq-player1-bg";
+                if (isSolo && claimed) cellBg = "border-emerald-600/30 bg-emerald-100";
+                else if (claimed === 1) cellBg = "border-elq-player1/30 bg-elq-player1-bg";
                 else if (claimed === 2) cellBg = "border-elq-player2/30 bg-elq-player2-bg";
                 else if (isClickable) cellBg = "border-elq-border bg-white cursor-pointer group hover:border-elq-orange/50 hover:shadow-md active:bg-elq-orange/5 motion-safe:hover:scale-[1.02] motion-safe:active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange focus-visible:ring-offset-2 focus-visible:z-10";
                 else if (showSamples) cellBg = "border-elq-border bg-sky-50/50";
@@ -889,7 +893,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                         )}
                         <div
                           className={`text-xs sm:text-sm font-bold truncate w-full ${
-                            claimed === 1 ? "text-elq-player1" : "text-elq-player2"
+                            isSolo && claimed
+                              ? "text-emerald-800"
+                              : claimed === 1
+                                ? "text-elq-player1"
+                                : "text-elq-player2"
                           }`}
                         >
                           {cell.claimed_player_name || `P${claimed}`}
@@ -899,7 +907,9 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                             {cell.sample_answers.map((name, i) => (
                               <div
                                 key={i}
-                                className="text-[11px] not-italic text-elq-muted leading-tight truncate"
+                                className={`text-[11px] not-italic leading-tight truncate ${
+                                  isSolo ? "text-emerald-700" : "text-elq-muted"
+                                }`}
                               >
                                 {name}
                               </div>

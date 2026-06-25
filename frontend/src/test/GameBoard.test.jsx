@@ -643,6 +643,137 @@ describe("GameBoard solo stakes", () => {
   });
 });
 
+describe("GameBoard claimed-cell colors (issue #262)", () => {
+  // Builds an active board where the given cells are pre-claimed so the board
+  // grid renders the claimed-cell styling we want to assert on.
+  function roundWithClaims(claims) {
+    return {
+      columns: [axis("A"), axis("B"), axis("C")],
+      rows: [axis("1"), axis("2"), axis("3")],
+      cells: boardCells().map((cell) => {
+        const claim = claims.find(
+          (c) => c.row === cell.row_index && c.col === cell.col_index
+        );
+        return claim
+          ? {
+              ...cell,
+              claimed_by_player: claim.player,
+              claimed_player_name: claim.name,
+            }
+          : cell;
+      }),
+    };
+  }
+
+  it("renders solo claimed cells with a neutral green accent, not Player-1 blue", () => {
+    render(
+      <GameBoard
+        initialState={soloGame({
+          round: roundWithClaims([{ row: 0, col: 0, player: 1, name: "Solo Claim Pick" }]),
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    const nameEl = screen.getByText("Solo Claim Pick");
+    const button = nameEl.closest("button");
+    expect(button.className).toContain("bg-emerald-100");
+    expect(button.className).not.toContain("bg-elq-player1-bg");
+    expect(nameEl.className).toContain("text-emerald-800");
+    expect(nameEl.className).not.toContain("text-elq-player1");
+  });
+
+  it("keeps the Player-1 blue identity for local 1v1 claimed cells", () => {
+    render(
+      <GameBoard
+        initialState={activeGame({
+          mode: "local_two_player",
+          round: roundWithClaims([{ row: 0, col: 0, player: 1, name: "Local Blue Pick" }]),
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    const nameEl = screen.getByText("Local Blue Pick");
+    const button = nameEl.closest("button");
+    expect(button.className).toContain("bg-elq-player1-bg");
+    expect(button.className).not.toContain("bg-emerald-100");
+    expect(nameEl.className).toContain("text-elq-player1");
+    expect(nameEl.className).not.toContain("text-emerald-800");
+  });
+
+  it("keeps the Player-1-blue / Player-2-red identity for online claimed cells", () => {
+    render(
+      <GameBoard
+        initialState={activeGame({
+          mode: "online_friend",
+          round: roundWithClaims([
+            { row: 0, col: 0, player: 1, name: "Online P1 Pick" },
+            { row: 0, col: 1, player: 2, name: "Online P2 Pick" },
+          ]),
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    const p1 = screen.getByText("Online P1 Pick");
+    const p2 = screen.getByText("Online P2 Pick");
+    expect(p1.closest("button").className).toContain("bg-elq-player1-bg");
+    expect(p1.closest("button").className).not.toContain("bg-emerald-100");
+    expect(p1.className).toContain("text-elq-player1");
+    expect(p2.closest("button").className).toContain("bg-elq-player2-bg");
+    expect(p2.className).toContain("text-elq-player2");
+  });
+
+  it("renders the solo answer-reveal pick in green, not Player-1 blue", () => {
+    render(
+      <GameBoard
+        initialState={soloGame({
+          status: "finished",
+          winner_player: 1,
+          round: {
+            columns: [axis("A"), axis("B"), axis("C")],
+            rows: [axis("1"), axis("2"), axis("3")],
+            status: "completed",
+            winner_player: 1,
+            cells: boardCells().map((cell, i) =>
+              i === 0
+                ? {
+                    ...cell,
+                    claimed_by_player: 1,
+                    claimed_player_name: "Reveal Pick",
+                    sample_answers: ["Vasilije Micic"],
+                  }
+                : cell
+            ),
+          },
+          solo_progress: {
+            claimed_cells: 1,
+            total_cells: 9,
+            strikes_used: 0,
+            strikes_remaining: 3,
+            strike_limit: 3,
+            boards_won: 0,
+          },
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    const pickEl = screen.getByText(/Your pick: Reveal Pick/);
+    expect(pickEl.className).toContain("text-emerald-700");
+    expect(pickEl.className).not.toContain("text-elq-player1");
+  });
+});
+
 describe("GameBoard end-of-game result", () => {
   it("reveals the inline result and clears the waiting indicator when the opponent resigns", async () => {
     // Player 2 is the viewer and it is player 1's turn, so the stale-prone
