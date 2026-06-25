@@ -311,13 +311,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
       </div>
       {isOnline && (<div className="bg-elq-bg text-center py-1 text-[11px] text-elq-muted border-b border-elq-border flex-shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block mr-1.5" />You are <strong>{game[`player${myPlayer}_name`]}</strong>{!isMyTurn && <span className="text-elq-orange ml-1">&mdash; Opponent&apos;s turn</span>}</div>)}
       {isMissingOnlineSeat && (<div className="bg-amber-50 text-center py-1 text-[11px] text-amber-700 border-b border-amber-100 flex-shrink-0">{onlineSeatMissingMessage}</div>)}
-      {isSolo ? (
-      <div className="bg-white border-b border-elq-border flex-shrink-0">
-        <div className="max-w-5xl mx-auto px-3 py-2 text-center">
-          <span className="font-semibold text-sm text-elq-player1">{game.player1_name}</span>
-        </div>
-      </div>
-      ) : (
+      {isSolo ? null : (
       <div className="bg-white border-b border-elq-border flex-shrink-0">
         <div className="max-w-5xl mx-auto px-3 py-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 flex-1 min-w-0"><span className={`font-semibold text-sm truncate ${game.current_player === 1 && game.status === "active" ? "text-elq-player1" : "text-elq-muted"}`}>{game.player1_name}</span><span className="text-xl font-bold text-elq-dark">{game.player1_score}</span>{game.current_player === 1 && game.status === "active" && <span className="w-1.5 h-1.5 rounded-full bg-elq-player1 animate-pulse flex-shrink-0" />}</div>
