@@ -49,6 +49,10 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
   const [targetWins, setTargetWins] = useState(3);
   const [timerMode, setTimerMode] = useState("40s");
   const [player1Name, setPlayer1Name] = useClerkPrefilledName(getDisplayName);
+  // Local 1v1's "Player 1" gets its own non-prefilled state so both local fields
+  // stay neutral placeholders ("Player 1"/"Player 2") instead of seeding the
+  // signed-in guest/display name into Player 1 only (which implied "you").
+  const [localPlayer1Name, setLocalPlayer1Name] = useState("");
   const [player2Name, setPlayer2Name] = useState("");
   const [joinCode, setJoinCode] = useState(prefillCode);
   const [error, setError] = useState(null);
@@ -71,8 +75,10 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
 
   const { pools } = useQuickMatchPools(isQuick);
 
-  // The name field doubles as the shared nickname in solo/online, but as the
-  // local "Player 1" label in local 1v1 — only persist the former.
+  // The shared name field is the persisted nickname in solo / online / friend.
+  // Local 1v1's "Player 1" uses a separate, non-persisted state
+  // (localPlayer1Name), so this handler only drives the nickname field; the
+  // `!isLocal` guard stays as a defensive backstop.
   function handlePlayer1NameChange(value) {
     setPlayer1Name(value);
     if (!isLocal) setNickname(value);
@@ -126,8 +132,8 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
           mode: BACKEND_MODE[mode],
           target_wins: targetWins,
           timer_mode: mode === "solo" ? "unlimited" : timerMode,
-          player1_name: player1Name || null,
-          player2_name: isLocal ? player2Name || null : null,
+          player1_name: (isLocal ? localPlayer1Name : player1Name).trim() || null,
+          player2_name: isLocal ? player2Name.trim() || null : null,
         });
         if (isOnline) {
           onGameCreated(resp, { playerNumber: 1, isOnline: true });
@@ -233,8 +239,8 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "" 
                 ) : (
                   <div className="space-y-4 mb-6">
                     <NameField
-                      value={player1Name}
-                      onChange={handlePlayer1NameChange}
+                      value={isLocal ? localPlayer1Name : player1Name}
+                      onChange={isLocal ? setLocalPlayer1Name : handlePlayer1NameChange}
                       label={isLocal ? "Player 1" : "Your Name"}
                       placeholder={isLocal ? "Player 1" : "Your name"}
                     />

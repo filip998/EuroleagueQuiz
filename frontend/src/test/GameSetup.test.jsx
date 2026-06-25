@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import GameSetup from "../GameSetup";
-import { quickMatchTicTacToe } from "../api";
+import { createGame, quickMatchTicTacToe } from "../api";
 import { AuthContext } from "../identityBridge";
 
 vi.mock("../api", () => ({
@@ -334,5 +334,153 @@ describe("GameSetup", () => {
     fireEvent.click(screen.getByText("Local 1v1"));
     expect(screen.getByText("Player 1")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Player 2")).toBeInTheDocument();
+    // The Player 1 field must NOT seed the signed-in Clerk username — both local
+    // fields stay neutral placeholders (issue #264).
+    expect(screen.getByLabelText("Player 1")).toHaveValue("");
+    expect(screen.getByLabelText("Player 2")).toHaveValue("");
+  });
+
+  // --- Local 1v1 neutral-placeholder behavior (issue #264) ---
+
+  it("renders both Local 1v1 name fields empty with neutral placeholders (no display-name prefill)", () => {
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+
+    // Default Online Quick Match prefills "Your name" with the guest name...
+    expect(screen.getByPlaceholderText("Your name").value).toMatch(/^Guest \d{4}$/);
+
+    fireEvent.click(screen.getByText("Local 1v1"));
+
+    const player1 = screen.getByLabelText("Player 1");
+    const player2 = screen.getByLabelText("Player 2");
+    expect(player1).toHaveValue("");
+    expect(player1).toHaveAttribute("placeholder", "Player 1");
+    expect(player1.value).not.toMatch(/^Guest \d{4}$/);
+    expect(player2).toHaveValue("");
+    expect(player2).toHaveAttribute("placeholder", "Player 2");
+  });
+
+  it("restores the display-name prefill when switching Local 1v1 back to Online", () => {
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+
+    const guestName = screen.getByPlaceholderText("Your name").value;
+    expect(guestName).toMatch(/^Guest \d{4}$/);
+
+    fireEvent.click(screen.getByText("Local 1v1"));
+    expect(screen.getByLabelText("Player 1")).toHaveValue("");
+
+    fireEvent.click(screen.getByText("Online"));
+    // Online lands back on Quick Match with the prefilled shared name intact.
+    expect(screen.getByPlaceholderText("Your name")).toHaveValue(guestName);
+  });
+
+  it("preserves a typed Local Player 1 name across mode toggles and never leaks it into the shared name", () => {
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+
+    const guestName = screen.getByPlaceholderText("Your name").value;
+
+    fireEvent.click(screen.getByText("Local 1v1"));
+    fireEvent.change(screen.getByLabelText("Player 1"), { target: { value: "Bob" } });
+
+    // The typed Local name must not bleed into the shared Online/Solo name.
+    fireEvent.click(screen.getByText("Online"));
+    expect(screen.getByPlaceholderText("Your name")).toHaveValue(guestName);
+
+    // ...and coming back to Local keeps the typed Player 1 name.
+    fireEvent.click(screen.getByText("Local 1v1"));
+    expect(screen.getByLabelText("Player 1")).toHaveValue("Bob");
+  });
+
+  it("does not leak a typed shared Online name into the Local 1v1 Player 1 field", () => {
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Your name"), {
+      target: { value: "Alice" },
+    });
+
+    fireEvent.click(screen.getByText("Local 1v1"));
+    expect(screen.getByLabelText("Player 1")).toHaveValue("");
+
+    // Returning to Online still shows the typed shared name.
+    fireEvent.click(screen.getByText("Online"));
+    expect(screen.getByPlaceholderText("Your name")).toHaveValue("Alice");
+  });
+
+  it("does not persist the Local 1v1 Player 1 name as the saved nickname", () => {
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+
+    fireEvent.click(screen.getByText("Local 1v1"));
+    fireEvent.change(screen.getByLabelText("Player 1"), { target: { value: "Bob" } });
+    fireEvent.change(screen.getByLabelText("Player 2"), { target: { value: "Cara" } });
+
+    // Local names are scratch labels, not the shared nickname.
+    expect(globalThis.localStorage.getItem("elq_nickname")).toBeNull();
+  });
+
+  it("submits Local 1v1 with empty fields as null player names (backend defaults to Player 1/2)", async () => {
+    createGame.mockResolvedValue({ state: { id: 1 } });
+
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+    fireEvent.click(screen.getByText("Local 1v1"));
+    fireEvent.click(screen.getByText("Start Game"));
+
+    await waitFor(() => expect(createGame).toHaveBeenCalled());
+    expect(createGame).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "local_two_player",
+        player1_name: null,
+        player2_name: null,
+      })
+    );
+  });
+
+  it("submits Local 1v1 with whitespace-only fields as null player names", async () => {
+    createGame.mockResolvedValue({ state: { id: 1 } });
+
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+    fireEvent.click(screen.getByText("Local 1v1"));
+    fireEvent.change(screen.getByLabelText("Player 1"), { target: { value: "   " } });
+    fireEvent.change(screen.getByLabelText("Player 2"), { target: { value: "  " } });
+    fireEvent.click(screen.getByText("Start Game"));
+
+    await waitFor(() => expect(createGame).toHaveBeenCalled());
+    expect(createGame).toHaveBeenCalledWith(
+      expect.objectContaining({ player1_name: null, player2_name: null })
+    );
+  });
+
+  it("submits Local 1v1 with the typed Player 1 / Player 2 names", async () => {
+    createGame.mockResolvedValue({ state: { id: 1 } });
+
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+    fireEvent.click(screen.getByText("Local 1v1"));
+    fireEvent.change(screen.getByLabelText("Player 1"), { target: { value: "Bob" } });
+    fireEvent.change(screen.getByLabelText("Player 2"), { target: { value: "Cara" } });
+    fireEvent.click(screen.getByText("Start Game"));
+
+    await waitFor(() => expect(createGame).toHaveBeenCalled());
+    expect(createGame).toHaveBeenCalledWith(
+      expect.objectContaining({ player1_name: "Bob", player2_name: "Cara" })
+    );
+  });
+
+  it("submits Solo with the shared display name, not the Local Player 1 state, after visiting Local", async () => {
+    createGame.mockResolvedValue({ state: { id: 1 } });
+
+    render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
+    const guestName = screen.getByPlaceholderText("Your name").value;
+
+    // Visit Local, type a Local Player 1 name, then go to Solo and start.
+    fireEvent.click(screen.getByText("Local 1v1"));
+    fireEvent.change(screen.getByLabelText("Player 1"), { target: { value: "LocalOnly" } });
+    fireEvent.click(screen.getByText("Solo"));
+    fireEvent.click(screen.getByText("Start Game"));
+
+    await waitFor(() => expect(createGame).toHaveBeenCalled());
+    expect(createGame).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "single_player",
+        player1_name: guestName,
+      })
+    );
   });
 });
