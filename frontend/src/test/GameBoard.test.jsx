@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import GameBoard from "../GameBoard";
 import { submitMove, giveUpGame, cancelQuickMatchTicTacToe } from "../api";
@@ -1169,3 +1169,158 @@ describe("GameBoard height-aware board sizing (issue #259)", () => {
     expect(onlineReserve).toBeGreaterThan(soloReserve);
   });
 });
+
+describe("GameBoard desktop Solo command rail (issue #266)", () => {
+  // jsdom has no matchMedia, so the component defaults to the stacked/mobile
+  // layout everywhere else. Installing a matches=true stub flips useMediaQuery's
+  // (min-width: 1024px) check on so the desktop two-pane Solo layout renders.
+  let originalMatchMedia;
+
+  beforeEach(() => {
+    originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn((query) => ({
+      matches: query.includes("min-width: 1024px"),
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+  });
+
+  afterEach(() => {
+    if (originalMatchMedia === undefined) {
+      delete window.matchMedia;
+    } else {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  const sizingContainer = (container) =>
+    [...container.querySelectorAll("div[style]")].find((d) =>
+      d.style.getPropertyValue("--ttt-reserve")
+    );
+
+  const boardRows = (container) =>
+    [...container.querySelectorAll("div[style]")].filter((d) =>
+      (d.style.gridTemplateColumns || "").includes("var(--ttt-cell)")
+    );
+
+  it("renders the left command rail without duplicating the board or progress", () => {
+    const { container } = render(
+      <GameBoard
+        initialState={soloGame({
+          solo_progress: {
+            claimed_cells: 4,
+            total_cells: 9,
+            strikes_used: 1,
+            strikes_remaining: 2,
+            strike_limit: 3,
+            boards_won: 1,
+          },
+        })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    // The two-pane rail wrapper is present and the progress/board/controls each
+    // render exactly once (no CSS-hidden duplicate layout).
+    const rail = screen.getByLabelText("TicTacToe solo command rail");
+    expect(rail).toBeInTheDocument();
+    expect(screen.getAllByLabelText("TicTacToe solo progress")).toHaveLength(1);
+    expect(within(rail).getByLabelText("TicTacToe solo progress")).toBeInTheDocument();
+    expect(screen.getAllByText("Show answers")).toHaveLength(1);
+    expect(within(rail).getByText("Show answers")).toBeInTheDocument();
+
+    // Rail teaches via "How to play"; the always-on clue legend and the full
+    // guide's first-run card / objective line are intentionally dropped here.
+    expect(screen.getAllByTestId("ttt-howto-trigger")).toHaveLength(1);
+    expect(within(rail).getByTestId("ttt-howto-trigger")).toBeInTheDocument();
+    expect(screen.queryByTestId("ttt-legend-trigger")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ttt-objective")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ttt-howto")).not.toBeInTheDocument();
+
+    // A single board (1 header row + 3 cell rows) renders in the board pane.
+    expect(boardRows(container)).toHaveLength(4);
+
+    // The "Solo" header indicator replaces the empty placeholder.
+    expect(screen.getByText("Solo")).toBeInTheDocument();
+  });
+
+  it("shrinks the board reserve below the stacked solo value so the board uses the freed height", () => {
+    const { container } = render(
+      <GameBoard
+        initialState={soloGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    const reserve = sizingContainer(container).style.getPropertyValue("--ttt-reserve");
+    expect(reserve).toMatch(/px$/);
+    // Less chrome above the board than the 404px stacked solo reserve.
+    expect(parseInt(reserve, 10)).toBeLessThan(404);
+    // Cell var still height-aware so short laptops shrink the board to fit.
+    expect(sizingContainer(container).style.getPropertyValue("--ttt-cell")).toContain("svh");
+  });
+
+  it("reveals answers from the rail and then shows the neutral result screen", async () => {
+    const revealRound = completedRound({
+      status: "drawn",
+      winner_player: null,
+    });
+    giveUpGame.mockResolvedValue({
+      state: soloGame({
+        status: "finished",
+        winner_player: null,
+        round: revealRound,
+      }),
+      result: "gave_up",
+      completedRound: revealRound,
+    });
+
+    render(
+      <GameBoard
+        initialState={soloGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    const rail = screen.getByLabelText("TicTacToe solo command rail");
+    fireEvent.click(within(rail).getByText("Show answers"));
+
+    await waitFor(() => expect(giveUpGame).toHaveBeenCalledWith(7));
+    // The reveal feedback banner surfaces inside the rail, not the board pane.
+    expect(await screen.findByText("👀 Answers revealed.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("See Result"));
+
+    expect(
+      await screen.findByRole("heading", { name: "Answers revealed" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+  });
+
+  it("keeps Local 1v1 on the stacked layout even at desktop width", () => {
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player", player2_name: "Bob" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    // Non-solo never uses the Solo rail, even on a wide screen.
+    expect(screen.queryByLabelText("TicTacToe solo command rail")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("TicTacToe multiplayer scoreboard")).toBeInTheDocument();
+  });
+});
+

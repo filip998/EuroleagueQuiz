@@ -12,7 +12,8 @@ import ClubLogo from "./ClubLogo";
 import WaitingLobby from "./WaitingLobby";
 import ResignControl from "./ResignControl";
 import QuickMatchSearchingLobby from "./QuickMatchSearchingLobby";
-import TicTacToeGuide from "./TicTacToeGuide";
+import TicTacToeGuide, { HowToPlayControl } from "./TicTacToeGuide";
+import { useMediaQuery } from "./useMediaQuery";
 import { buildInviteUrl } from "./inviteLink";
 import { splitTrailingGroup } from "./labelWrap";
 import { clearOnlineInfo } from "./onlineRecovery";
@@ -256,6 +257,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   // A solo / local game must never be treated as online, even if `onlineInfo`
   // carries a stale seat recovered for a reused game id (see onlineRecovery.js).
   const isOnline = game?.mode === "online_friend" && Boolean(onlineInfo?.isOnline);
+  // Desktop Solo gets the left command rail + board pane layout (issue #266); the
+  // hook is matchMedia-guarded so it resolves to false in jsdom, keeping every
+  // existing test (and mobile/local/online) on the stacked column. Called here,
+  // before any early return, so hook order is stable across renders.
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const isSoloDesktop = isSolo && isDesktop;
   const myPlayer = onlineInfo?.playerNumber;
   const realtimeUnavailableMessage = "Realtime connection unavailable. Reconnecting...";
 
@@ -566,14 +573,25 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   // against real 1366x768 / 1280x900 measurements (incl. tall played_with boards
   // with the banner visible); natural page scroll remains the ultimate fallback so
   // nothing is ever clipped.
-  const boardReserve = isSolo ? "404px" : isOnline ? "552px" : "524px";
+  //
+  // Desktop Solo (issue #266) moves the scoreboard, feedback and guide into the
+  // left command rail, so the only chrome above the board pane is the page header
+  // + the column-header row. That frees a lot of vertical space, so the reserve
+  // drops sharply and the per-cell cap is raised to use the freed height/width.
+  const boardReserve = isSoloDesktop
+    ? "230px"
+    : isSolo
+      ? "404px"
+      : isOnline
+        ? "552px"
+        : "524px";
+  const boardCellMax = isSoloDesktop ? "240px" : "176px";
   const boardSizingStyle = {
     animationDelay: "100ms",
     containerType: "inline-size",
     "--ttt-reserve": boardReserve,
     "--ttt-axis": "clamp(72px, 14cqw, 92px)",
-    "--ttt-cell":
-      "min(calc((100cqw - var(--ttt-axis) - 18px) / 3), clamp(72px, calc((100svh - var(--ttt-reserve)) / 3), 176px))",
+    "--ttt-cell": `min(calc((100cqw - var(--ttt-axis) - 18px) / 3), clamp(72px, calc((100svh - var(--ttt-reserve)) / 3), ${boardCellMax}))`,
   };
   const boardGridStyle = {
     gridTemplateColumns: "var(--ttt-axis) repeat(3, var(--ttt-cell))",
@@ -650,6 +668,343 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     );
   }
 
+  // Render fragments shared by the stacked column (mobile Solo, Local 1v1,
+  // Online) and the desktop Solo command rail (issue #266). Each is built once
+  // and referenced from a single live layout branch, so unscoped test queries
+  // (e.g. getByText("Show answers")) never match duplicate nodes.
+  const soloProgressCard = isSolo ? (
+    <div
+      className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-3 sm:p-4 mb-3 animate-fade-in-up"
+      aria-label="TicTacToe solo progress"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-elq-muted">
+            Objective
+          </div>
+          <div className="text-base sm:text-lg font-bold text-elq-dark">
+            Make three in a row
+          </div>
+          {soloProgress.boardsWon > 0 && (
+            <div className="mt-0.5 text-xs font-semibold text-elq-muted">
+              Boards won: {soloProgress.boardsWon}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-5 sm:gap-7">
+          <div className="text-center">
+            <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-elq-muted">
+              Claimed
+            </div>
+            <div className="font-display text-2xl sm:text-3xl font-bold leading-none text-elq-dark">
+              {soloProgress.claimedCells}/{soloProgress.totalCells}
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-elq-muted">
+              Strikes left
+            </div>
+            <div
+              className="mt-1 flex items-center justify-center gap-1.5"
+              role="img"
+              aria-label={`${soloProgress.strikesUsed} of ${soloProgress.strikeLimit} strikes used, ${soloProgress.strikesRemaining} remaining`}
+            >
+              {Array.from({ length: soloProgress.strikeLimit }).map((_, i) => (
+                <span
+                  key={i}
+                  aria-hidden="true"
+                  className={`h-3 w-3 rounded-full border-2 ${
+                    i < soloProgress.strikesUsed
+                      ? "border-red-600 bg-red-600"
+                      : "border-elq-border bg-transparent"
+                  }`}
+                />
+              ))}
+              <span
+                aria-hidden="true"
+                className={`ml-1 font-display text-xl font-bold leading-none ${
+                  soloProgress.strikesRemaining <= 1 ? "text-red-700" : "text-elq-dark"
+                }`}
+              >
+                {soloProgress.strikesRemaining}/{soloProgress.strikeLimit}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  const onlineScoreboard = !isSolo ? (
+    <div className="w-full">
+      <OnlineScoreboard
+        ariaLabel="TicTacToe multiplayer scoreboard"
+        showSeatBars={false}
+        players={[
+          {
+            name: game.player1_name,
+            score: game.player1_score,
+            active: game.current_player === 1 && game.status === "active",
+          },
+          {
+            name: game.player2_name,
+            score: game.player2_score,
+            active: game.current_player === 2 && game.status === "active",
+          },
+        ]}
+        youPlayerNumber={isOnline ? myPlayer : null}
+        roundNumber={game.round_number}
+        targetWins={game.target_wins}
+        timer={
+          game.turn_seconds && game.status === "active" && timeLeft !== null
+            ? { seconds: timeLeft, critical: timeLeft <= 5 }
+            : null
+        }
+        statusText={
+          game.status === "finished"
+            ? `\ud83c\udf89 ${game.winner_player === 1 ? game.player1_name : game.player2_name} wins!`
+            : `${currentPlayerName}'s turn`
+        }
+      />
+    </div>
+  ) : null;
+
+  const feedbackBanner =
+    lastResult && !["resigned", "opponent_left"].includes(lastResult) ? (
+      <div className="w-full mb-2 animate-slide-down">
+        <div
+          className={`p-2 rounded-xl text-center text-sm font-medium ${
+            ["round_won", "match_won", "board_complete", "solo_won"].includes(lastResult)
+              ? "bg-elq-orange/10 text-elq-orange border border-elq-orange/20"
+              : lastResult === "correct"
+                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                : ["incorrect", "time_expired", "solo_lost"].includes(lastResult)
+                  ? "bg-red-50 text-red-700 border border-red-200"
+                  : "bg-amber-50 text-amber-700 border border-amber-200"
+          }`}
+        >
+          {resultMessages[lastResult] || lastResult}
+          {isSolo && lastResult === "incorrect" && soloProgress && (
+            <span className="block mt-1 font-normal">
+              {soloProgress.strikesRemaining} strike{soloProgress.strikesRemaining === 1 ? "" : "s"} remaining.
+            </span>
+          )}
+          {["incorrect", "solo_lost"].includes(lastResult) && lastFeedback?.message && (
+            <span className="block mt-1 font-normal">
+              {lastFeedback.message}
+            </span>
+          )}
+          {inTransition && roundTransition.countdown !== null && (
+            <span className="ml-2 font-bold">
+              {isSolo ? `Next board in ${roundTransition.countdown}...` : `Next round in ${roundTransition.countdown}...`}
+            </span>
+          )}
+        </div>
+        {inTransition && roundTransition.countdown === null && (
+          <div className="text-center mt-3">
+            <button
+              onClick={() => {
+                const preserveResult = SOLO_TERMINAL_RESULTS.has(roundTransition.result);
+                setRoundTransition(null);
+                if (!preserveResult) {
+                  setLastResult(null);
+                  setLastFeedback(null);
+                }
+              }}
+              className="px-6 py-2.5 bg-elq-cta text-white font-bold rounded-xl hover:bg-elq-cta-dark active:scale-[0.98] transition-all"
+            >
+              {SOLO_TERMINAL_RESULTS.has(roundTransition.result) ? "See Result" : "Start New Round"}
+            </button>
+          </div>
+        )}
+      </div>
+    ) : null;
+
+  const errorBanner = error ? (
+    <div className="w-full mb-2 animate-slide-down">
+      <div className="p-2 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm text-center">
+        {error}
+      </div>
+    </div>
+  ) : null;
+
+  // Board: full-width query container drives the height-aware cell var; the inner
+  // board shrinks to the grid's content width and stays centered.
+  const boardPane = (
+    <div className="w-full animate-fade-in-up" style={boardSizingStyle}>
+      <div className="mx-auto w-fit max-w-full">
+        {/* Column headers */}
+        <div className="grid gap-1.5 mb-1.5" style={boardGridStyle}>
+          <div />
+          {displayRound.columns.map((col, ci) => (
+            <AxisLabel key={ci} axis={col} />
+          ))}
+        </div>
+
+        {/* Rows */}
+        {[0, 1, 2].map((ri) => (
+          <div key={ri} className="grid gap-1.5 mb-1.5" style={boardGridStyle}>
+            <AxisLabel axis={displayRound.rows[ri]} />
+            {[0, 1, 2].map((ci) => {
+              const cell = displayRound.cells.find(
+                (c) => c.row_index === ri && c.col_index === ci
+              );
+              const claimed = cell?.claimed_by_player;
+              const isClickable =
+                !claimed &&
+                !inTransition &&
+                game.status === "active" &&
+                !game.pending_draw &&
+                isMyTurn;
+              const showSamples =
+                inTransition && !claimed && cell?.sample_answers?.length > 0;
+              const showClaimedSamples =
+                inTransition && claimed && cell?.sample_answers?.length > 0;
+
+              // Solo has no opponent, so a claimed cell uses a neutral/positive
+              // green accent instead of the Player-1 blue identity color (which
+              // implies a second player). Local 1v1 / Online keep blue/red.
+              let cellBg = "border-elq-border bg-white";
+              if (isSolo && claimed) cellBg = "border-emerald-600/30 bg-emerald-100";
+              else if (claimed === 1) cellBg = "border-elq-player1/30 bg-elq-player1-bg";
+              else if (claimed === 2) cellBg = "border-elq-player2/30 bg-elq-player2-bg";
+              else if (isClickable) cellBg = "border-elq-border bg-white cursor-pointer group hover:border-elq-orange/50 hover:shadow-md active:bg-elq-orange/5 motion-safe:hover:scale-[1.02] motion-safe:active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange focus-visible:ring-offset-2 focus-visible:z-10";
+              else if (showSamples) cellBg = "border-elq-border bg-sky-50/50";
+
+              return (
+                <button
+                  key={ci}
+                  type="button"
+                  onClick={() => isClickable && handleCellClick(cell)}
+                  disabled={!isClickable}
+                  className={`relative aspect-square rounded-xl border-2 flex items-center justify-center transition-all duration-200 text-center p-1.5 overflow-hidden min-w-0 ${cellBg}`}
+                >
+                  {claimed ? (
+                    <div className="animate-cell-claim flex flex-col items-center gap-0.5 w-full min-w-0">
+                      {cell.claimed_player_image_url && !inTransition && (
+                        <img
+                          src={optimizeHeadshot(cell.claimed_player_image_url, { width: HEADSHOT_WIDTHS.cell })}
+                          alt={cell.claimed_player_name || ""}
+                          className="ttt-claimed-headshot w-5 h-5 sm:w-6 sm:h-6 rounded-full object-cover object-top border border-slate-200"
+                          onError={(e) => handleHeadshotError(e, cell.claimed_player_image_url, (ev) => { ev.currentTarget.style.display = "none"; })}
+                        />
+                      )}
+                      <div
+                        className={`ttt-claimed-name font-bold w-full min-w-0 ${
+                          isSolo && claimed
+                            ? "text-emerald-800"
+                            : claimed === 1
+                              ? "text-elq-player1"
+                              : "text-elq-player2"
+                        }`}
+                      >
+                        {cell.claimed_player_name || `P${claimed}`}
+                      </div>
+                      {showClaimedSamples && (
+                        <div className="mt-1 w-full space-y-0.5">
+                          {cell.sample_answers.map((name, i) => (
+                            <div
+                              key={i}
+                              className={`text-[11px] not-italic leading-tight truncate ${
+                                isSolo ? "text-emerald-700" : "text-elq-muted"
+                              }`}
+                            >
+                              {name}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : showSamples ? (
+                    <div className="w-full space-y-0.5">
+                      {cell.sample_answers.map((name, i) => (
+                        <div
+                          key={i}
+                          className="text-[11px] not-italic text-elq-muted leading-tight truncate"
+                        >
+                          {name}
+                        </div>
+                      ))}
+                    </div>
+                  ) : isClickable ? (
+                    <span className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full border-2 border-elq-orange-dark/40 text-elq-orange-dark text-2xl sm:text-3xl font-bold leading-none transition-colors group-hover:border-elq-orange-dark group-hover:bg-elq-orange/10">
+                      +
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const showAnswersButton = (
+    <button
+      onClick={handleGiveUp}
+      disabled={loading}
+      className="text-sm text-elq-muted hover:text-elq-text transition-colors underline underline-offset-2"
+    >
+      Show answers
+    </button>
+  );
+
+  const drawResignControls =
+    !isSolo && game.status === "active" && !inTransition ? (
+      <div className="mt-2 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-center">
+        {game.pending_draw ? (
+          <div className="w-full bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
+            <p className="text-sm text-elq-text mb-3">
+              <strong>
+                {game.pending_draw.offered_by === 1
+                  ? game.player1_name
+                  : game.player2_name}
+              </strong>{" "}
+              offers a draw.{" "}
+              <strong>
+                {game.pending_draw.respond_to === 1
+                  ? game.player1_name
+                  : game.player2_name}
+              </strong>
+              , do you accept?
+            </p>
+            {(!isOnline || myPlayer === game.pending_draw.respond_to) && (
+              <div className="flex gap-3 justify-center">
+                <button
+                  onClick={() => handleRespondDraw(true)}
+                  disabled={loading}
+                  className="px-5 py-2 bg-elq-success text-white font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  Accept
+                </button>
+                <button
+                  onClick={() => handleRespondDraw(false)}
+                  disabled={loading}
+                  className="px-5 py-2 bg-white border border-elq-border text-elq-text font-medium rounded-lg hover:bg-elq-bg transition-colors disabled:opacity-50"
+                >
+                  Decline
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          isMyTurn && (
+            <button
+              onClick={handleOfferDraw}
+              disabled={loading}
+              className="text-sm text-elq-muted hover:text-elq-text transition-colors underline underline-offset-2"
+            >
+              Offer Draw
+            </button>
+          )
+        )}
+        {isOnline && (
+          <ResignControl onResign={handleResign} disabled={loading} inline />
+        )}
+      </div>
+    ) : null;
+
   return (
     <div className="min-h-screen flex flex-col">
       {/* Orange accent bar */}
@@ -657,9 +1012,20 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
       {/* Header bar */}
       <div className="bg-white border-b border-elq-border">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div
+          className={`${
+            isSoloDesktop ? "max-w-6xl" : "max-w-2xl"
+          } mx-auto px-4 py-3 flex items-center justify-between`}
+        >
           <BoardHeaderNav onHome={onHome} />
-          <span />
+          {isSoloDesktop ? (
+            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-elq-text">
+              <span className="h-2 w-2 rounded-full bg-elq-orange" aria-hidden="true" />
+              Solo
+            </span>
+          ) : (
+            <span />
+          )}
         </div>
       </div>
 
@@ -675,348 +1041,59 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       )}
 
       {/* Main content */}
+      {isSoloDesktop ? (
+        <div className="flex-1 min-h-0 w-full max-w-6xl mx-auto flex gap-6 px-4 py-4">
+          {/* Left command rail: objective + progress pinned top, transient
+              feedback/error in a bounded scroll area (so a long banner can never
+              push the board below the fold), and how-to + show-answers pinned to
+              the bottom. Desktop Solo only — issue #266. */}
+          <aside
+            className="flex w-[280px] shrink-0 flex-col min-h-0"
+            aria-label="TicTacToe solo command rail"
+          >
+            <div className="shrink-0">{soloProgressCard}</div>
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {feedbackBanner}
+              {errorBanner}
+            </div>
+            <div className="shrink-0 mt-3 flex flex-col items-start gap-3 border-t border-elq-border pt-3">
+              <HowToPlayControl />
+              {game.status === "active" && !inTransition && showAnswersButton}
+            </div>
+          </aside>
+          {/* Board pane fills the freed width; the board sizes against the viewport
+              height (boardSizingStyle) and stays centered. */}
+          <div className="flex-1 min-w-0 min-h-0 flex items-center justify-center">
+            {boardPane}
+          </div>
+        </div>
+      ) : (
       <div className="flex-1 flex flex-col items-center px-4 py-3 sm:py-4 max-w-2xl mx-auto w-full">
         {/* Scoreboard */}
-        {isSolo ? (
-          <div
-            className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-3 sm:p-4 mb-3 animate-fade-in-up"
-            aria-label="TicTacToe solo progress"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-              <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-elq-muted">
-                  Objective
-                </div>
-                <div className="text-base sm:text-lg font-bold text-elq-dark">
-                  Make three in a row
-                </div>
-                {soloProgress.boardsWon > 0 && (
-                  <div className="mt-0.5 text-xs font-semibold text-elq-muted">
-                    Boards won: {soloProgress.boardsWon}
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-5 sm:gap-7">
-                <div className="text-center">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-elq-muted">
-                    Claimed
-                  </div>
-                  <div className="font-display text-2xl sm:text-3xl font-bold leading-none text-elq-dark">
-                    {soloProgress.claimedCells}/{soloProgress.totalCells}
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-elq-muted">
-                    Strikes left
-                  </div>
-                  <div
-                    className="mt-1 flex items-center justify-center gap-1.5"
-                    role="img"
-                    aria-label={`${soloProgress.strikesUsed} of ${soloProgress.strikeLimit} strikes used, ${soloProgress.strikesRemaining} remaining`}
-                  >
-                    {Array.from({ length: soloProgress.strikeLimit }).map((_, i) => (
-                      <span
-                        key={i}
-                        aria-hidden="true"
-                        className={`h-3 w-3 rounded-full border-2 ${
-                          i < soloProgress.strikesUsed
-                            ? "border-red-600 bg-red-600"
-                            : "border-elq-border bg-transparent"
-                        }`}
-                      />
-                    ))}
-                    <span
-                      aria-hidden="true"
-                      className={`ml-1 font-display text-xl font-bold leading-none ${
-                        soloProgress.strikesRemaining <= 1 ? "text-red-700" : "text-elq-dark"
-                      }`}
-                    >
-                      {soloProgress.strikesRemaining}/{soloProgress.strikeLimit}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-        <div className="w-full">
-          <OnlineScoreboard
-            ariaLabel="TicTacToe multiplayer scoreboard"
-            showSeatBars={false}
-            players={[
-              {
-                name: game.player1_name,
-                score: game.player1_score,
-                active: game.current_player === 1 && game.status === "active",
-              },
-              {
-                name: game.player2_name,
-                score: game.player2_score,
-                active: game.current_player === 2 && game.status === "active",
-              },
-            ]}
-            youPlayerNumber={isOnline ? myPlayer : null}
-            roundNumber={game.round_number}
-            targetWins={game.target_wins}
-            timer={
-              game.turn_seconds && game.status === "active" && timeLeft !== null
-                ? { seconds: timeLeft, critical: timeLeft <= 5 }
-                : null
-            }
-            statusText={
-              game.status === "finished"
-                ? `\ud83c\udf89 ${game.winner_player === 1 ? game.player1_name : game.player2_name} wins!`
-                : `${currentPlayerName}'s turn`
-            }
-          />
-        </div>
-        )}
+        {isSolo ? soloProgressCard : onlineScoreboard}
 
         {/* Result banner */}
-        {lastResult && !["resigned", "opponent_left"].includes(lastResult) && (
-          <div className="w-full mb-2 animate-slide-down">
-            <div
-              className={`p-2 rounded-xl text-center text-sm font-medium ${
-                ["round_won", "match_won", "board_complete", "solo_won"].includes(lastResult)
-                  ? "bg-elq-orange/10 text-elq-orange border border-elq-orange/20"
-                  : lastResult === "correct"
-                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                    : ["incorrect", "time_expired", "solo_lost"].includes(lastResult)
-                      ? "bg-red-50 text-red-700 border border-red-200"
-                      : "bg-amber-50 text-amber-700 border border-amber-200"
-              }`}
-            >
-              {resultMessages[lastResult] || lastResult}
-              {isSolo && lastResult === "incorrect" && soloProgress && (
-                <span className="block mt-1 font-normal">
-                  {soloProgress.strikesRemaining} strike{soloProgress.strikesRemaining === 1 ? "" : "s"} remaining.
-                </span>
-              )}
-              {["incorrect", "solo_lost"].includes(lastResult) && lastFeedback?.message && (
-                <span className="block mt-1 font-normal">
-                  {lastFeedback.message}
-                </span>
-              )}
-              {inTransition && roundTransition.countdown !== null && (
-                <span className="ml-2 font-bold">
-                  {isSolo ? `Next board in ${roundTransition.countdown}...` : `Next round in ${roundTransition.countdown}...`}
-                </span>
-              )}
-            </div>
-            {inTransition && roundTransition.countdown === null && (
-              <div className="text-center mt-3">
-                <button
-                  onClick={() => {
-                    const preserveResult = SOLO_TERMINAL_RESULTS.has(roundTransition.result);
-                    setRoundTransition(null);
-                    if (!preserveResult) {
-                      setLastResult(null);
-                      setLastFeedback(null);
-                    }
-                  }}
-                  className="px-6 py-2.5 bg-elq-cta text-white font-bold rounded-xl hover:bg-elq-cta-dark active:scale-[0.98] transition-all"
-                >
-                  {SOLO_TERMINAL_RESULTS.has(roundTransition.result) ? "See Result" : "Start New Round"}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        {feedbackBanner}
 
         {/* Error */}
-        {error && (
-          <div className="w-full mb-2 animate-slide-down">
-            <div className="p-2 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm text-center">
-              {error}
-            </div>
-          </div>
-        )}
+        {errorBanner}
 
         {/* Onboarding: objective, first-run how-to, clue legend */}
         <div className="w-full">
           <TicTacToeGuide />
         </div>
-        {/* Board: full-width query container drives the height-aware cell var; the
-            inner board shrinks to the grid's content width and stays centered. */}
-        <div className="w-full animate-fade-in-up" style={boardSizingStyle}>
-         <div className="mx-auto w-fit max-w-full">
-          {/* Column headers */}
-          <div className="grid gap-1.5 mb-1.5" style={boardGridStyle}>
-            <div />
-            {displayRound.columns.map((col, ci) => (
-              <AxisLabel key={ci} axis={col} />
-            ))}
-          </div>
-
-          {/* Rows */}
-          {[0, 1, 2].map((ri) => (
-            <div key={ri} className="grid gap-1.5 mb-1.5" style={boardGridStyle}>
-              <AxisLabel axis={displayRound.rows[ri]} />
-              {[0, 1, 2].map((ci) => {
-                const cell = displayRound.cells.find(
-                  (c) => c.row_index === ri && c.col_index === ci
-                );
-                const claimed = cell?.claimed_by_player;
-                const isClickable =
-                  !claimed &&
-                  !inTransition &&
-                  game.status === "active" &&
-                  !game.pending_draw &&
-                  isMyTurn;
-                const showSamples =
-                  inTransition && !claimed && cell?.sample_answers?.length > 0;
-                const showClaimedSamples =
-                  inTransition && claimed && cell?.sample_answers?.length > 0;
-
-                // Solo has no opponent, so a claimed cell uses a neutral/positive
-                // green accent instead of the Player-1 blue identity color (which
-                // implies a second player). Local 1v1 / Online keep blue/red.
-                let cellBg = "border-elq-border bg-white";
-                if (isSolo && claimed) cellBg = "border-emerald-600/30 bg-emerald-100";
-                else if (claimed === 1) cellBg = "border-elq-player1/30 bg-elq-player1-bg";
-                else if (claimed === 2) cellBg = "border-elq-player2/30 bg-elq-player2-bg";
-                else if (isClickable) cellBg = "border-elq-border bg-white cursor-pointer group hover:border-elq-orange/50 hover:shadow-md active:bg-elq-orange/5 motion-safe:hover:scale-[1.02] motion-safe:active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange focus-visible:ring-offset-2 focus-visible:z-10";
-                else if (showSamples) cellBg = "border-elq-border bg-sky-50/50";
-
-                return (
-                  <button
-                    key={ci}
-                    type="button"
-                    onClick={() => isClickable && handleCellClick(cell)}
-                    disabled={!isClickable}
-                    className={`relative aspect-square rounded-xl border-2 flex items-center justify-center transition-all duration-200 text-center p-1.5 overflow-hidden min-w-0 ${cellBg}`}
-                  >
-                    {claimed ? (
-                      <div className="animate-cell-claim flex flex-col items-center gap-0.5 w-full min-w-0">
-                        {cell.claimed_player_image_url && !inTransition && (
-                          <img
-                            src={optimizeHeadshot(cell.claimed_player_image_url, { width: HEADSHOT_WIDTHS.cell })}
-                            alt={cell.claimed_player_name || ""}
-                            className="ttt-claimed-headshot w-5 h-5 sm:w-6 sm:h-6 rounded-full object-cover object-top border border-slate-200"
-                            onError={(e) => handleHeadshotError(e, cell.claimed_player_image_url, (ev) => { ev.currentTarget.style.display = "none"; })}
-                          />
-                        )}
-                        <div
-                          className={`ttt-claimed-name font-bold w-full min-w-0 ${
-                            isSolo && claimed
-                              ? "text-emerald-800"
-                              : claimed === 1
-                                ? "text-elq-player1"
-                                : "text-elq-player2"
-                          }`}
-                        >
-                          {cell.claimed_player_name || `P${claimed}`}
-                        </div>
-                        {showClaimedSamples && (
-                          <div className="mt-1 w-full space-y-0.5">
-                            {cell.sample_answers.map((name, i) => (
-                              <div
-                                key={i}
-                                className={`text-[11px] not-italic leading-tight truncate ${
-                                  isSolo ? "text-emerald-700" : "text-elq-muted"
-                                }`}
-                              >
-                                {name}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : showSamples ? (
-                      <div className="w-full space-y-0.5">
-                        {cell.sample_answers.map((name, i) => (
-                          <div
-                            key={i}
-                            className="text-[11px] not-italic text-elq-muted leading-tight truncate"
-                          >
-                            {name}
-                          </div>
-                        ))}
-                      </div>
-                    ) : isClickable ? (
-                      <span className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full border-2 border-elq-orange-dark/40 text-elq-orange-dark text-2xl sm:text-3xl font-bold leading-none transition-colors group-hover:border-elq-orange-dark group-hover:bg-elq-orange/10">
-                        +
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-         </div>
-        </div>
+        {/* Board */}
+        {boardPane}
 
         {/* Answer reveal button for solo mode */}
         {isSolo && game.status === "active" && !inTransition && (
-          <div className="mt-4 text-center">
-            <button
-              onClick={handleGiveUp}
-              disabled={loading}
-              className="text-sm text-elq-muted hover:text-elq-text transition-colors underline underline-offset-2"
-            >
-              Show answers
-            </button>
-          </div>
+          <div className="mt-4 text-center">{showAnswersButton}</div>
         )}
 
-        {/* Draw + resign controls. For online, "Offer Draw" and "Resign" share a
-            single wrapping row so the board plus both controls fit a laptop
-            viewport without scrolling (issue #259); the wider draw-response panel
-            takes its own line via w-full. Local 1v1 shows only the draw control. */}
-        {!isSolo && game.status === "active" && !inTransition && (
-          <div className="mt-2 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-center">
-            {game.pending_draw ? (
-              <div className="w-full bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
-                <p className="text-sm text-elq-text mb-3">
-                  <strong>
-                    {game.pending_draw.offered_by === 1
-                      ? game.player1_name
-                      : game.player2_name}
-                  </strong>{" "}
-                  offers a draw.{" "}
-                  <strong>
-                    {game.pending_draw.respond_to === 1
-                      ? game.player1_name
-                      : game.player2_name}
-                  </strong>
-                  , do you accept?
-                </p>
-                {(!isOnline || myPlayer === game.pending_draw.respond_to) && (
-                  <div className="flex gap-3 justify-center">
-                    <button
-                      onClick={() => handleRespondDraw(true)}
-                      disabled={loading}
-                      className="px-5 py-2 bg-elq-success text-white font-medium rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      onClick={() => handleRespondDraw(false)}
-                      disabled={loading}
-                      className="px-5 py-2 bg-white border border-elq-border text-elq-text font-medium rounded-lg hover:bg-elq-bg transition-colors disabled:opacity-50"
-                    >
-                      Decline
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              isMyTurn && (
-                <button
-                  onClick={handleOfferDraw}
-                  disabled={loading}
-                  className="text-sm text-elq-muted hover:text-elq-text transition-colors underline underline-offset-2"
-                >
-                  Offer Draw
-                </button>
-              )
-            )}
-            {isOnline && (
-              <ResignControl onResign={handleResign} disabled={loading} inline />
-            )}
-          </div>
-        )}
+        {/* Draw + resign controls (online / local 1v1) */}
+        {drawResignControls}
       </div>
+      )}
 
       {/* Player search modal */}
       {selectedCell && game.status === "active" && !inTransition && (
