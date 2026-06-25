@@ -195,6 +195,9 @@ test.describe.serial("Photo Quiz Flow", () => {
     if (!(await nextPhoto.isVisible().catch(() => false))) {
       await page.getByRole("button", { name: "Reveal answer" }).click();
       await expect(nextPhoto).toBeVisible({ timeout: 10000 });
+      // Issue #282: revealing the answer must clear the transient wrong-guess
+      // banner so it never lingers above the revealed player.
+      await expect(page.getByTestId("photo-feedback-message")).toHaveCount(0);
     }
   });
 

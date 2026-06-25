@@ -214,6 +214,9 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
 
   function handleRealtimeState(result) {
     if (!result?.state) return;
+    // Snapshot the round the client is currently showing before swapping in the
+    // incoming state so we can detect when this broadcast advances the round.
+    const previousRoundNumber = currentRoundNumber;
     setGame(result.state);
 
     if (result.result === "opponent_left") {
@@ -223,6 +226,23 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
 
     if (result.result === "resigned") {
       setLastResult("resigned");
+      return;
+    }
+
+    // A round boundary drops any transient guess feedback so a resolved round
+    // banner (correct or wrong) never bleeds onto the next round photo
+    // (issue #282). This covers every way a round advances: a correct guess
+    // (round_won), a public Quick Match timeout (time_expired), a no-answer skip,
+    // or a resync that lands on a later round. The CompletedRoundReveal card
+    // carries the resolved round outcome instead.
+    const incomingRoundNumber = getPhotoGameRoundNumber(result.state);
+    if (
+      incomingRoundNumber != null
+      && previousRoundNumber != null
+      && incomingRoundNumber !== previousRoundNumber
+    ) {
+      setNoAnswerOfferMessageRoundNumber(null);
+      setMessage("");
       return;
     }
 
@@ -362,6 +382,9 @@ export default function PhotoQuizBoard({ initialState, soloInitialRound, onlineI
         soloResolvedRoundRef.current = requestedRoundToken;
         setSoloScore((score) => ({ ...score, streak: 0 }));
         setAnswer(result.answer);
+        // Clear any stale wrong-guess feedback from a prior guess so it never
+        // sits above the revealed answer (issue #282).
+        setMessage("");
         setRecentIds((ids) => [...ids.slice(-19), result.answer.id]);
       }
     } finally {
