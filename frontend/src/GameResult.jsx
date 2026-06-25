@@ -53,6 +53,9 @@ function VictoryConfetti() {
  * - onHome:        home handler; the secondary button renders only when provided.
  * - homeLabel:     home label (default "Home").
  * - celebrate:     when true, overlays winner confetti.
+ * - align:         "center" (default) vertically centers the result card; "top"
+ *                  top-anchors it (used by Higher or Lower so the result doesn't
+ *                  float with a big empty band above it).
  */
 export default function GameResult({
   emoji = "\u{1F3C6}",
@@ -64,11 +67,14 @@ export default function GameResult({
   onHome = null,
   homeLabel = "Home",
   celebrate = false,
+  align = "center",
 }) {
+  const alignClass =
+    align === "top" ? "items-start p-4 pt-12 sm:pt-20" : "items-center p-4";
   return (
     <div className="min-h-screen flex flex-col">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
-      <div className="relative flex-1 flex items-center justify-center p-4">
+      <div className={`relative flex-1 flex ${alignClass} justify-center`}>
         {celebrate && <VictoryConfetti />}
         <div className="text-center animate-fade-in-up max-w-md w-full">
           <div className="text-6xl mb-4">{emoji}</div>

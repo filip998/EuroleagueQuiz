@@ -57,4 +57,22 @@ describe("GameResult", () => {
 
     expect(container.querySelector("p")).toBeNull();
   });
+
+  it("vertically centers the result card by default", () => {
+    const { container } = render(<GameResult title="GAME OVER" />);
+
+    const region = container.querySelector(".flex-1");
+    expect(region).not.toBeNull();
+    expect(region).toHaveClass("items-center");
+    expect(region).not.toHaveClass("items-start");
+  });
+
+  it("top-anchors the result card when align is 'top'", () => {
+    const { container } = render(<GameResult title="GAME OVER" align="top" />);
+
+    const region = container.querySelector(".flex-1");
+    expect(region).not.toBeNull();
+    expect(region).toHaveClass("items-start");
+    expect(region).not.toHaveClass("items-center");
+  });
 });

@@ -92,6 +92,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
         subtitle={gameOver.streak === 0 ? "Better luck next time!" : `${gameOver.streak} correct in a row!`}
         onPlayAgain={onNewGame}
         onHome={onHome}
+        align="top"
       >
         {/* Last answer reveal */}
         <div className="bg-white rounded-2xl border border-red-200 p-4 mb-6">
@@ -135,7 +136,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
 
       {/* Header */}
       <div className="bg-white border-b border-elq-border">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
           <BoardHeaderNav onHome={onHome} />
           <span className="font-display text-lg tracking-wide text-elq-dark">
             HIGHER OR LOWER
@@ -148,7 +149,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 sm:py-10 max-w-2xl mx-auto w-full">
+      <div className="flex-1 flex flex-col items-center justify-center lg:justify-start px-4 py-6 sm:py-10 lg:pt-12 max-w-3xl mx-auto w-full">
         {/* Category label */}
         <div className="mb-6 text-center animate-fade-in-up">
           <div className="inline-flex items-center gap-2 bg-white border border-elq-border rounded-full px-5 py-2 shadow-sm">
@@ -161,13 +162,13 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
         </div>
 
         {/* Two cards */}
-        <div className={`w-full grid grid-cols-2 gap-4 sm:gap-6 mb-8 ${animating ? "opacity-50 transition-opacity duration-300" : ""}`}>
+        <div className={`w-full grid grid-cols-2 gap-4 sm:gap-6 mb-8 lg:grid-rows-1 lg:flex-1 lg:max-h-[26rem] ${animating ? "opacity-50 transition-opacity duration-300" : ""}`}>
           {/* Left card */}
           <button
             type="button"
             onClick={() => handleChoice("left")}
             disabled={loading || !!result}
-            className={`group relative bg-white rounded-2xl border-2 p-5 sm:p-7 text-center transition-all duration-300 ${
+            className={`group relative bg-white rounded-2xl border-2 p-5 sm:p-7 lg:p-10 text-center lg:flex lg:flex-col lg:items-center lg:justify-center transition-all duration-300 ${
               result
                 ? result.left_value >= result.right_value && result.left_value !== result.right_value
                   ? "border-emerald-400 bg-emerald-50/50 shadow-lg shadow-emerald-100"
@@ -175,14 +176,14 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
                 : "border-elq-border hover:border-elq-player1/50 hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             }`}
           >
-            <div className="text-4xl mb-3">{getFlag(pair.left.nationality)}</div>
-            <div className="font-semibold text-elq-dark text-base sm:text-lg leading-tight mb-1">
+            <div className="text-4xl lg:text-6xl mb-3">{getFlag(pair.left.nationality)}</div>
+            <div className="font-semibold text-elq-dark text-base sm:text-lg lg:text-2xl leading-tight mb-1">
               {pair.left.name}
             </div>
             <div className="text-xs text-elq-muted mb-4">{pair.left.nationality || "Unknown"}</div>
 
             {showValues ? (
-              <div className={`text-3xl sm:text-4xl font-bold tabular-nums animate-fade-in-up ${
+              <div className={`text-3xl sm:text-4xl lg:text-6xl font-bold tabular-nums animate-fade-in-up ${
                 result.left_value > result.right_value
                   ? "text-emerald-600"
                   : result.left_value === result.right_value
@@ -192,7 +193,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
                 {formatValue(result.left_value)}
               </div>
             ) : (
-              <div className="text-3xl sm:text-4xl font-bold text-elq-muted/30">?</div>
+              <div className="text-3xl sm:text-4xl lg:text-6xl font-bold text-elq-muted/30">?</div>
             )}
 
             {!result && (
@@ -207,7 +208,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
             type="button"
             onClick={() => handleChoice("right")}
             disabled={loading || !!result}
-            className={`group relative bg-white rounded-2xl border-2 p-5 sm:p-7 text-center transition-all duration-300 ${
+            className={`group relative bg-white rounded-2xl border-2 p-5 sm:p-7 lg:p-10 text-center lg:flex lg:flex-col lg:items-center lg:justify-center transition-all duration-300 ${
               result
                 ? result.right_value >= result.left_value && result.left_value !== result.right_value
                   ? "border-emerald-400 bg-emerald-50/50 shadow-lg shadow-emerald-100"
@@ -215,14 +216,14 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
                 : "border-elq-border hover:border-elq-player2/50 hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             }`}
           >
-            <div className="text-4xl mb-3">{getFlag(pair.right.nationality)}</div>
-            <div className="font-semibold text-elq-dark text-base sm:text-lg leading-tight mb-1">
+            <div className="text-4xl lg:text-6xl mb-3">{getFlag(pair.right.nationality)}</div>
+            <div className="font-semibold text-elq-dark text-base sm:text-lg lg:text-2xl leading-tight mb-1">
               {pair.right.name}
             </div>
             <div className="text-xs text-elq-muted mb-4">{pair.right.nationality || "Unknown"}</div>
 
             {showValues ? (
-              <div className={`text-3xl sm:text-4xl font-bold tabular-nums animate-fade-in-up ${
+              <div className={`text-3xl sm:text-4xl lg:text-6xl font-bold tabular-nums animate-fade-in-up ${
                 result.right_value > result.left_value
                   ? "text-emerald-600"
                   : result.left_value === result.right_value
@@ -232,7 +233,7 @@ export default function HigherLowerBoard({ initialState, onNewGame, onHome }) {
                 {formatValue(result.right_value)}
               </div>
             ) : (
-              <div className="text-3xl sm:text-4xl font-bold text-elq-muted/30">?</div>
+              <div className="text-3xl sm:text-4xl lg:text-6xl font-bold text-elq-muted/30">?</div>
             )}
 
             {!result && (
