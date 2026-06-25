@@ -306,23 +306,23 @@ export default function GuessTheListRaceBoard({ initialState, onlineInfo, onNewG
 
         <CompletedRoundReveal round={completedRound} countdown={revealRemaining} />
 
-        <section className="mb-4 rounded-3xl border border-elq-border bg-elq-dark text-white shadow-sm overflow-hidden">
+        <section className="mb-4 rounded-3xl border border-elq-border bg-white text-elq-dark shadow-sm overflow-hidden">
           <div className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3 min-w-0">
               {usesScopeLabelHeader ? (
-                <h2 className="font-display text-2xl truncate">{displayRound.scope_label}</h2>
+                <h2 className="font-display text-2xl truncate text-elq-dark">{displayRound.scope_label}</h2>
               ) : (
                 <>
                   <ClubLogo code={displayRound.team_code} size={36} className="flex-shrink-0" />
-                  <div className="min-w-0">
-                    <h2 className="font-display text-2xl truncate">{displayRound.team_name}</h2>
-                    <p className="text-sm text-white/60">{displayRound.season_year}/{String(displayRound.season_year + 1).slice(2)}</p>
+                  <div className="min-w-0 flex items-center gap-2">
+                    <h2 className="font-display text-2xl truncate text-elq-dark">{displayRound.team_name}</h2>
+                    <span className="flex-shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-800 whitespace-nowrap">{displayRound.season_year}/{String(displayRound.season_year + 1).slice(2)}</span>
                   </div>
                 </>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.14em]">
-              <span className="rounded-full bg-white/10 px-2 py-1">
+              <span className="rounded-full border border-elq-orange/20 bg-elq-orange/10 px-2 py-1 text-elq-cta-dark">
                 {displayRound.guessed_count}/{displayRound.total_slots} claimed
               </span>
               {roundLocked && (
@@ -480,7 +480,7 @@ function CompletedRoundReveal({ round, countdown }) {
           <div className="font-display text-2xl text-elq-dark">
             {round.winner_player ? `Player ${round.winner_player} wins the round` : "Tie round"}
           </div>
-          <div className="text-sm text-elq-muted">
+          <div className="text-sm text-elq-text">
             {round.player1_correct} - {round.player2_correct} · Full list revealed
           </div>
         </div>

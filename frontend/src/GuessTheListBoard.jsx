@@ -320,23 +320,25 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
         </div>
       </div>
       )}
-      <div className="bg-elq-dark flex-shrink-0">
-        <div className="max-w-5xl mx-auto px-3 py-2.5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            {usesScopeLabelHeader ? (
-              <span className="font-display text-xl sm:text-2xl text-white tracking-wide truncate">{displayRound.scope_label}</span>
-            ) : (
-              <>
-                <ClubLogo code={displayRound.team_code} size={28} className="flex-shrink-0" />
-                <span className="font-display text-xl sm:text-2xl text-white tracking-wide truncate">{displayRound.team_name}</span>
-                <span className="text-elq-orange font-semibold text-sm whitespace-nowrap">{displayRound.season_year}/{String(displayRound.season_year + 1).slice(2)}</span>
-              </>
-            )}
-          </div>
-          <div className="flex items-center gap-3 text-[11px] text-white/60 whitespace-nowrap">
-            <span>{displayRound.guessed_count}/{displayRound.total_slots}</span>
-            {!isSolo && (displayRound.player1_correct > 0 || displayRound.player2_correct > 0) && (<span><span className="text-blue-300">{displayRound.player1_correct}</span> &ndash; <span className="text-red-300">{displayRound.player2_correct}</span></span>)}
-            {isRevealing && <span className="text-elq-orange font-semibold">{revealCountdown}s</span>}
+      <div className="bg-elq-bg flex-shrink-0">
+        <div className="max-w-5xl mx-auto px-3 py-2">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-elq-border bg-white px-3 py-2 shadow-sm">
+            <div className="flex items-center gap-2 min-w-0">
+              {usesScopeLabelHeader ? (
+                <span className="font-display text-xl sm:text-2xl text-elq-dark tracking-wide truncate">{displayRound.scope_label}</span>
+              ) : (
+                <>
+                  <ClubLogo code={displayRound.team_code} size={28} className="flex-shrink-0" />
+                  <span className="font-display text-xl sm:text-2xl text-elq-dark tracking-wide truncate">{displayRound.team_name}</span>
+                  <span className="flex-shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-800 whitespace-nowrap">{displayRound.season_year}/{String(displayRound.season_year + 1).slice(2)}</span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-elq-text whitespace-nowrap">
+              <span className="rounded-full border border-elq-orange/20 bg-elq-orange/10 px-2 py-0.5 text-xs font-bold text-elq-cta-dark">{displayRound.guessed_count}/{displayRound.total_slots}</span>
+              {!isSolo && (displayRound.player1_correct > 0 || displayRound.player2_correct > 0) && (<span><span className="text-elq-player1 font-semibold">{displayRound.player1_correct}</span> &ndash; <span className="text-elq-player2 font-semibold">{displayRound.player2_correct}</span></span>)}
+              {isRevealing && <span className="text-elq-cta font-semibold">{revealCountdown}s</span>}
+            </div>
           </div>
         </div>
       </div>
@@ -357,7 +359,7 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
           </div>
         </div>
       )}
-      {(lastResult || error) && (<div className="flex-shrink-0 px-3 pt-2 max-w-5xl mx-auto w-full">{lastResult && (<div className={`px-3 py-1.5 rounded-lg text-center text-xs font-medium animate-slide-down ${["round_won","match_won","round_complete","board_complete"].includes(lastResult) ? "bg-elq-orange/10 text-elq-orange" : lastResult === "correct" ? "bg-emerald-50 text-emerald-700" : lastResult === "incorrect" || lastResult === "time_expired" ? "bg-red-50 text-red-600" : lastResult === "given_up" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{resultMessages[lastResult] || lastResult}{inTransition && roundTransition.countdown !== null && <span className="ml-2 font-bold">{isSolo ? `Next list in ${roundTransition.countdown}...` : `Next in ${roundTransition.countdown}...`}</span>}</div>)}{inTransition && roundTransition.countdown === null && (<div className="text-center mt-3"><button onClick={() => { setRoundTransition(null); setLastResult(null); }} className="px-6 py-2.5 bg-elq-cta text-white font-bold rounded-xl hover:bg-elq-cta-dark active:scale-[0.98] transition-all">Start New Round</button></div>)}{error && <div className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs text-center mt-1">{error}</div>}</div>)}
+      {(lastResult || error) && (<div className="flex-shrink-0 px-3 pt-2 max-w-5xl mx-auto w-full">{lastResult && (<div className={`px-3 py-1.5 rounded-lg text-center text-xs font-medium animate-slide-down ${["round_won","match_won","round_complete","board_complete"].includes(lastResult) ? "bg-elq-orange/10 text-elq-orange" : lastResult === "correct" ? "bg-emerald-50 text-emerald-700" : lastResult === "incorrect" || lastResult === "time_expired" ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-700"}`}>{resultMessages[lastResult] || lastResult}{inTransition && roundTransition.countdown !== null && <span className="ml-2 font-bold">{isSolo ? `Next list in ${roundTransition.countdown}...` : `Next in ${roundTransition.countdown}...`}</span>}</div>)}{inTransition && roundTransition.countdown === null && (<div className="text-center mt-3"><button onClick={() => { setRoundTransition(null); setLastResult(null); }} className="px-6 py-2.5 bg-elq-cta text-white font-bold rounded-xl hover:bg-elq-cta-dark active:scale-[0.98] transition-all">Start New Round</button></div>)}{error && <div className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs text-center mt-1">{error}</div>}</div>)}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-3 py-3">
           <div className="grid gap-1.5">
@@ -487,14 +489,14 @@ export default function GuessTheListBoard({ initialState, onNewGame, onHome, onl
                 </div>
               ) : (<>
                 {isMyTurn && game.mode !== "single_player" && (<button onClick={handleOfferEnd} disabled={loading} className="text-xs text-elq-muted hover:text-elq-text transition-colors">End Round</button>)}
-                {game.mode === "single_player" && (<button onClick={handleGiveUp} disabled={loading} className="text-xs text-red-400 hover:text-red-600 transition-colors font-medium">Give Up</button>)}
+                {game.mode === "single_player" && (<button onClick={handleGiveUp} disabled={loading} className="text-xs text-elq-muted hover:text-elq-text transition-colors underline underline-offset-2">Give Up</button>)}
               </>)}
             </>
           )}
           {isOnline && game.status === "active" && !inTransition && !isRevealing && (
             <ResignControl onResign={handleResign} disabled={resigning} />
           )}
-          {isRevealing && !inTransition && (<span className="text-xs text-elq-muted">Reviewing list... <strong className="text-elq-orange">{revealCountdown}s</strong></span>)}
+          {isRevealing && !inTransition && (<span className="text-xs text-elq-muted">Reviewing list... <strong className="text-elq-cta">{revealCountdown}s</strong></span>)}
         </div>
       </div>
     </div>
