@@ -8,6 +8,7 @@ const getGuessTheListGameMock = vi.fn();
 vi.mock("../api", () => ({
   getGuessTheListGame: (...args) => getGuessTheListGameMock(...args),
   getGame: vi.fn(),
+  createGame: vi.fn(),
   getCareerGame: vi.fn(),
   getPhotoGame: vi.fn(),
 }));

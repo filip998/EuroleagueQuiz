@@ -524,7 +524,7 @@ describe("GameBoard solo stakes", () => {
     expect(screen.getByText(feedback.message)).toBeInTheDocument();
   });
 
-  it("pauses on the solo answer reveal before showing the win screen", async () => {
+  it("shows the solo win result screen immediately when the board is won", async () => {
     const revealRound = completedRound();
     submitMove.mockResolvedValue({
       state: soloGame({
@@ -557,19 +557,89 @@ describe("GameBoard solo stakes", () => {
     fireEvent.click(screen.getAllByText("+")[0]);
     fireEvent.click(screen.getByText("select-player"));
 
-    expect(await screen.findByText(/Solo win! Three in a row/)).toBeInTheDocument();
-    expect(screen.queryByText(/Next board in/)).not.toBeInTheDocument();
-    expect(screen.getByText("See Result")).toBeInTheDocument();
-    expect(screen.getAllByText("Vasilije Micic").length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByText("See Result"));
-
+    // No "See Result" gate: the win screen renders straight away with the reveal.
     expect(await screen.findByRole("heading", { name: "Solo board won!" })).toBeInTheDocument();
+    expect(screen.queryByText("See Result")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Next board in/)).not.toBeInTheDocument();
     expect(screen.getByText("Answer reveal")).toBeInTheDocument();
     expect(screen.getAllByText(/Vasilije Micic/).length).toBeGreaterThan(0);
   });
 
-  it("uses Show answers to reveal the board and then show the neutral result screen", async () => {
+  it("shows the solo loss result screen immediately when strikes run out", async () => {
+    const revealRound = completedRound({ status: "drawn", winner_player: null });
+    submitMove.mockResolvedValue({
+      state: soloGame({
+        status: "finished",
+        winner_player: null,
+        solo_progress: {
+          claimed_cells: 2,
+          total_cells: 9,
+          strikes_used: 3,
+          strikes_remaining: 0,
+          strike_limit: 3,
+          boards_won: 0,
+        },
+        round: revealRound,
+      }),
+      result: "solo_lost",
+      completedRound: revealRound,
+    });
+
+    render(
+      <GameBoard
+        initialState={soloGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    expect(await screen.findByRole("heading", { name: "Out of strikes" })).toBeInTheDocument();
+    expect(screen.queryByText("See Result")).not.toBeInTheDocument();
+    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+  });
+
+  it("shows the solo draw result screen immediately when the board fills with no line", async () => {
+    const revealRound = completedRound({ status: "drawn", winner_player: null });
+    submitMove.mockResolvedValue({
+      state: soloGame({
+        status: "finished",
+        winner_player: null,
+        solo_progress: {
+          claimed_cells: 5,
+          total_cells: 9,
+          strikes_used: 1,
+          strikes_remaining: 2,
+          strike_limit: 3,
+          boards_won: 0,
+        },
+        round: revealRound,
+      }),
+      result: "solo_drawn",
+      completedRound: revealRound,
+    });
+
+    render(
+      <GameBoard
+        initialState={soloGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    expect(await screen.findByRole("heading", { name: "Board complete" })).toBeInTheDocument();
+    expect(screen.queryByText("See Result")).not.toBeInTheDocument();
+    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+  });
+
+  it("uses Show answers to jump straight to the neutral result screen", async () => {
     const revealRound = completedRound({
       status: "drawn",
       winner_player: null,
@@ -596,12 +666,9 @@ describe("GameBoard solo stakes", () => {
     fireEvent.click(screen.getByText("Show answers"));
 
     await waitFor(() => expect(giveUpGame).toHaveBeenCalledWith(7));
-    expect(await screen.findByText("👀 Answers revealed.")).toBeInTheDocument();
-    expect(screen.getByText("See Result")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("See Result"));
-
+    // No "See Result" gate: Show answers reveals the result screen directly.
     expect(await screen.findByRole("heading", { name: "Answers revealed" })).toBeInTheDocument();
+    expect(screen.queryByText("See Result")).not.toBeInTheDocument();
     expect(screen.getByText("Answer reveal")).toBeInTheDocument();
   });
 
@@ -1269,7 +1336,7 @@ describe("GameBoard desktop Solo command rail (issue #266)", () => {
     expect(sizingContainer(container).style.getPropertyValue("--ttt-cell")).toContain("svh");
   });
 
-  it("reveals answers from the rail and then shows the neutral result screen", async () => {
+  it("reveals answers from the rail and jumps straight to the result screen", async () => {
     const revealRound = completedRound({
       status: "drawn",
       winner_player: null,
@@ -1297,14 +1364,11 @@ describe("GameBoard desktop Solo command rail (issue #266)", () => {
     fireEvent.click(within(rail).getByText("Show answers"));
 
     await waitFor(() => expect(giveUpGame).toHaveBeenCalledWith(7));
-    // The reveal feedback banner surfaces inside the rail, not the board pane.
-    expect(await screen.findByText("👀 Answers revealed.")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("See Result"));
-
+    // No "See Result" gate: the result screen renders directly after the reveal.
     expect(
       await screen.findByRole("heading", { name: "Answers revealed" })
     ).toBeInTheDocument();
+    expect(screen.queryByText("See Result")).not.toBeInTheDocument();
     expect(screen.getByText("Answer reveal")).toBeInTheDocument();
   });
 

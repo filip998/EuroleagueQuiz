@@ -348,7 +348,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   // Round transition countdown
   useEffect(() => {
     if (!roundTransition) return;
-    if (roundTransition.countdown === null) return; // paused (solo give-up)
+    if (roundTransition.countdown == null) return; // defensive: transitions always carry a numeric countdown
     if (roundTransition.countdown <= 0) {
       setRoundTransition(null);
       return;
@@ -362,12 +362,18 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   }, [roundTransition]);
 
   function startRoundTransition(result, completedRound, feedback = null) {
+    // Solo terminal results (solo_won/solo_lost/solo_drawn/gave_up) only occur in
+    // single_player mode and skip the "See Result" gate: the finished game state
+    // already carries the revealed round, so we record the result and let the
+    // solo GameResult branch render immediately instead of pausing on a banner.
+    if (SOLO_TERMINAL_RESULTS.has(result)) {
+      setLastResult(result);
+      setLastFeedback(feedback);
+      setSelectedCell(null);
+      return;
+    }
     if (completedRound) {
-      setRoundTransition({
-        countdown: SOLO_TERMINAL_RESULTS.has(result) ? null : 3,
-        completedRound,
-        result,
-      });
+      setRoundTransition({ countdown: 3, completedRound, result });
     }
     setLastResult(result);
     setLastFeedback(feedback);
@@ -462,14 +468,9 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setError(null);
     try {
       const res = await giveUpGame(game.id);
-      setGame(res.state);
-      if (res.completedRound) {
-        const result = res.result || "gave_up";
-        setRoundTransition({ countdown: null, completedRound: res.completedRound, result });
-        setLastResult(result);
-        setLastFeedback(res.feedback || null);
-        setSelectedCell(null);
-      }
+      // Solo give-up returns a finished game with the revealed round; route it
+      // through the shared handler so it lands on the result screen with no gate.
+      handleRealtimeState(res);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -794,29 +795,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
               {lastFeedback.message}
             </span>
           )}
-          {inTransition && roundTransition.countdown !== null && (
+          {inTransition && (
             <span className="ml-2 font-bold">
               {isSolo ? `Next board in ${roundTransition.countdown}...` : `Next round in ${roundTransition.countdown}...`}
             </span>
           )}
         </div>
-        {inTransition && roundTransition.countdown === null && (
-          <div className="text-center mt-3">
-            <button
-              onClick={() => {
-                const preserveResult = SOLO_TERMINAL_RESULTS.has(roundTransition.result);
-                setRoundTransition(null);
-                if (!preserveResult) {
-                  setLastResult(null);
-                  setLastFeedback(null);
-                }
-              }}
-              className="px-6 py-2.5 bg-elq-cta text-white font-bold rounded-xl hover:bg-elq-cta-dark active:scale-[0.98] transition-all"
-            >
-              {SOLO_TERMINAL_RESULTS.has(roundTransition.result) ? "See Result" : "Start New Round"}
-            </button>
-          </div>
-        )}
       </div>
     ) : null;
 
