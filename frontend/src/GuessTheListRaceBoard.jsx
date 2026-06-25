@@ -315,7 +315,7 @@ export default function GuessTheListRaceBoard({ initialState, onlineInfo, onNewG
                 <>
                   <ClubLogo code={displayRound.team_code} size={36} className="flex-shrink-0" />
                   <div className="min-w-0 flex items-center gap-2">
-                    <h2 className="font-display text-2xl truncate text-elq-dark">{displayRound.team_name}</h2>
+                    <h2 className="font-display text-2xl truncate text-elq-dark min-w-0">{displayRound.team_name}</h2>
                     <span className="flex-shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-800 whitespace-nowrap">{displayRound.season_year}/{String(displayRound.season_year + 1).slice(2)}</span>
                   </div>
                 </>
