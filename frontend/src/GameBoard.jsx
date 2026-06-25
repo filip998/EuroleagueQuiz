@@ -202,7 +202,7 @@ export function AxisLabel({ axis }) {
     AXIS_CHIP_STYLES[axisType] || "bg-slate-50 text-slate-700 border-slate-200";
   return (
     <div
-      className={`px-2 py-2 text-[11px] sm:text-xs font-semibold text-center rounded-lg border ${bgColor} leading-tight flex flex-col items-center justify-center gap-0.5 min-w-0`}
+      className={`px-2 py-1.5 text-[11px] sm:text-xs font-semibold text-center rounded-lg border ${bgColor} leading-tight flex flex-col items-center justify-center gap-0.5 min-w-0`}
     >
       {isTeam && axis.team_code && (
         <ClubLogo code={axis.team_code} size={28} alt={axis.team_name || label} />
@@ -216,7 +216,7 @@ export function AxisLabel({ axis }) {
         <img
           src={optimizeHeadshot(imageUrl, { width: HEADSHOT_WIDTHS.avatar })}
           alt={label}
-          className="w-6 h-6 rounded-full object-cover object-top border border-amber-300"
+          className="w-5 h-5 rounded-full object-cover object-top border border-amber-300"
           onError={(e) => handleHeadshotError(e, imageUrl, (ev) => { ev.currentTarget.style.display = "none"; })}
         />
       )}
@@ -548,14 +548,20 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   //            short viewports, floored so cells stay tappable and capped so
   //            large desktops keep the original ~176px cells.
   // `--ttt-reserve` is every non-cell vertical pixel (page/header chrome +
-  // scoreboard + guide + a transient feedback line + the column-header row + grid
-  // gaps + the control(s) beneath the board). It is mode-aware because the shared
-  // multiplayer scoreboard (local/online) is much taller than the solo card and
-  // online additionally stacks the "Online" status bar plus both the Offer Draw
-  // and Resign controls under the board. Calibrated against real 1366x768 /
-  // 1280x900 measurements; natural page scroll remains the ultimate fallback so
+  // scoreboard + guide + the transient result/feedback banner + the column-header
+  // row + grid gaps + the control(s) beneath the board). It is mode-aware because
+  // the shared multiplayer scoreboard (local/online) is much taller than the solo
+  // card and online additionally stacks the "Online" status bar plus the combined
+  // Offer Draw / Resign control row under the board. The reserve deliberately
+  // budgets the (transient) single-line feedback banner ("Time's up", "Incorrect",
+  // ...) so the third row stays above the fold even while that banner is showing;
+  // because the row-axis labels (e.g. "PLAYED WITH" chips) sit in the fixed
+  // `--ttt-axis` track, shrinking the cell shrinks the whole row down to the 72px
+  // floor. Online is pinned to that floor for maximum banner headroom. Calibrated
+  // against real 1366x768 / 1280x900 measurements (incl. tall played_with boards
+  // with the banner visible); natural page scroll remains the ultimate fallback so
   // nothing is ever clipped.
-  const boardReserve = isSolo ? "404px" : isOnline ? "540px" : "476px";
+  const boardReserve = isSolo ? "404px" : isOnline ? "552px" : "524px";
   const boardSizingStyle = {
     animationDelay: "100ms",
     containerType: "inline-size",
@@ -763,9 +769,9 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
         {/* Result banner */}
         {lastResult && !["resigned", "opponent_left"].includes(lastResult) && (
-          <div className="w-full mb-3 animate-slide-down">
+          <div className="w-full mb-2 animate-slide-down">
             <div
-              className={`p-2.5 rounded-xl text-center text-sm font-medium ${
+              className={`p-2 rounded-xl text-center text-sm font-medium ${
                 ["round_won", "match_won", "board_complete", "solo_won"].includes(lastResult)
                   ? "bg-elq-orange/10 text-elq-orange border border-elq-orange/20"
                   : lastResult === "correct"
@@ -814,8 +820,8 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
         {/* Error */}
         {error && (
-          <div className="w-full mb-3 animate-slide-down">
-            <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm text-center">
+          <div className="w-full mb-2 animate-slide-down">
+            <div className="p-2 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm text-center">
               {error}
             </div>
           </div>
