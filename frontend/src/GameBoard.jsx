@@ -202,7 +202,7 @@ export function AxisLabel({ axis }) {
     AXIS_CHIP_STYLES[axisType] || "bg-slate-50 text-slate-700 border-slate-200";
   return (
     <div
-      className={`px-2 py-3 text-[11px] sm:text-xs font-semibold text-center rounded-lg border ${bgColor} leading-tight flex flex-col items-center justify-center gap-1 min-w-0`}
+      className={`px-2 py-1.5 text-[11px] sm:text-xs font-semibold text-center rounded-lg border ${bgColor} leading-tight flex flex-col items-center justify-center gap-0.5 min-w-0`}
     >
       {isTeam && axis.team_code && (
         <ClubLogo code={axis.team_code} size={28} alt={axis.team_name || label} />
@@ -216,7 +216,7 @@ export function AxisLabel({ axis }) {
         <img
           src={optimizeHeadshot(imageUrl, { width: HEADSHOT_WIDTHS.avatar })}
           alt={label}
-          className="w-9 h-9 rounded-full object-cover object-top border border-amber-300"
+          className="w-5 h-5 rounded-full object-cover object-top border border-amber-300"
           onError={(e) => handleHeadshotError(e, imageUrl, (ev) => { ev.currentTarget.style.display = "none"; })}
         />
       )}
@@ -538,6 +538,42 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     game.current_player === 1 ? game.player1_name : game.player2_name;
   const isMyTurn = !isOnline || game.current_player === myPlayer;
 
+  // Height-aware board sizing (issue #259): the full 3x3 grid + axis headers must
+  // fit a laptop viewport without scrolling. Each cell is the MIN of a
+  // width-derived track and a height-derived track:
+  //   width  = (100cqw - axis - gaps) / 3   -> a hard upper bound, so the board
+  //            can never be wider than its container (no mobile h-overflow at any
+  //            width), and
+  //   height = clamp(72px, (100svh - reserve) / 3, 176px) -> shrinks the board on
+  //            short viewports, floored so cells stay tappable and capped so
+  //            large desktops keep the original ~176px cells.
+  // `--ttt-reserve` is every non-cell vertical pixel (page/header chrome +
+  // scoreboard + guide + the transient result/feedback banner + the column-header
+  // row + grid gaps + the control(s) beneath the board). It is mode-aware because
+  // the shared multiplayer scoreboard (local/online) is much taller than the solo
+  // card and online additionally stacks the "Online" status bar plus the combined
+  // Offer Draw / Resign control row under the board. The reserve deliberately
+  // budgets the (transient) single-line feedback banner ("Time's up", "Incorrect",
+  // ...) so the third row stays above the fold even while that banner is showing;
+  // because the row-axis labels (e.g. "PLAYED WITH" chips) sit in the fixed
+  // `--ttt-axis` track, shrinking the cell shrinks the whole row down to the 72px
+  // floor. Online is pinned to that floor for maximum banner headroom. Calibrated
+  // against real 1366x768 / 1280x900 measurements (incl. tall played_with boards
+  // with the banner visible); natural page scroll remains the ultimate fallback so
+  // nothing is ever clipped.
+  const boardReserve = isSolo ? "404px" : isOnline ? "552px" : "524px";
+  const boardSizingStyle = {
+    animationDelay: "100ms",
+    containerType: "inline-size",
+    "--ttt-reserve": boardReserve,
+    "--ttt-axis": "clamp(72px, 14cqw, 92px)",
+    "--ttt-cell":
+      "min(calc((100cqw - var(--ttt-axis) - 18px) / 3), clamp(72px, calc((100svh - var(--ttt-reserve)) / 3), 176px))",
+  };
+  const boardGridStyle = {
+    gridTemplateColumns: "var(--ttt-axis) repeat(3, var(--ttt-cell))",
+  };
+
   const resultMessages = {
     correct: isSolo ? "\u2705 Correct!" : "\u2705 Correct! Turn switches.",
     incorrect: isSolo ? "\u274c Incorrect. Strike lost." : "\u274c Incorrect. Turn switches.",
@@ -624,7 +660,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
       {/* Online indicator */}
       {isOnline && (
-        <div className="bg-elq-bg text-center py-1.5 text-xs text-elq-muted border-b border-elq-border">
+        <div className="bg-elq-bg text-center py-1 text-xs text-elq-muted border-b border-elq-border">
           <span className="inline-flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             Online
@@ -634,11 +670,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       )}
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col items-center px-4 py-4 sm:py-6 max-w-2xl mx-auto w-full">
+      <div className="flex-1 flex flex-col items-center px-4 py-3 sm:py-4 max-w-2xl mx-auto w-full">
         {/* Scoreboard */}
         {isSolo ? (
           <div
-            className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-4 sm:p-5 mb-4 animate-fade-in-up"
+            className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-3 sm:p-4 mb-3 animate-fade-in-up"
             aria-label="TicTacToe solo progress"
           >
             <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
@@ -733,9 +769,9 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
         {/* Result banner */}
         {lastResult && !["resigned", "opponent_left"].includes(lastResult) && (
-          <div className="w-full mb-4 animate-slide-down">
+          <div className="w-full mb-2 animate-slide-down">
             <div
-              className={`p-3 rounded-xl text-center text-sm font-medium ${
+              className={`p-2 rounded-xl text-center text-sm font-medium ${
                 ["round_won", "match_won", "board_complete", "solo_won"].includes(lastResult)
                   ? "bg-elq-orange/10 text-elq-orange border border-elq-orange/20"
                   : lastResult === "correct"
@@ -784,8 +820,8 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
         {/* Error */}
         {error && (
-          <div className="w-full mb-4 animate-slide-down">
-            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm text-center">
+          <div className="w-full mb-2 animate-slide-down">
+            <div className="p-2 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm text-center">
               {error}
             </div>
           </div>
@@ -795,13 +831,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         <div className="w-full">
           <TicTacToeGuide />
         </div>
-        {/* Board */}
-        <div className="w-full animate-fade-in-up" style={{ animationDelay: "100ms" }}>
+        {/* Board: full-width query container drives the height-aware cell var; the
+            inner board shrinks to the grid's content width and stays centered. */}
+        <div className="w-full animate-fade-in-up" style={boardSizingStyle}>
+         <div className="mx-auto w-fit max-w-full">
           {/* Column headers */}
-          <div
-            className="grid gap-1.5 mb-1.5"
-            style={{ gridTemplateColumns: "minmax(72px, 96px) repeat(3, 1fr)" }}
-          >
+          <div className="grid gap-1.5 mb-1.5" style={boardGridStyle}>
             <div />
             {displayRound.columns.map((col, ci) => (
               <AxisLabel key={ci} axis={col} />
@@ -810,11 +845,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
           {/* Rows */}
           {[0, 1, 2].map((ri) => (
-            <div
-              key={ri}
-              className="grid gap-1.5 mb-1.5"
-              style={{ gridTemplateColumns: "minmax(72px, 96px) repeat(3, 1fr)" }}
-            >
+            <div key={ri} className="grid gap-1.5 mb-1.5" style={boardGridStyle}>
               <AxisLabel axis={displayRound.rows[ri]} />
               {[0, 1, 2].map((ci) => {
                 const cell = displayRound.cells.find(
@@ -897,11 +928,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
               })}
             </div>
           ))}
+         </div>
         </div>
 
         {/* Answer reveal button for solo mode */}
         {isSolo && game.status === "active" && !inTransition && (
-          <div className="mt-6 text-center">
+          <div className="mt-4 text-center">
             <button
               onClick={handleGiveUp}
               disabled={loading}
@@ -912,11 +944,14 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           </div>
         )}
 
-        {/* Draw controls */}
+        {/* Draw + resign controls. For online, "Offer Draw" and "Resign" share a
+            single wrapping row so the board plus both controls fit a laptop
+            viewport without scrolling (issue #259); the wider draw-response panel
+            takes its own line via w-full. Local 1v1 shows only the draw control. */}
         {!isSolo && game.status === "active" && !inTransition && (
-          <div className="mt-6 text-center">
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-center">
             {game.pending_draw ? (
-              <div className="bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
+              <div className="w-full bg-white rounded-xl border border-elq-border p-4 animate-slide-down">
                 <p className="text-sm text-elq-text mb-3">
                   <strong>
                     {game.pending_draw.offered_by === 1
@@ -961,12 +996,10 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                 </button>
               )
             )}
+            {isOnline && (
+              <ResignControl onResign={handleResign} disabled={loading} inline />
+            )}
           </div>
-        )}
-
-        {/* Resign control for online games */}
-        {isOnline && game.status === "active" && !inTransition && (
-          <ResignControl onResign={handleResign} disabled={loading} />
         )}
       </div>
 

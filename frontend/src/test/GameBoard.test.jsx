@@ -316,6 +316,24 @@ describe("GameBoard online resign", () => {
     // The terminal banner is suppressed in favour of the finished-screen subtitle.
     expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
   });
+
+  it("offers draw and resign together so neither control falls below the fold (issue #259)", () => {
+    // The viewport-fit fix combines the online Offer Draw and Resign controls
+    // into one wrapping row. On the viewer's turn both must remain present and
+    // reachable; dropping or re-stacking either is what pushed row 3 / controls
+    // below the fold at 1366x768.
+    render(
+      <GameBoard
+        initialState={activeGame({ current_player: 1 })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    expect(screen.getByText("Offer Draw")).toBeInTheDocument();
+    expect(screen.getByText("Resign")).toBeInTheDocument();
+  });
 });
 
 describe("GameBoard wrong-guess feedback", () => {
@@ -863,5 +881,74 @@ describe("GameBoard solo / local never shows the online Resign control (issue #1
 
     expect(screen.queryByText("Resign")).not.toBeInTheDocument();
     expect(realtimeHolder.opts.enabled).toBe(false);
+  });
+});
+
+describe("GameBoard height-aware board sizing (issue #259)", () => {
+  // The board must fit a laptop viewport without scrolling. We assert the
+  // height-aware sizing wiring is present (not pixel sizes, which jsdom does
+  // not compute): the grid tracks consume the cell variable, and the sizing
+  // container declares a viewport-height-derived cell with a mode-aware
+  // reserve. The actual fit is verified in a real browser.
+  const sizingContainer = (container) =>
+    [...container.querySelectorAll("div[style]")].find((d) =>
+      d.style.getPropertyValue("--ttt-reserve")
+    );
+
+  const boardRows = (container) =>
+    [...container.querySelectorAll("div[style]")].filter((d) =>
+      (d.style.gridTemplateColumns || "").includes("var(--ttt-cell)")
+    );
+
+  it("drives the board grid from a viewport-height-aware cell variable", () => {
+    const { container } = render(
+      <GameBoard
+        initialState={soloGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    const sizing = sizingContainer(container);
+    expect(sizing).toBeTruthy();
+    // Cell height is bounded by the viewport height so short laptops shrink it.
+    expect(sizing.style.getPropertyValue("--ttt-cell")).toContain("svh");
+    expect(sizing.style.getPropertyValue("--ttt-reserve")).toMatch(/px$/);
+
+    // Every header/cell row references the shared cell track, not 1fr columns.
+    const rows = boardRows(container);
+    expect(rows.length).toBe(4); // 1 header row + 3 cell rows
+  });
+
+  it("reserves more non-cell height for online than solo chrome", () => {
+    const solo = render(
+      <GameBoard
+        initialState={soloGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+    const soloReserve = parseInt(
+      sizingContainer(solo.container).style.getPropertyValue("--ttt-reserve"),
+      10
+    );
+    solo.unmount();
+
+    const online = render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+    const onlineReserve = parseInt(
+      sizingContainer(online.container).style.getPropertyValue("--ttt-reserve"),
+      10
+    );
+
+    expect(onlineReserve).toBeGreaterThan(soloReserve);
   });
 });
