@@ -211,7 +211,12 @@ describe("GameSetup", () => {
     render(<GameSetup onGameCreated={mockOnGameCreated} onBack={mockOnBack} />);
 
     fireEvent.click(screen.getByText("Solo"));
-    expect(screen.getByText("Start Game")).toBeInTheDocument();
+    const startButton = screen.getByText("Start Game");
+    expect(startButton).toBeInTheDocument();
+    // The primary CTA must use the accessible CTA fill token (white-on-#C2410C
+    // ≈ 5.18:1), never the decorative brand orange (#FF6600 ≈ 2.94:1, fails AA).
+    expect(startButton).toHaveClass("bg-elq-cta");
+    expect(startButton.className).not.toContain("bg-elq-orange");
     expect(screen.queryByTestId("quick-pick-standard")).not.toBeInTheDocument();
   });
 

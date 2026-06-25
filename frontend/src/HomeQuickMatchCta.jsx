@@ -33,8 +33,8 @@ const QUIET_CLASS =
  *     leading icon. Used by the Refined home's mini cards so only the flagship keeps
  *     a filled primary.
  *
- * The CTA colour is the `--color-elq-cta` token (the accessible darker orange under
- * the refined variant), keeping every home-card CTA on one source of truth.
+ * The CTA colour is the `--color-elq-cta` token (the accessible darker orange, now the
+ * base default in both UI variants), keeping every home-card CTA on one source of truth.
  */
 export function HomeCardCta({ to, label, icon = null, testid, emphasis = "primary" }) {
   const quiet = emphasis === "quiet";

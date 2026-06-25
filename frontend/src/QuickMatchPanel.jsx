@@ -103,7 +103,7 @@ export default function QuickMatchPanel({
                     <span
                       aria-hidden="true"
                       data-testid={`play-${p.key}`}
-                      className="col-start-1 row-start-1 justify-self-end inline-flex items-center gap-1 rounded-full bg-elq-orange px-3 py-1 text-xs font-bold text-white shadow-sm pointer-events-none transition-all opacity-0 motion-safe:translate-x-1 group-hover:opacity-100 group-focus-visible:opacity-100 motion-safe:group-hover:translate-x-0 motion-safe:group-focus-visible:translate-x-0"
+                      className="col-start-1 row-start-1 justify-self-end inline-flex items-center gap-1 rounded-full bg-elq-cta px-3 py-1 text-xs font-bold text-white shadow-sm pointer-events-none transition-all opacity-0 motion-safe:translate-x-1 group-hover:opacity-100 group-focus-visible:opacity-100 motion-safe:group-hover:translate-x-0 motion-safe:group-focus-visible:translate-x-0"
                     >
                       Play
                       <span aria-hidden="true">▶</span>

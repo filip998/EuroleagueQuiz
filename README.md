@@ -372,7 +372,8 @@ by the `VITE_UI_VARIANT` environment variable and resolved in
   the four mini cards use calm, low-emphasis **Play →** links that open each game's
   setup on its **Solo** default (Quick Match is then one tap away inside setup). Each
   card keeps its existing route, `HomeQuickMatchCta` / `HomePlayCta`, and test IDs.
-- **`classic`** — the original flat five-card grid, preserved pixel-for-pixel. Set
+- **`classic`** — the original flat five-card grid, preserved pixel-for-pixel apart
+  from the shared accessible CTA fill (see **Accessible color tokens** below). Set
   `VITE_UI_VARIANT=classic` (e.g. in `frontend/.env.development` or the deploy build)
   to fall back instantly with no code change.
 
@@ -381,19 +382,23 @@ selector (defaulting to `UI_VARIANT`) so the route stays `<HomePage />` and test
 render either variant deterministically. `main.jsx` writes the active variant to
 `document.documentElement.dataset.ui` at boot.
 
-**Accessible color tokens.** The refined variant darkens shared tokens in
-`frontend/src/index.css` to meet WCAG AA, scoped under a higher-specificity
-`html[data-ui="refined"]` block so the classic defaults in `@theme` are untouched:
+**Accessible color tokens.** `frontend/src/index.css` keeps every solid-orange
+surface that carries white text on an AA-compliant fill, in **both** UI variants:
 
-- `--color-elq-muted` → `#566677` (≈5.9:1 on white, ≈5.5:1 on `--color-elq-bg`) for
-  body/label/placeholder text.
-- New `--color-elq-cta` / `--color-elq-cta-dark` drive the primary-CTA fill; the
-  refined variant points them at `#C2410C` / `#9A3412` so white button text clears AA
-  (≈5.2:1), while classic maps them to the original `#FF6600` / `#E85D00`. The shared
-  `HomeQuickMatchCta` / `HomePlayCta` use these tokens two ways via an `emphasis` prop:
-  the default `primary` is the filled `bg-elq-cta` button, and `quiet` is a low-emphasis
-  `text-elq-cta` accent text link (no fill) — `#C2410C` clears AA as body text too
-  (≈5.2:1).
+- `--color-elq-cta` / `--color-elq-cta-dark` are the primary-CTA fill, defined in the
+  base `@theme` so both variants render `#C2410C` (≈5.18:1 for white-on-fill) at rest
+  and the darker `#9A3412` (≈7.31:1) on hover — both clear WCAG AA, where the
+  decorative brand `--color-elq-orange` (#FF6600) is only 2.94:1. Every primary button,
+  the auth Sign-In button, and the countdown/status badges use `bg-elq-cta` /
+  `hover:bg-elq-cta-dark`; `--color-elq-orange` stays `#FF6600` for decorative accents
+  (borders, chips, `/opacity` tints, icons, focus rings) so the broader look is
+  unchanged. The shared `HomeQuickMatchCta` / `HomePlayCta` use the same token two ways
+  via an `emphasis` prop: the default `primary` is the filled `bg-elq-cta` button, and
+  `quiet` is a low-emphasis `text-elq-cta` accent text link (no fill) — `#C2410C` clears
+  AA as body text too.
+- The refined variant additionally darkens `--color-elq-muted` → `#566677` (≈5.9:1 on
+  white, ≈5.5:1 on `--color-elq-bg`) for body/label/placeholder text, scoped under a
+  higher-specificity `html[data-ui="refined"]` block.
 
 A `prefers-reduced-motion: reduce` guard disables the entrance reveals
 (`.animate-fade-in-up`, `.animate-slide-down`) without ever gating content visibility.

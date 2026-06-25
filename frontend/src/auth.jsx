@@ -121,7 +121,7 @@ function ClerkProviderWithRouter({ children }) {
 }
 
 const SIGN_IN_BTN_CLASS =
-  "px-4 py-1.5 rounded-full bg-elq-orange text-white text-sm font-semibold shadow-sm hover:bg-elq-orange-dark active:scale-[0.98] transition-all";
+  "px-4 py-1.5 rounded-full bg-elq-cta text-white text-sm font-semibold shadow-sm hover:bg-elq-cta-dark active:scale-[0.98] transition-all";
 const SIGN_UP_BTN_CLASS =
   "px-4 py-1.5 rounded-full bg-white text-elq-text text-sm font-semibold border border-elq-border shadow-sm hover:border-elq-orange/40 active:scale-[0.98] transition-all";
 

@@ -544,7 +544,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
                     </p>
                   </div>
                 </div>
-                <button onClick={nextSoloRound} className="px-6 py-3 rounded-xl bg-elq-orange text-white font-bold">
+                <button onClick={nextSoloRound} className="px-6 py-3 rounded-xl bg-elq-cta text-white font-bold">
                   Next career
                 </button>
               </div>
@@ -560,7 +560,7 @@ export default function CareerQuizBoard({ initialState, soloInitialRound, online
                     <button
                       onClick={() => respondNoAnswer(true)}
                       disabled={roundLocked}
-                      className="px-5 py-2 rounded-xl bg-elq-orange text-white font-bold disabled:opacity-50"
+                      className="px-5 py-2 rounded-xl bg-elq-cta text-white font-bold disabled:opacity-50"
                     >
                       Accept no answer
                     </button>

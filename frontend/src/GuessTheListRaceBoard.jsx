@@ -326,7 +326,7 @@ export default function GuessTheListRaceBoard({ initialState, onlineInfo, onNewG
                 {displayRound.guessed_count}/{displayRound.total_slots} claimed
               </span>
               {roundLocked && (
-                <span className="rounded-full bg-elq-orange px-2 py-1 text-white">
+                <span className="rounded-full bg-elq-cta px-2 py-1 text-white">
                   Next round in {revealRemaining}s
                 </span>
               )}
@@ -485,7 +485,7 @@ function CompletedRoundReveal({ round, countdown }) {
           </div>
         </div>
         {countdown > 0 && (
-          <div className="rounded-full bg-elq-orange px-3 py-1 text-sm font-bold text-white">
+          <div className="rounded-full bg-elq-cta px-3 py-1 text-sm font-bold text-white">
             Next in {countdown}s
           </div>
         )}
