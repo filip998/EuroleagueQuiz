@@ -195,6 +195,9 @@ test.describe.serial("Photo Quiz Flow", () => {
     if (!(await nextPhoto.isVisible().catch(() => false))) {
       await page.getByRole("button", { name: "Reveal answer" }).click();
       await expect(nextPhoto).toBeVisible({ timeout: 10000 });
+      // Issue #282: revealing the answer must clear the transient wrong-guess
+      // banner so it never lingers above the revealed player.
+      await expect(page.getByTestId("photo-feedback-message")).toHaveCount(0);
     }
   });
 
@@ -228,7 +231,11 @@ test.describe.serial("Photo Quiz Flow", () => {
       expect(gameIdFromUrl(playerB)).toBe(gameId);
 
       const first = await playCorrectPhotoGuess(playerA, gameId, { expectedRound: 1 });
-      await expect(playerA.getByText("Correct!")).toBeVisible({ timeout: 10000 });
+      // Issue #282: the winning guess advances the round, so the resolved round's
+      // outcome is carried by the reveal card instead of a transient "Correct!"
+      // banner (which would otherwise bleed onto the next round's photo).
+      await expect(playerA.getByText("Player 1 wins the round")).toBeVisible({ timeout: 10000 });
+      await expect(playerA.getByTestId("photo-feedback-message")).toHaveCount(0);
       await expect(playerA.getByText(`Answer: ${first.answer.name}`)).toBeVisible({ timeout: 10000 });
       await expect(playerA.getByText(/Next round unlocks in|Next round unlocked/)).toBeVisible({
         timeout: 10000,

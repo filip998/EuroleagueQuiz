@@ -310,7 +310,7 @@ describe("PhotoQuizBoard multiplayer reveals", () => {
     expect(wrongGuesses.getByText("Wrong Two")).toBeInTheDocument();
   });
 
-  it("styles multiplayer correct and wrong guess feedback with distinct tones", async () => {
+  it("styles multiplayer wrong-guess feedback and never bleeds a win banner into the next round", async () => {
     autocompletePhotoPlayer
       .mockResolvedValueOnce({ players: [{ id: 41, name: "Wrong Player" }] })
       .mockResolvedValueOnce({ players: [{ id: 42, name: "Winning Player" }] });
@@ -338,6 +338,7 @@ describe("PhotoQuizBoard multiplayer reveals", () => {
     const wrongFeedback = await screen.findByTestId("photo-feedback-message");
     expect(wrongFeedback).toHaveTextContent("Wrong guess.");
     expect(wrongFeedback).toHaveClass("bg-red-50", "text-red-600");
+    expect(wrongFeedback).not.toHaveClass("bg-emerald-50");
 
     await selectPhotoPlayer("Winning Player");
     emitPhotoRealtimeState({
@@ -360,9 +361,69 @@ describe("PhotoQuizBoard multiplayer reveals", () => {
       }),
     });
 
-    const successFeedback = await screen.findByTestId("photo-feedback-message");
-    expect(successFeedback).toHaveTextContent("Correct!");
-    expect(successFeedback).toHaveClass("bg-emerald-50", "text-emerald-700");
+    // The won round's outcome is carried by the reveal card; once the round
+    // advances no transient guess banner may persist over the new round (#282).
+    await screen.findByText("Player 1 wins the round");
+    expect(screen.queryByText("Correct!")).not.toBeInTheDocument();
+    expect(screen.queryByText("Wrong guess.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("photo-feedback-message")).not.toBeInTheDocument();
+  });
+
+  it("clears a stale wrong-guess banner when a public Quick Match round auto-skips on timeout", async () => {
+    autocompletePhotoPlayer.mockResolvedValueOnce({
+      players: [{ id: 41, name: "Wrong Player" }],
+    });
+
+    const publicGame = (overrides = {}) => activePhotoGame({
+      is_public: true,
+      preset: "standard",
+      ...overrides,
+    });
+
+    render(
+      <PhotoQuizBoard
+        initialState={publicGame()}
+        onlineInfo={{ playerNumber: 1 }}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectPhotoPlayer("Wrong Player");
+    emitPhotoRealtimeState({
+      state: publicGame(),
+      result: "incorrect",
+    });
+    expect(await screen.findByText("Wrong guess.")).toBeInTheDocument();
+
+    // The shared round timer expiry advances the round with a time_expired
+    // result; the stale "Wrong guess." banner must not bleed into it (#282).
+    emitPhotoRealtimeState({
+      state: publicGame({
+        round_number: 2,
+        current_round: {
+          ...publicGame().current_round,
+          round_number: 2,
+        },
+        latest_completed_round: completedRound({
+          round_number: 1,
+          name: "Skipped Player",
+          status: "completed",
+          winner_player: null,
+        }),
+      }),
+      result: "time_expired",
+      completedRound: completedRound({
+        round_number: 1,
+        name: "Skipped Player",
+        status: "completed",
+        winner_player: null,
+      }),
+    });
+
+    await screen.findByText("No answer");
+    expect(screen.queryByText("Wrong guess.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("photo-feedback-message")).not.toBeInTheDocument();
   });
 
   it("does not show personal correct feedback for an opponent win broadcast", () => {
@@ -775,6 +836,66 @@ describe("PhotoQuizBoard solo HUD", () => {
     expect(screen.getByRole("group", { name: "Streak 0" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Solved 0" })).toBeInTheDocument();
     expect(revealPhotoSoloAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the solo wrong-guess banner when the answer is revealed", async () => {
+    autocompletePhotoPlayer.mockResolvedValueOnce({ players: [{ id: 55, name: "Solo Miss" }] });
+    submitPhotoSoloGuess.mockResolvedValueOnce({ correct: false });
+    revealPhotoSoloAnswer.mockResolvedValueOnce({
+      answer: photoAnswer({ id: 56, name: "Revealed Star" }),
+    });
+
+    render(
+      <PhotoQuizBoard
+        soloInitialRound={soloPhotoRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectPhotoPlayer("Solo Miss");
+    expect(await screen.findByText("Not this player. Keep guessing.")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reveal answer" }));
+    });
+
+    // Revealing the answer must drop the stale wrong-guess banner instead of
+    // leaving it stacked above the revealed player (issue #282).
+    expect(await screen.findByText("Revealed Star")).toBeInTheDocument();
+    expect(screen.queryByText("Not this player. Keep guessing.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("photo-feedback-message")).not.toBeInTheDocument();
+  });
+
+  it("leaves no solo feedback banner when advancing to the next photo after a reveal", async () => {
+    autocompletePhotoPlayer.mockResolvedValueOnce({ players: [{ id: 57, name: "Solo Miss" }] });
+    submitPhotoSoloGuess.mockResolvedValueOnce({ correct: false });
+    revealPhotoSoloAnswer.mockResolvedValueOnce({
+      answer: photoAnswer({ id: 58, name: "Revealed Star" }),
+    });
+    createPhotoSoloRound.mockResolvedValueOnce(soloPhotoRound({ round_token: "next-round" }));
+
+    render(
+      <PhotoQuizBoard
+        soloInitialRound={soloPhotoRound()}
+        onHome={vi.fn()}
+        onNewGame={vi.fn()}
+      />
+    );
+
+    await selectPhotoPlayer("Solo Miss");
+    expect(await screen.findByText("Not this player. Keep guessing.")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reveal answer" }));
+    });
+    await screen.findByText("Revealed Star");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next photo" }));
+    await waitFor(() => expect(createPhotoSoloRound).toHaveBeenCalled());
+
+    expect(screen.queryByText("Not this player. Keep guessing.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("photo-feedback-message")).not.toBeInTheDocument();
   });
 });
 
