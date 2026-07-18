@@ -270,7 +270,7 @@ describe("GameBoard online resign", () => {
     fireEvent.click(screen.getByText("Resign"));
 
     await waitFor(() => expect(giveUpGame).toHaveBeenCalledWith(7, 1));
-    expect(await screen.findByText("You resigned.")).toBeInTheDocument();
+    expect(await screen.findByText("You resigned.", { selector: "p" })).toBeInTheDocument();
   });
 
   it("renders an opponent resignation delivered over realtime", async () => {
@@ -292,7 +292,7 @@ describe("GameBoard online resign", () => {
       });
     });
 
-    expect(await screen.findByText("Your opponent resigned.")).toBeInTheDocument();
+    expect(await screen.findByText("Your opponent resigned.", { selector: "p" })).toBeInTheDocument();
   });
 
   it("renders a disconnect forfeit delivered over realtime", async () => {
@@ -315,7 +315,7 @@ describe("GameBoard online resign", () => {
       });
     });
 
-    expect(await screen.findByText("Your opponent left the game.")).toBeInTheDocument();
+    expect(await screen.findByText("Your opponent left the game.", { selector: "p" })).toBeInTheDocument();
     // The terminal banner is suppressed in favour of the finished-screen subtitle.
     expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
   });
@@ -528,6 +528,227 @@ describe("GameBoard correct-answer feedback", () => {
       () => expect(cell.querySelector(".ttt-correct-check")).toBeNull(),
       { timeout: 1000 }
     );
+  });
+
+  it("treats a correct final no-line move (round_drawn) as an accepted move with check-to-headshot feedback", async () => {
+    const claimedRound = {
+      columns: [axis("A"), axis("B"), axis("C")],
+      rows: [axis("1"), axis("2"), axis("3")],
+      cells: boardCells().map((cell, index) =>
+        index === 0
+          ? {
+              ...cell,
+              claimed_by_player: 1,
+              claimed_player_id: 99,
+              claimed_player_name: "Nando De Colo",
+              claimed_player_image_url: "https://example.com/nando.png",
+            }
+          : cell
+      ),
+    };
+    // The backend only returns round_drawn when the final cell of a full board
+    // was claimed correctly (no three-in-row), so this is an accepted move
+    // like round_won/board_complete, not a rejected one.
+    submitMove.mockResolvedValue({
+      state: activeGame({
+        mode: "local_two_player",
+        current_player: 2,
+        round: claimedRound,
+      }),
+      result: "round_drawn",
+      completedRound: claimedRound,
+    });
+
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    const name = await screen.findByText("Nando De Colo");
+    const cell = name.closest("button");
+    expect(cell.querySelector(".ttt-correct-check-enter")).toBeTruthy();
+  });
+});
+
+describe("GameBoard pending-move guard", () => {
+  it("ignores a second PlayerSearch activation fired before the online move broadcast returns", () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    // Both calls happen synchronously in the same tick, before React can
+    // re-render and clear `selectedCell` -- exactly the rapid-second-activation
+    // race the guard exists for.
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+      playerSearchHolder.props.onSelect(player);
+    });
+
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a second PlayerSearch activation fired before submitMove settles (local/HTTP)", async () => {
+    let resolveSubmit;
+    submitMove.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve;
+        })
+    );
+
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    await act(async () => {
+      playerSearchHolder.props.onSelect(player);
+      playerSearchHolder.props.onSelect(player);
+    });
+
+    expect(submitMove).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSubmit({
+        state: activeGame({ mode: "local_two_player", current_player: 2 }),
+        result: "correct",
+      });
+    });
+
+    // The guard releases once the deferred response lands, so a genuinely new
+    // move afterwards is still possible.
+    fireEvent.click(screen.getAllByText("+")[1]);
+    fireEvent.click(screen.getByText("select-player"));
+    await waitFor(() => expect(submitMove).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("GameBoard claimed-vs-incorrect cell coloring race", () => {
+  it("prioritizes a newly-claimed cell over this viewer's own stale wrong-guess tint", async () => {
+    const feedback = { message: "No match for both clues." };
+    submitMove.mockResolvedValue({
+      state: activeGame({ mode: "local_two_player", current_player: 2 }),
+      result: "incorrect",
+      feedback,
+    });
+
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    const incorrectCell = await screen.findByRole("button", {
+      name: /1 row and A column\. Incorrect\./,
+    });
+    expect(incorrectCell.className).toContain("bg-red-50");
+
+    // The opponent claims the very same cell (row 0 / col 0) while this
+    // viewer's 2400ms wrong-feedback window is still open.
+    const claimedRound = {
+      columns: [axis("A"), axis("B"), axis("C")],
+      rows: [axis("1"), axis("2"), axis("3")],
+      cells: boardCells().map((cell, index) =>
+        index === 0
+          ? {
+              ...cell,
+              claimed_by_player: 2,
+              claimed_player_id: 5,
+              claimed_player_name: "Opponent Pick",
+            }
+          : cell
+      ),
+    };
+    act(() => {
+      realtimeHolder.opts?.onState?.({
+        state: activeGame({
+          mode: "local_two_player",
+          current_player: 1,
+          round: claimedRound,
+        }),
+        result: null,
+      });
+    });
+
+    const claimedCell = screen.getByText("Opponent Pick").closest("button");
+    expect(claimedCell.className).not.toContain("bg-red-50");
+    expect(claimedCell.className).toContain("bg-elq-player2-bg");
+  });
+});
+
+describe("GameBoard end-of-game live announcement", () => {
+  function liveRegionText() {
+    return document.querySelector('[aria-live="polite"]')?.textContent || "";
+  }
+
+  it("announces the perspective-aware resignation reason, not the raw result key", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 2 }}
+      />
+    );
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ status: "finished", winner_player: 2 }),
+        result: "resigned",
+      });
+    });
+
+    await screen.findByText("Your opponent resigned.", { selector: "p" });
+    expect(liveRegionText()).toContain("Your opponent resigned.");
+    expect(liveRegionText()).not.toMatch(/^resigned$/);
+  });
+
+  it("announces the perspective-aware disconnect reason, not the raw result key", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 2 }}
+      />
+    );
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ status: "finished", winner_player: 2 }),
+        result: "opponent_left",
+      });
+    });
+
+    await screen.findByText("Your opponent left the game.", { selector: "p" });
+    expect(liveRegionText()).toContain("Your opponent left the game.");
+    expect(liveRegionText()).not.toMatch(/opponent_left/);
   });
 });
 
@@ -1052,7 +1273,7 @@ describe("GameBoard end-of-game result", () => {
       });
     });
 
-    expect(await screen.findByText("Your opponent resigned.")).toBeInTheDocument();
+    expect(await screen.findByText("Your opponent resigned.", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByText(/WINS!/)).toBeInTheDocument();
     expect(screen.queryByText("Waiting for opponent...")).not.toBeInTheDocument();
   });
@@ -1121,7 +1342,7 @@ describe("GameBoard end-of-game result", () => {
 
     // The unified result screen replaces the board inline — it is not a
     // dismissible modal, so the forfeit reason and winner stay on screen.
-    expect(await screen.findByText("Your opponent resigned.")).toBeInTheDocument();
+    expect(await screen.findByText("Your opponent resigned.", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByText(/WINS!/)).toBeInTheDocument();
 
     // The old dismissible modal is gone: no Close button, no "View result" pill,

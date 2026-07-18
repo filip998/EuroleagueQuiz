@@ -54,15 +54,30 @@ async function currentTurnPage(gameId, playerA, playerB) {
 
 async function playVisibleMove(gameId, playerA, playerB) {
   const page = await currentTurnPage(gameId, playerA, playerB);
-  await page.getByRole("button", { name: "+" }).first().click();
+  // Capture a specific currently-available cell via its stateful aria-label
+  // (set whenever a cell is actually clickable) plus its stable data
+  // coordinates, rather than matching on "+" (only present in some clue
+  // labels, e.g. a "15+ PPG season" stat-milestone chip) or asserting on the
+  // first feedback-cell anywhere on the board (which a prior move's cell can
+  // already satisfy).
+  const availableCell = page
+    .locator('[data-row-index][data-col-index][aria-label*="Available. Choose a player"]')
+    .first();
+  await expect(availableCell).toBeVisible({ timeout: 10000 });
+  const rowIndex = await availableCell.getAttribute("data-row-index");
+  const colIndex = await availableCell.getAttribute("data-col-index");
+  await availableCell.click();
   await page.getByPlaceholder("Type player name...").fill("a");
   const firstResult = page.getByRole("option").first();
   await expect(firstResult).toBeVisible({ timeout: 10000 });
   await firstResult.click();
-  const feedbackCell = page.locator(
-    '[data-row-index][aria-label*="Incorrect"], [data-row-index][aria-label*="Claimed by"]'
-  ).first();
-  await expect(feedbackCell).toBeVisible({
+  // Wait for this exact cell (not just any cell) to reflect the move result,
+  // proving each call resolves a distinct move rather than reusing another
+  // cell's already-settled feedback.
+  const targetCell = page.locator(
+    `[data-row-index="${rowIndex}"][data-col-index="${colIndex}"]`
+  );
+  await expect(targetCell).toHaveAttribute("aria-label", /Incorrect|Claimed by/, {
     timeout: 15000,
   });
 }
@@ -237,7 +252,13 @@ test.describe.serial("TicTacToe Quick Match Flow", () => {
       await playerA.getByText("Resign the match? Your opponent wins.").waitFor();
       await playerA.getByRole("button", { name: "Resign" }).click();
 
-      await expect(playerA.getByText("You resigned.")).toBeVisible({ timeout: 15000 });
+      // "You resigned." is intentionally announced twice: once visibly in the
+      // result subtitle, and once in the sr-only aria-live region (so screen
+      // readers get the same perspective-aware wording instead of a raw
+      // "resigned" result key). Scope to the visible <main> result screen.
+      await expect(
+        playerA.getByRole("main").getByText("You resigned.")
+      ).toBeVisible({ timeout: 15000 });
       await expect(playerA.getByText(/Quick Bob WINS!/)).toBeVisible({ timeout: 15000 });
       await expect(playerB.getByText(/Quick Bob WINS!/)).toBeVisible({ timeout: 15000 });
     } finally {

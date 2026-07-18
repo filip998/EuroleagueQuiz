@@ -237,7 +237,8 @@ html[data-auth-chrome="reserve"] {
   .ttt-correct-check-enter,
   .ttt-correct-check-exit,
   .ttt-headshot-reveal,
-  .ttt-responsive-dialog {
+  .ttt-responsive-dialog,
+  .animate-spin-slow {
     animation: none;
   }
 

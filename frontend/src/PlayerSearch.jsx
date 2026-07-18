@@ -85,6 +85,26 @@ export default function PlayerSearch({
   );
   const activeOptionId =
     activeIndex >= 0 ? `${optionIdPrefix}-${results[activeIndex]?.player_id}` : undefined;
+  // Single predicate shared by the rendered listbox and its aria-expanded so
+  // the two can never disagree (e.g. stale results still counted as "expanded"
+  // while the loading/error view is what's actually on screen).
+  const showResultsList = !loading && !searchError && results.length > 0;
+
+  function handleQueryChange(event) {
+    const value = event.target.value;
+    setQuery(value);
+    // Invalidate the previous query's results/highlight immediately instead of
+    // waiting out the 250ms debounce below. Otherwise an old result set (and
+    // its keyboard highlight) stays "live" while the user keeps typing, so an
+    // Enter pressed right after an edit can select a player that no longer
+    // matches what's in the box.
+    setResults([]);
+    setSearchError(null);
+    // Keep the "Searching…" state (rather than a misleading "No players
+    // found" flash) continuously covering the gap until the debounced search
+    // below actually starts.
+    setLoading(value.length >= 1);
+  }
 
   return createPortal(
     <div
@@ -97,7 +117,7 @@ export default function PlayerSearch({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="ttt-responsive-dialog flex h-[min(66dvh,580px)] max-h-[calc(100dvh-56px)] w-full flex-col rounded-t-3xl bg-white shadow-2xl outline-none sm:h-auto sm:min-h-[460px] sm:max-w-md sm:rounded-2xl"
+        className="ttt-responsive-dialog flex h-[min(66dvh,580px)] max-h-[calc(100dvh-56px)] w-full flex-col rounded-t-3xl bg-white shadow-2xl outline-none sm:h-auto sm:max-h-[calc(100dvh-56px)] sm:min-h-[min(460px,calc(100dvh-56px))] sm:max-w-md sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div
@@ -174,11 +194,11 @@ export default function PlayerSearch({
               role="combobox"
               aria-autocomplete="list"
               aria-controls={listId}
-              aria-expanded={results.length > 0}
+              aria-expanded={showResultsList}
               aria-activedescendant={activeOptionId}
               aria-busy={loading}
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={handleQueryChange}
               onKeyDown={handleKeyDown}
               placeholder="Type player name..."
               autoComplete="off"
@@ -240,7 +260,7 @@ export default function PlayerSearch({
               </p>
             )}
 
-            {!loading && !searchError && results.length > 0 && (
+            {showResultsList && (
               <ul id={listId} role="listbox" aria-label="Player results" className="space-y-1">
                 {results.map((player, index) => {
                   const highlighted = index === activeIndex;

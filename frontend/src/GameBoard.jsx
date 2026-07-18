@@ -43,6 +43,7 @@ const SOLO_TERMINAL_RESULTS = new Set(["solo_won", "solo_lost", "solo_drawn", "g
 const ACCEPTED_MOVE_RESULTS = new Set([
   "correct",
   "round_won",
+  "round_drawn",
   "match_won",
   "board_complete",
   "solo_won",
@@ -229,6 +230,13 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const [roundTransition, setRoundTransition] = useState(null);
   const [cancelling, setCancelling] = useState(false);
   const attemptedCellRef = useRef(null);
+  // Synchronous guard against a second move firing before the first settles.
+  // React state (e.g. `selectedCell`/`loading`) only takes effect on the next
+  // render, so a second PlayerSearch activation in the same tick (fast
+  // double-tap/double-Enter before the closing re-render lands) could still
+  // read the stale `selectedCell` and dispatch another submitMove/realtime
+  // move. A ref is mutated immediately and closes that window.
+  const pendingMoveRef = useRef(false);
 
   const isSolo = game?.mode === "single_player";
   // A solo / local game must never be treated as online, even if `onlineInfo`
@@ -263,6 +271,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       setCellFeedback({ ...attemptedCell, kind: "correct", phase: "check" });
     }
     if (result) attemptedCellRef.current = null;
+    if (result) pendingMoveRef.current = false;
 
     if (result && message.completedRound && ROUND_REVEAL_RESULTS.has(result)) {
       startRoundTransition(result, message.completedRound, feedback);
@@ -406,7 +415,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   }
 
   async function handlePlayerSelect(player) {
-    if (!selectedCell) return;
+    // Bail out synchronously if a move is already in flight (online: waiting
+    // on the realtime broadcast; local/HTTP: waiting on submitMove) so a rapid
+    // second PlayerSearch activation can never issue a second move.
+    if (!selectedCell || pendingMoveRef.current) return;
+    pendingMoveRef.current = true;
     const attemptedCell = {
       row_index: selectedCell.row_index,
       col_index: selectedCell.col_index,
@@ -424,8 +437,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         });
         if (!sent) {
           attemptedCellRef.current = null;
+          pendingMoveRef.current = false;
           setError(realtimeUnavailableMessage);
         }
+        // On success the guard stays engaged until the realtime broadcast
+        // reaches handleRealtimeState, which clears it alongside attemptedCellRef.
         return;
       }
 
@@ -437,6 +453,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       handleRealtimeState(res);
     } catch (err) {
       attemptedCellRef.current = null;
+      pendingMoveRef.current = false;
       setError(err.message);
     } finally {
       setLoading(false);
@@ -876,6 +893,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                 !inTransition &&
                 game.status === "active" &&
                 !game.pending_draw &&
+                !loading &&
                 isMyTurn;
               const showSamples =
                 (inTransition || showFinishedResult) &&
@@ -894,7 +912,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
               // green accent instead of the Player-1 blue identity color (which
               // implies a second player). Local 1v1 / Online keep blue/red.
               let cellBg = "border-elq-border bg-white";
-              if (activeCellFeedback?.kind === "incorrect") {
+              if (!claimed && activeCellFeedback?.kind === "incorrect") {
                 cellBg = "border-red-300 bg-red-50";
               } else if (isSolo && claimed) cellBg = "border-emerald-600/30 bg-emerald-100";
               else if (claimed === 1) cellBg = "border-elq-player1/30 bg-elq-player1-bg";
@@ -1164,7 +1182,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       : "Online";
   const liveAnnouncement = lastResult
     ? [
-        resultMessages[lastResult] || lastResult,
+        // Terminal forfeit results have no generic phrasing in resultMessages;
+        // prefer the perspective-aware reason ("You resigned." / "Your opponent
+        // left the game.") already computed above so the live region never reads
+        // out the raw result key ("resigned", "opponent_left") to screen readers.
+        finishedReason || resultMessages[lastResult] || lastResult,
         lastFeedback?.message,
         game.status === "active" ? `${currentPlayerName}'s turn.` : null,
       ]

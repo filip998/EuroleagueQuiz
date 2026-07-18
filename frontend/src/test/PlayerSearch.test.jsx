@@ -442,4 +442,65 @@ describe("PlayerSearch", () => {
       screen.getByRole("option", { name: "Luka Doncic" })
     ).toHaveAttribute("aria-selected", "false");
   });
+
+  it("invalidates stale results immediately on edit so an immediate Enter cannot select the old player", async () => {
+    const stalePlayer = { player_id: 1, full_name: "Luka Doncic" };
+    autocompletePlayer.mockResolvedValueOnce({ players: [stalePlayer] });
+
+    render(
+      <PlayerSearch
+        rowAxis={barca}
+        colAxis={madrid}
+        onSelect={mockOnSelect}
+        onCancel={mockOnCancel}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type player name...");
+    await userEvent.type(input, "luka");
+    await waitFor(() =>
+      expect(screen.getByText("Luka Doncic")).toBeInTheDocument()
+    );
+
+    // Edit the query and press Enter immediately, well inside the 250ms
+    // debounce window for the new query -- before any new network response
+    // could possibly invalidate the old (now-mismatched) result set.
+    fireEvent.change(input, { target: { value: "lukas" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mockOnSelect).not.toHaveBeenCalled();
+    // The stale result must disappear from the DOM immediately, not just stop
+    // being selectable.
+    expect(screen.queryByText("Luka Doncic")).not.toBeInTheDocument();
+  });
+
+  it("keeps aria-expanded in sync with the rendered listbox while a new search is mid-debounce", async () => {
+    autocompletePlayer.mockResolvedValueOnce({
+      players: [{ player_id: 1, full_name: "Luka Doncic" }],
+    });
+
+    render(
+      <PlayerSearch
+        rowAxis={barca}
+        colAxis={madrid}
+        onSelect={mockOnSelect}
+        onCancel={mockOnCancel}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type player name...");
+    await userEvent.type(input, "luka");
+    await waitFor(() =>
+      expect(screen.getByText("Luka Doncic")).toBeInTheDocument()
+    );
+    expect(input).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.change(input, { target: { value: "lukas" } });
+
+    // The previous result set is invalidated immediately, so the listbox is
+    // gone from the DOM at the same moment aria-expanded flips -- the two can
+    // never disagree.
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-expanded", "false");
+  });
 });
