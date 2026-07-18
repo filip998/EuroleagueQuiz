@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import GameBoard from "../GameBoard";
 import {
@@ -201,6 +201,38 @@ describe("GameBoard keyboard focus restoration with the real PlayerSearch dialog
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(cell).toHaveFocus();
     expect(submitMove).not.toHaveBeenCalled();
+  });
+
+  it("restores focus to the clicked cell via the explicit trigger even when the click itself never focused it (Safari/Firefox pointer-open behavior)", () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    const cell = screen.getByRole("button", {
+      name: /1 row and A column\. Available\. Choose a player\./,
+    });
+    // fireEvent.click does NOT move focus in jsdom (unlike userEvent's
+    // click), reproducing exactly what Safari and Firefox on macOS commonly
+    // do on a real pointer/tap: the clicked control never actually receives
+    // focus, so document.activeElement is never the cell when the dialog's
+    // own initial-focus effect takes over.
+    fireEvent.click(cell);
+    expect(cell).not.toHaveFocus();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    // Because GameBoard passes the actual clicked DOM node as an explicit
+    // triggerRef (captured at click time via event.currentTarget), focus
+    // restoration is deterministic and does not depend on whatever
+    // document.activeElement happened to be when the dialog opened.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(cell).toHaveFocus();
   });
 
   it("keeps focus on the attempted cell after an incorrect Local 1v1 guess resolves (game stays active)", async () => {

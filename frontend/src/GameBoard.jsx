@@ -254,6 +254,13 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const [focusRecoveryTarget, setFocusRecoveryTarget] = useState(null);
   const boardRegionRef = useRef(null);
   const primaryResultActionRef = useRef(null);
+  // The actual DOM node of the cell button that opened PlayerSearch, captured
+  // explicitly at click time (not inferred from document.activeElement).
+  // Safari/iOS Safari and Firefox on macOS commonly do NOT move focus to a
+  // button on a plain pointer/tap, so relying on activeElement alone would
+  // capture <body> as the "opener" there and never restore to the real
+  // trigger. Passed to PlayerSearch as an explicit, deterministic triggerRef.
+  const selectedCellTriggerRef = useRef(null);
 
   const isSolo = game?.mode === "single_player";
   // A solo / local game must never be treated as online, even if `onlineInfo`
@@ -578,11 +585,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setSelectedCell(null);
   }
 
-  function handleCellClick(cell) {
+  function handleCellClick(cell, triggerElement) {
     if (game.status !== "active") return;
     if (cell.claimed_by_player) return;
     if (game.pending_draw) return;
     if (isOnline && game.current_player !== myPlayer) return;
+    selectedCellTriggerRef.current = triggerElement instanceof HTMLElement ? triggerElement : null;
     setSelectedCell(cell);
     setError(null);
     setLastResult(null);
@@ -1159,7 +1167,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                 <button
                   key={ci}
                   type="button"
-                  onClick={() => isClickable && handleCellClick(cell)}
+                  onClick={(event) => isClickable && handleCellClick(cell, event.currentTarget)}
                   disabled={!baseClickable}
                   aria-disabled={pendingBlocked ? "true" : undefined}
                   aria-label={`${rowLabel} row and ${colLabel} column. ${stateLabel}.`}
@@ -1468,7 +1476,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
               {errorBanner}
             </div>
             <div className="shrink-0 mt-3 flex flex-col items-start gap-3 border-t border-elq-border pt-3">
-              <HowToPlayControl />
+              <HowToPlayControl fallbackFocusRef={boardRegionRef} />
               {game.status === "active" && !inTransition && showAnswersButton}
             </div>
           </aside>
@@ -1491,7 +1499,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
         {/* Objective and the combined Help sheet */}
         <div className="w-full">
-          <TicTacToeGuide />
+          <TicTacToeGuide fallbackFocusRef={boardRegionRef} />
         </div>
         {/* Board */}
         {boardPane}
@@ -1513,6 +1521,10 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           colAxis={selectedCell.col_axis ?? round?.columns?.[selectedCell.col_index]}
           onSelect={handlePlayerSelect}
           onCancel={() => setSelectedCell(null)}
+          // Explicit opener: deterministic regardless of whether the browser
+          // actually moved focus to the clicked cell (Safari/Firefox commonly
+          // don't on a plain pointer/tap).
+          triggerRef={selectedCellTriggerRef}
           // If a realtime update (turn change, claim, ...) disables the
           // opener cell while this dialog is open on top of it, restoring
           // focus there on close would silently no-op -- fall back to the

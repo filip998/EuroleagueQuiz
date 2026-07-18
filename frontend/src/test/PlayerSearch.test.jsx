@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -165,6 +165,100 @@ describe("PlayerSearch", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(document.body.style.overflow).toBe("");
     expect(opener).toHaveFocus();
+  });
+
+  it("restores focus to an explicit triggerRef even when the browser left <body> focused on open (Safari/Firefox pointer behavior)", async () => {
+    // Safari and Firefox on macOS commonly do NOT move focus to a plain
+    // clicked button, unlike Chromium/jsdom's default userEvent behavior --
+    // simulate that by blurring the opener synchronously as part of the same
+    // click that opens the picker, so document.activeElement is <body> by
+    // the time PlayerSearch's dialog-focus effect runs.
+    function PickerHarnessWithTrigger() {
+      const [open, setOpen] = useState(false);
+      const triggerRef = useRef(null);
+      return (
+        <>
+          <button
+            ref={triggerRef}
+            type="button"
+            onClick={() => {
+              setOpen(true);
+              triggerRef.current?.blur();
+            }}
+          >
+            Open picker
+          </button>
+          {open && (
+            <PlayerSearch
+              rowAxis={barca}
+              colAxis={madrid}
+              onSelect={() => {}}
+              onCancel={() => setOpen(false)}
+              triggerRef={triggerRef}
+            />
+          )}
+        </>
+      );
+    }
+
+    const user = userEvent.setup();
+    render(<PickerHarnessWithTrigger />);
+
+    const opener = screen.getByRole("button", { name: "Open picker" });
+    await user.click(opener);
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // The explicit triggerRef is deterministic regardless of what (if
+    // anything) document.activeElement was when the dialog opened.
+    expect(opener).toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("falls back to the caller-supplied fallback (not <body>) when no explicit trigger is supplied and the browser left <body> focused on open", async () => {
+    function PickerHarnessBodyOpenerNoTrigger() {
+      const [open, setOpen] = useState(false);
+      const openerRef = useRef(null);
+      const fallbackRef = useRef(null);
+      return (
+        <>
+          <button
+            ref={openerRef}
+            type="button"
+            onClick={() => {
+              setOpen(true);
+              openerRef.current?.blur();
+            }}
+          >
+            Open picker
+          </button>
+          <div ref={fallbackRef} tabIndex={-1} aria-label="Fallback region" />
+          {open && (
+            <PlayerSearch
+              rowAxis={barca}
+              colAxis={madrid}
+              onSelect={() => {}}
+              onCancel={() => setOpen(false)}
+              fallbackFocusRef={fallbackRef}
+            />
+          )}
+        </>
+      );
+    }
+
+    const user = userEvent.setup();
+    render(<PickerHarnessBodyOpenerNoTrigger />);
+
+    await user.click(screen.getByRole("button", { name: "Open picker" }));
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // Without an explicit trigger, the captured "opener" would have been
+    // <body> itself -- it must be rejected as a restoration target (never
+    // meaningfully focusable) rather than silently "restoring" to it, so
+    // the supplied fallback is used instead.
+    expect(screen.getByLabelText("Fallback region")).toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it("searches with debounce and shows results", async () => {

@@ -9,13 +9,16 @@ function getFocusable(node) {
 }
 
 // True only if calling `.focus()` on this element would actually move focus
-// to it right now -- connected to the document AND not natively disabled.
-// A disconnected element, or one whose `disabled` attribute flipped true
-// while a dialog was open on top of it (e.g. a game board cell that became
-// unavailable while a picker was open), silently no-ops on `.focus()`,
-// which is exactly how focus restoration used to go missing to `<body>`.
+// to it right now -- connected to the document, not the document/body root
+// itself, and not natively disabled. A disconnected element, `<body>`/the
+// root `<html>` (never a meaningful restoration target -- see below), or one
+// whose `disabled` attribute flipped true while a dialog was open on top of
+// it (e.g. a game board cell that became unavailable while a picker was
+// open) silently no-ops on `.focus()`, which is exactly how focus
+// restoration used to go missing to `<body>`.
 function isRestorable(el) {
   if (!(el instanceof HTMLElement) || !el.isConnected) return false;
+  if (el === document.body || el === document.documentElement) return false;
   if ("disabled" in el && el.disabled) return false;
   return true;
 }
@@ -24,6 +27,7 @@ export function useDialogFocus({
   open = true,
   onClose,
   initialFocusRef = null,
+  triggerRef = null,
   fallbackFocusRef = null,
 }) {
   const dialogRef = useRef(null);
@@ -37,8 +41,17 @@ export function useDialogFocus({
   useEffect(() => {
     if (!open) return undefined;
 
-    openerRef.current =
+    // Prefer an explicitly-supplied trigger control -- deterministic
+    // regardless of whether the browser actually moved focus to it on
+    // pointer/tap (Safari and Firefox on macOS commonly leave `<body>`
+    // focused after a plain click, unlike Chromium). Only fall back to
+    // inferring the opener from document.activeElement for callers that
+    // haven't supplied one yet.
+    const explicitTrigger =
+      triggerRef?.current instanceof HTMLElement ? triggerRef.current : null;
+    const activeElementOpener =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    openerRef.current = explicitTrigger || activeElementOpener;
 
     const node = dialogRef.current;
     const previousBodyOverflow = document.body.style.overflow;
@@ -100,7 +113,7 @@ export function useDialogFocus({
         if (isRestorable(fallback)) fallback.focus();
       }
     };
-  }, [initialFocusRef, fallbackFocusRef, open]);
+  }, [initialFocusRef, triggerRef, fallbackFocusRef, open]);
 
   return dialogRef;
 }

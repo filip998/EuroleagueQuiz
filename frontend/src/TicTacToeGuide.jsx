@@ -138,7 +138,7 @@ function LegendPanel({ panelId, tabId }) {
   );
 }
 
-function HelpDialog({ open, onClose }) {
+function HelpDialog({ open, onClose, triggerRef, fallbackFocusRef }) {
   const [activeTab, setActiveTab] = useState("howto");
   const titleId = useId();
   const howToTabId = useId();
@@ -147,7 +147,7 @@ function HelpDialog({ open, onClose }) {
   const legendPanelId = useId();
   const howToTabRef = useRef(null);
   const legendTabRef = useRef(null);
-  const dialogRef = useDialogFocus({ open, onClose });
+  const dialogRef = useDialogFocus({ open, onClose, triggerRef, fallbackFocusRef });
 
   if (!open) return null;
 
@@ -269,11 +269,13 @@ function HelpDialog({ open, onClose }) {
 const HELP_BUTTON_CLASS =
   "inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-semibold text-elq-cta hover:text-elq-cta-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange";
 
-export function HowToPlayControl({ className = HELP_BUTTON_CLASS }) {
+export function HowToPlayControl({ className = HELP_BUTTON_CLASS, fallbackFocusRef }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef(null);
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         data-testid="ttt-help-trigger"
         onClick={() => setOpen(true)}
@@ -281,13 +283,19 @@ export function HowToPlayControl({ className = HELP_BUTTON_CLASS }) {
       >
         Help
       </button>
-      <HelpDialog open={open} onClose={() => setOpen(false)} />
+      <HelpDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        triggerRef={triggerRef}
+        fallbackFocusRef={fallbackFocusRef}
+      />
     </>
   );
 }
 
-export default function TicTacToeGuide() {
+export default function TicTacToeGuide({ fallbackFocusRef }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef(null);
 
   return (
     <div className="mb-2 flex w-full items-start justify-between gap-3">
@@ -295,6 +303,7 @@ export default function TicTacToeGuide() {
         Pick a cell, then name a player who matches both clues.
       </p>
       <button
+        ref={triggerRef}
         type="button"
         data-testid="ttt-help-trigger"
         onClick={() => setOpen(true)}
@@ -302,7 +311,12 @@ export default function TicTacToeGuide() {
       >
         Help
       </button>
-      <HelpDialog open={open} onClose={() => setOpen(false)} />
+      <HelpDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        triggerRef={triggerRef}
+        fallbackFocusRef={fallbackFocusRef}
+      />
     </div>
   );
 }

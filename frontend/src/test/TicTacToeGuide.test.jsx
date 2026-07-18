@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -152,5 +153,62 @@ describe("HowToPlayControl", () => {
 
     expect(screen.getByTestId("ttt-help-dialog")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Clue types" })).toBeInTheDocument();
+  });
+});
+
+describe("Help fallback when the trigger and dialog disconnect together", () => {
+  // Mirrors how GameBoard actually hosts these: a stable board-region
+  // fallback ref, plus a host that can swap or remove the Help
+  // trigger/dialog subtree entirely -- e.g. an ambient/remote event (the
+  // opponent finishing the match) replacing the whole layout branch, or a
+  // responsive Solo desktop <-> mobile branch swap between HowToPlayControl
+  // and TicTacToeGuide. In both cases the trigger button and its HelpDialog
+  // unmount in the very same update, so there is no "disabled opener" to
+  // fall back from -- only the caller-supplied fallback can save focus from
+  // landing on <body>.
+  function HelpHostHarness() {
+    const [mode, setMode] = useState("guide");
+    const fallbackRef = useRef(null);
+    return (
+      <>
+        <div ref={fallbackRef} tabIndex={-1} aria-label="Board region" />
+        <button type="button" onClick={() => setMode("none")}>
+          Ambient finish
+        </button>
+        <button type="button" onClick={() => setMode("control")}>
+          Swap layout
+        </button>
+        {mode === "guide" && <TicTacToeGuide fallbackFocusRef={fallbackRef} />}
+        {mode === "control" && <HowToPlayControl fallbackFocusRef={fallbackRef} />}
+      </>
+    );
+  }
+
+  it("falls back to the board region (not <body>) when an ambient/remote event removes the Help host entirely while it's open", async () => {
+    const user = userEvent.setup();
+    render(<HelpHostHarness />);
+
+    await user.click(screen.getByTestId("ttt-help-trigger"));
+    expect(screen.getByTestId("ttt-help-dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Ambient finish"));
+
+    expect(screen.queryByTestId("ttt-help-dialog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Board region")).toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("falls back to the board region when a responsive branch swap replaces the Help host (Solo desktop <-> mobile)", async () => {
+    const user = userEvent.setup();
+    render(<HelpHostHarness />);
+
+    await user.click(screen.getByTestId("ttt-help-trigger"));
+    expect(screen.getByTestId("ttt-help-dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Swap layout"));
+
+    expect(screen.queryByTestId("ttt-help-dialog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Board region")).toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
   });
 });
