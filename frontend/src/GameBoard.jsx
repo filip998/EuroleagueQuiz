@@ -244,6 +244,16 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   // keep the attempted cell's button focusable so focus restoration from the
   // closing PlayerSearch dialog has somewhere to land.
   const [movePending, setMovePending] = useState(false);
+  // A cell that just became permanently unfocusable (claimed, or the game
+  // ended) can silently blur to <body> the instant its `disabled` attribute
+  // flips true, if the user was still focused on it via keyboard. When that
+  // is detected, this records where focus should land instead: "board" (a
+  // stable, always-focusable board region -- the game continues, just not on
+  // this exact cell anymore) or "finished" (the terminal Play Again action).
+  // Set by handleRealtimeState, applied and cleared by the effect below.
+  const [focusRecoveryTarget, setFocusRecoveryTarget] = useState(null);
+  const boardRegionRef = useRef(null);
+  const primaryResultActionRef = useRef(null);
 
   const isSolo = game?.mode === "single_player";
   // A solo / local game must never be treated as online, even if `onlineInfo`
@@ -282,6 +292,31 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     const result = message.result;
     const feedback = message.feedback || null;
     const attemptedCell = attemptedCellRef.current;
+
+    // Decide BEFORE mutating any state whether this update is about to make
+    // the just-attempted cell's button permanently unfocusable: either it is
+    // claimed for good (any ACCEPTED_MOVE_RESULTS outcome), or the game/round
+    // is no longer active (finished, or a strikes-out/timeout/forfeit ended
+    // it without a claim). An "incorrect" result while the game stays active
+    // is the one case the button remains focusable through -- see
+    // baseClickable below, which keeps it a real (non-natively-disabled)
+    // button during that transient window instead of needing this recovery.
+    // If keyboard focus is currently on that exact cell, arm a recovery
+    // target so the effect above can move focus somewhere stable/meaningful
+    // once the DOM reflects the change, instead of silently losing it to
+    // <body> the instant `disabled` flips true.
+    if (attemptedCell && result) {
+      const cellStaysFocusable = message.state?.status === "active" && result === "incorrect";
+      if (!cellStaysFocusable) {
+        const attemptedButton = document.querySelector(
+          `[data-row-index="${attemptedCell.row_index}"][data-col-index="${attemptedCell.col_index}"]`
+        );
+        if (attemptedButton && document.activeElement === attemptedButton) {
+          setFocusRecoveryTarget(message.state?.status === "finished" ? "finished" : "board");
+        }
+      }
+    }
+
     setGame(message.state);
     if (message.state?.status === "finished") {
       setTerminalRound(message.completedRound || message.state.round || null);
@@ -323,13 +358,24 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   }
 
   // A server-rejected move (claimed cell, player not found, a pending draw
-  // that raced ahead, ...) arrives as a realtime ERROR envelope, not a
-  // state/result broadcast, so it would never reach handleRealtimeState's
-  // result-based release above. Routing every realtime error through the
-  // same release keeps a retryable rejection (or a dropped connection) from
-  // ever soft-locking the board; releasing when nothing is pending is a no-op.
-  function handleRealtimeError(message) {
-    releasePendingMove();
+  // that raced ahead, ...) arrives as a realtime ERROR envelope tagged
+  // { source: "realtime" } by useOnlineGameRealtime, not a state/result
+  // broadcast, so it would never reach handleRealtimeState's result-based
+  // release above. Routing every REALTIME error through the same release
+  // keeps a retryable rejection (or a dropped connection) from ever
+  // soft-locking the board; releasing when nothing is pending is a no-op.
+  //
+  // A background POLL failure (source: "poll") is a different thing
+  // entirely: it is just a transient GET hiccup fetching the periodic
+  // authoritative resync, unrelated to whether any specific action was
+  // accepted or rejected. Treating it as a move rejection would release the
+  // guard for a move that may still be perfectly in flight, opening the door
+  // to a second move sending while the first is still outstanding. Only
+  // surface it as a connection message; never release on it.
+  function handleRealtimeError(message, meta) {
+    if (meta?.source !== "poll") {
+      releasePendingMove();
+    }
     setError(message);
   }
 
@@ -366,6 +412,40 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           );
     return () => clearTimeout(timer);
   }, [cellFeedback]);
+
+  // Mirrors `showFinishedResult` (computed further below, after this
+  // component's early-return gates) using only state already available this
+  // early -- hooks must run unconditionally on every render, so this effect
+  // has to sit above those gates and can't reference a `const` declared after
+  // them.
+  const isShowingFinishedResult = game?.status === "finished" && !roundTransition;
+
+  // Runs after the render where the attempted cell's button actually became
+  // disabled (see handleRealtimeState below, which decides IF/where to
+  // recover focus to). Deferred to an effect rather than done inline so the
+  // recovery target (board region / Play Again button) is guaranteed to
+  // already exist in the DOM for the render it needs to apply to.
+  useEffect(() => {
+    if (!focusRecoveryTarget) return;
+    if (focusRecoveryTarget === "board") {
+      boardRegionRef.current?.focus();
+      setFocusRecoveryTarget(null);
+      return;
+    }
+    // focusRecoveryTarget === "finished": a correct claim or a game-ending
+    // result just arrived, but the game can still be sitting behind a
+    // "Next round in N..." transition banner (e.g. match_won) before the
+    // terminal Play Again screen actually mounts. Hold focus on the
+    // still-rendered board in the meantime; this effect re-runs every time
+    // isShowingFinishedResult flips, so it finishes the job (and only then
+    // clears the target) once the terminal screen is actually on screen.
+    if (isShowingFinishedResult && primaryResultActionRef.current) {
+      primaryResultActionRef.current.focus();
+      setFocusRecoveryTarget(null);
+    } else {
+      boardRegionRef.current?.focus();
+    }
+  }, [focusRecoveryTarget, isShowingFinishedResult]);
 
   // Sync timer
   useEffect(() => {
@@ -912,7 +992,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   // board shrinks to the grid's content width and stays centered.
   const boardPane = (
     <div className="w-full animate-fade-in-up" style={boardSizingStyle}>
-      <div className="mx-auto w-fit max-w-full">
+      <div
+        ref={boardRegionRef}
+        tabIndex={-1}
+        aria-label="TicTacToe board"
+        className="mx-auto w-fit max-w-full outline-none"
+      >
         {/* Column headers */}
         <div className="grid gap-1.5 mb-1.5" style={boardGridStyle}>
           <div />
@@ -934,27 +1019,41 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                 cellFeedback?.row_index === ri && cellFeedback?.col_index === ci
                   ? cellFeedback
                   : null;
-              // baseClickable covers every reason a cell is legitimately
-              // inert (claimed, mid-transition, game not active, blocked by a
-              // pending draw, not this player's turn) and drives the native
-              // `disabled` attribute below. `movePending` -- the synchronous
-              // guard's reactive mirror -- is intentionally kept OUT of
-              // `disabled`: gating the HTML attribute on it would make the
-              // just-clicked cell's button unfocusable the instant the
-              // PlayerSearch dialog unmounts, so useDialogFocus's opener-focus
-              // restoration silently no-ops and keyboard focus falls back to
-              // <body>. Blocking activation (via isClickable/onClick) and
-              // surfacing aria-disabled is enough to keep the board from
-              // looking or acting interactive while a move is in flight,
-              // without sacrificing focus restoration.
+              // baseClickable covers every reason a cell is PERMANENTLY
+              // inert for the rest of this round (claimed, mid-transition,
+              // game not active, blocked by a pending draw, not this
+              // player's turn) and drives the native `disabled` attribute
+              // below. Two things are intentionally kept OUT of it, both
+              // transient/reversible rather than structural:
+              //   - `movePending`/`loading`: a move is in flight for THIS
+              //     cell (online broadcast, or local/HTTP submitMove).
+              //   - an "incorrect" activeCellFeedback: the guess was wrong,
+              //     but the cell was never claimed, so it goes right back to
+              //     being clickable once the ~2.4s feedback window clears.
+              // Gating `disabled` on either would make the just-attempted
+              // cell's button unfocusable the instant it happens (mid-render,
+              // same commit as the state update), so:
+              //   - useDialogFocus's opener-focus restoration (when
+              //     PlayerSearch unmounts) would silently no-op, and
+              //   - a wrong guess would force an unnecessary focus recovery
+              //     every single time instead of just staying put.
+              // Blocking activation (via isClickable/onClick) and surfacing
+              // aria-disabled is enough to keep the board from looking or
+              // acting interactive while transiently blocked, without
+              // sacrificing focus. A cell that becomes claimed (correct) or a
+              // game/round that stops being active DOES permanently drop out
+              // of baseClickable -- handleRealtimeState's focus-recovery
+              // above is what keeps keyboard focus from being lost to <body>
+              // in that genuinely-permanent case.
+              const transientlyBlocked =
+                movePending || loading || activeCellFeedback?.kind === "incorrect";
               const baseClickable =
                 !claimed &&
-                !activeCellFeedback &&
                 !inTransition &&
                 game.status === "active" &&
                 !game.pending_draw &&
                 isMyTurn;
-              const isClickable = baseClickable && !movePending && !loading;
+              const isClickable = baseClickable && !transientlyBlocked;
               const showSamples =
                 (inTransition || showFinishedResult) &&
                 !claimed &&
@@ -989,10 +1088,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
               const rowLabel = clueText(displayRound.rows[ri]);
               const colLabel = clueText(displayRound.columns[ci]);
-              // Only surface the transient "blocked by a pending
-              // request" wording when the cell would otherwise be
-              // interactable, mirroring baseClickable vs. isClickable.
-              const pendingBlocked = baseClickable && (movePending || loading);
+              // True whenever the cell is transiently (not permanently)
+              // blocked: aria-disabled should say so regardless of which
+              // transient reason applies, but the "Move in progress" wording
+              // below only ever surfaces when nothing more specific (like
+              // the "Incorrect. ..." branch, checked first) already covers it.
+              const pendingBlocked = baseClickable && transientlyBlocked;
               const stateLabel = claimed
                 ? `Claimed by ${cell.claimed_player_name || `player ${claimed}`}`
                 : activeCellFeedback?.kind === "incorrect"
@@ -1226,6 +1327,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const finishedActions = showFinishedResult ? (
     <div className="mt-3 grid grid-cols-[1.35fr_1fr] gap-2">
       <button
+        ref={primaryResultActionRef}
         type="button"
         onClick={onNewGame}
         className="min-h-12 rounded-xl bg-elq-cta px-4 text-sm font-bold text-white transition-colors hover:bg-elq-cta-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange focus-visible:ring-offset-2"

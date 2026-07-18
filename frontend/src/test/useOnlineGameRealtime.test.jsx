@@ -427,4 +427,135 @@ describe("useOnlineGameRealtime", () => {
 
     expect(connect).not.toHaveBeenCalled();
   });
+
+  describe("action-epoch correlation with background polling", () => {
+    // These cover the round-3 finding: a 10s background poll can be in
+    // flight when the user sends a websocket action. Without correlating the
+    // two, the poll (captured BEFORE the send) could resolve or reject AFTER
+    // the send and be mistaken for authoritative information about that
+    // newer action -- releasing a consumer's pending-move guard too early,
+    // or misattributing feedback. `sendAction` bumps an internal action
+    // epoch; a poll started before that bump must be dropped once it
+    // settles, while a poll started AFTER the bump must still work normally
+    // (so a genuinely lost result broadcast can still be recovered).
+
+    it("ignores a poll SUCCESS that resolves after a newer action was sent while it was in flight", async () => {
+      vi.useFakeTimers();
+      let resolvePoll;
+      const onState = vi.fn();
+      const fetchState = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolvePoll = resolve;
+          })
+      );
+      renderHarness({ fetchState, onState });
+
+      // The poll fires and is held pending.
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+        await Promise.resolve();
+      });
+      expect(fetchState).toHaveBeenCalledTimes(1);
+
+      // A newer action is sent while that poll is still outstanding.
+      fireEvent.click(screen.getByText("send"));
+
+      // The stale (pre-send) poll now resolves.
+      await act(async () => {
+        resolvePoll({ id: 1, status: "active", current_player: 2 });
+        await Promise.resolve();
+      });
+
+      expect(onState).not.toHaveBeenCalled();
+    });
+
+    it("ignores a poll FAILURE that rejects after a newer action was sent while it was in flight", async () => {
+      vi.useFakeTimers();
+      let rejectPoll;
+      const onError = vi.fn();
+      const fetchState = vi.fn(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectPoll = reject;
+          })
+      );
+      renderHarness({ fetchState, onError });
+
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+        await Promise.resolve();
+      });
+      expect(fetchState).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByText("send"));
+
+      await act(async () => {
+        rejectPoll(new Error("network blip"));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it("still surfaces a poll that began after the action was sent (bounded recovery keeps working)", async () => {
+      vi.useFakeTimers();
+      const onState = vi.fn();
+      const fetchState = vi.fn().mockResolvedValue({
+        id: 1,
+        status: "active",
+        current_player: 2,
+      });
+      renderHarness({ fetchState, onState });
+
+      // Send the action first...
+      fireEvent.click(screen.getByText("send"));
+      // ...then let the poll interval fire; this poll starts AFTER the send,
+      // so it must not be treated as stale.
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+        await Promise.resolve();
+      });
+
+      expect(fetchState).toHaveBeenCalledTimes(1);
+      expect(onState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: "poll",
+          state: { id: 1, status: "active", current_player: 2 },
+        })
+      );
+    });
+
+    it("tags a realtime ERROR envelope with source: realtime", () => {
+      const onError = vi.fn();
+      const { connections } = renderHarness({ onError });
+
+      act(() =>
+        connections[0].emit({
+          kind: "error",
+          error: "It is not your turn",
+          code: "conflict",
+        })
+      );
+
+      expect(onError).toHaveBeenCalledWith("It is not your turn", {
+        source: "realtime",
+      });
+    });
+
+    it("tags a background poll failure with source: poll (distinct from a realtime ERROR)", async () => {
+      vi.useFakeTimers();
+      const onError = vi.fn();
+      const fetchState = vi.fn().mockRejectedValue(new Error("network blip"));
+      renderHarness({ fetchState, onError });
+
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+        await Promise.resolve();
+      });
+
+      expect(onError).toHaveBeenCalledWith("network blip", { source: "poll" });
+    });
+  });
 });
