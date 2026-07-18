@@ -55,6 +55,7 @@ html[data-ui="refined"] {
  */
 :root {
   --elq-auth-safe-top: 0px;
+  --elq-ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 }
 html[data-auth-chrome="reserve"] {
   --elq-auth-safe-top: 3.5rem;
@@ -142,6 +143,44 @@ html[data-auth-chrome="reserve"] {
   animation: spin-slow 3s linear infinite;
 }
 
+.home-launcher {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition:
+    opacity 220ms var(--elq-ease-out-quint),
+    transform 220ms var(--elq-ease-out-quint);
+}
+
+@starting-style {
+  .home-launcher {
+    opacity: 0;
+    transform: translateY(6px) scale(0.995);
+  }
+}
+
+.home-game-row {
+  transition:
+    transform 120ms var(--elq-ease-out-quint),
+    border-color 160ms var(--elq-ease-out-quint),
+    box-shadow 160ms var(--elq-ease-out-quint);
+}
+
+.home-game-row:active {
+  transform: scale(0.98);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .home-game-row:hover {
+    border-color: rgb(255 102 0 / 0.32);
+    box-shadow: 0 8px 20px rgb(15 25 35 / 0.08);
+    transform: translateY(-2px);
+  }
+
+  .home-game-row:active {
+    transform: scale(0.98);
+  }
+}
+
 /*
  * Reduced-motion alternative for entrance reveals (page sections plus the
  * portal dialogs). These keyframes start at opacity:0 with `both` fill, so
@@ -154,6 +193,27 @@ html[data-auth-chrome="reserve"] {
   .animate-modal-in,
   .animate-overlay-in {
     animation: none;
+  }
+
+  .home-launcher {
+    transform: none;
+    transition: opacity 120ms ease-out;
+  }
+
+  .home-game-row {
+    transition: background-color 100ms ease-out;
+  }
+
+  .home-game-row:hover,
+  .home-game-row:active {
+    transform: none;
+  }
+
+  @starting-style {
+    .home-launcher {
+      opacity: 0;
+      transform: none;
+    }
   }
 }
 

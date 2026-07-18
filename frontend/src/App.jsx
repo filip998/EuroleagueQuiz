@@ -62,7 +62,7 @@ function LoadingScreen() {
 //   - HomePageClassic: the original flat 5-card grid (preserved verbatim so
 //     VITE_UI_VARIANT=classic restores today's look pixel-for-pixel, apart from
 //     the shared accessible primary-CTA fill token; see index.css).
-//   - HomePageRefined: the "Refined Light" hero + flagship + 2x2 lobby (default).
+//   - HomePageRefined: the compact, game-first launcher used at every viewport.
 // `HomePage` picks one; the `/` route renders it. The `variant` prop defaults to
 // UI_VARIANT and exists so tests can render either presentation deterministically.
 // ---------------------------------------------------------------------------
@@ -211,57 +211,39 @@ const ICON_CAMERA = (
   </svg>
 );
 
-// Real club crests used by the flagship card (served from /public/logos).
-const FLAGSHIP_CRESTS = ["bar", "mad", "csk", "oly", "pan"];
-
-// Decorative 3x3 motif. Purely a faded, grayscale backdrop — it deliberately
-// does NOT mimic a live, claimable game (no orange "claimed" cells, no coloured
-// ownership tiles). Each entry is a crest code or null for an empty tile.
-const FLAGSHIP_BOARD = ["bar", null, "mad", null, "csk", null, "oly", null, "pan"];
-
-// Compact "how it works" rules shown on the flagship card (game rules only —
-// mode guidance lives elsewhere). Kept short so the 3-step list never overflows.
-const FLAGSHIP_STEPS = [
-  "Pick a cell on the grid",
-  "Name a player who fits both clues",
-  "Claim it to build your line",
-];
-
-function HomeStat({ value, label }) {
+function HomeGameRow({ to, title, modes, icon, iconChip, featured = false }) {
   return (
-    <div className="flex items-baseline gap-2">
-      <span className="font-display text-2xl text-elq-dark">{value}</span>
-      <span className="text-xs uppercase tracking-wider text-elq-muted">{label}</span>
-    </div>
-  );
-}
-
-function HomeStatSeparator() {
-  return <span aria-hidden="true" className="hidden h-6 w-px bg-elq-border sm:block" />;
-}
-
-// One differentiated game tile. `accentBar` / `iconChip` are full static class
-// strings (Tailwind v4 cannot generate dynamically composed class names), and
-// `cta` is the preserved HomeQuickMatchCta / HomePlayCta element so existing
-// routes, testids and Quick-Match behaviour are untouched.
-function GameMiniCard({ to, title, description, tag, icon, accentBar, iconChip, cta }) {
-  return (
-    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-elq-border bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg sm:p-6">
-      <span aria-hidden="true" className={`absolute inset-x-0 top-0 h-1 ${accentBar}`} />
-      <Link to={to} className="block flex-1 text-left">
-        <div className="flex items-start justify-between gap-3">
-          <span className={`flex h-11 w-11 items-center justify-center rounded-xl border ${iconChip}`}>
-            {icon}
+    <Link
+      to={to}
+      className={`home-game-row relative flex touch-manipulation items-center gap-3 overflow-hidden rounded-2xl border px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-cta focus-visible:ring-offset-2 ${
+        featured
+          ? "min-h-[84px] border-orange-300 bg-orange-50/80 shadow-sm active:bg-orange-100"
+          : "min-h-[68px] border-elq-border bg-white shadow-sm active:bg-elq-bg"
+      }`}
+    >
+      {featured && <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1 bg-elq-orange" />}
+      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconChip}`}>
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        {featured && (
+          <span className="mb-0.5 block text-[10px] font-bold uppercase tracking-wide text-elq-cta">
+            ★ Most played
           </span>
-          <span className="whitespace-nowrap rounded-full border border-elq-border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-elq-muted">
-            {tag}
-          </span>
-        </div>
-        <h3 className="mt-4 font-display text-2xl tracking-wide text-elq-dark">{title}</h3>
-        <p className="mt-1.5 text-sm leading-relaxed text-elq-muted">{description}</p>
-      </Link>
-      {cta}
-    </div>
+        )}
+        <span className={`block font-display leading-none tracking-wide text-elq-dark ${featured ? "text-[1.75rem]" : "text-2xl"}`}>
+          {title}
+        </span>
+        <span className="mt-0.5 block text-xs text-elq-muted">{modes}</span>
+      </span>
+      {featured ? (
+        <span className="flex min-h-11 shrink-0 items-center rounded-lg bg-elq-cta px-4 text-xs font-bold text-white">
+          PLAY
+        </span>
+      ) : (
+        <span aria-hidden="true" className="text-xl text-elq-muted">→</span>
+      )}
+    </Link>
   );
 }
 
@@ -270,207 +252,71 @@ function HomePageRefined() {
     <div className="elq-auth-safe-top relative min-h-screen overflow-hidden">
       <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
 
-      {/* Soft backdrop: radial wash + faint court lines. Purely decorative. */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "radial-gradient(120% 70% at 50% -8%, #ffffff 0%, var(--color-elq-bg) 46%, #e7ecf3 100%)",
-          }}
-        />
-        <svg
-          className="absolute left-1/2 top-0 w-[min(1180px,118vw)] -translate-x-1/2"
-          style={{ color: "rgba(15, 25, 35, 0.045)" }}
-          viewBox="0 0 1200 760"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <circle cx="600" cy="120" r="150" />
-          <path d="M150 -40 L150 250 Q150 470 600 470 Q1050 470 1050 250 L1050 -40" />
-          <rect x="470" y="-40" width="260" height="320" />
-          <circle cx="600" cy="280" r="60" />
-        </svg>
-      </div>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          background:
+            "radial-gradient(110% 54% at 50% -8%, #ffffff 0%, var(--color-elq-bg) 58%, #e7ecf3 100%)",
+        }}
+      />
 
-      <div className="relative z-10 mx-auto max-w-6xl px-5 py-8 sm:px-6 sm:py-10">
-        <header className="flex animate-fade-in-up justify-center">
-          <LogoFull />
+      <main className="home-launcher relative z-10 mx-auto max-w-md px-4 py-4 sm:py-8">
+        <header className="flex items-center justify-between border-b border-elq-border pb-3">
+          <LogoFull className="[&_img]:w-28" />
+          <span className="rounded-full border border-elq-border bg-white px-3 py-1.5 text-xs font-semibold text-elq-muted">
+            5 games
+          </span>
         </header>
 
-        <section className="mt-8 animate-fade-in-up text-center" style={{ animationDelay: "80ms" }}>
-          <h1 className="text-balance font-display text-5xl leading-[0.92] tracking-wide text-elq-dark sm:text-6xl lg:text-7xl">
-            HOW WELL DO YOU KNOW<br className="hidden sm:block" /> THE <span className="text-elq-cta">EUROLEAGUE</span>?
+        <section className="mt-4">
+          <h1 className="font-display text-4xl leading-none tracking-wide text-elq-dark">
+            CHOOSE YOUR <span className="text-elq-cta">GAME</span>
           </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-elq-muted sm:text-lg">
-            Five ways to test your hoops IQ — claim the grid, name the roster, and race friends across 25 seasons of European basketball.
-          </p>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 sm:gap-x-8">
-            <HomeStat value="3,000+" label="Players" />
-            <HomeStatSeparator />
-            <HomeStat value="25" label="Seasons" />
-            <HomeStatSeparator />
-            <HomeStat value="5" label="Game modes" />
-            <HomeStatSeparator />
-            <HomeStat value="1v1" label="Online" />
-          </div>
+          <p className="mt-1 text-sm text-elq-muted">Tap a game to start.</p>
         </section>
 
-        <section className="mt-10 animate-fade-in-up" style={{ animationDelay: "150ms" }}>
-          <div className="mb-5 px-1">
-            <h2 className="font-display text-3xl tracking-wide text-elq-dark">Choose your game</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-elq-muted">
-              Mode tags show how to play:{" "}
-              <span className="font-semibold text-elq-dark">Solo</span> on your own,{" "}
-              <span className="font-semibold text-elq-dark">Local 1v1</span> on one screen, or{" "}
-              <span className="font-semibold text-elq-dark">Online</span> against others.
-            </p>
-          </div>
+        <nav aria-label="EuroLeague quiz games" className="mt-4 flex flex-col gap-2">
+          <HomeGameRow
+            to="/tictactoe"
+            title="TIC-TAC-TOE"
+            modes="Solo · Local · Online"
+            icon={ICON_TTT}
+            iconChip="border border-orange-200 bg-white text-elq-cta shadow-sm"
+            featured
+          />
+          <HomeGameRow
+            to="/list"
+            title="GUESS THE LIST"
+            modes="Solo · Local · Online"
+            icon={ICON_PEOPLE}
+            iconChip="bg-red-50 text-elq-player2"
+          />
+          <HomeGameRow
+            to="/higherlower"
+            title="HIGHER OR LOWER"
+            modes="Solo"
+            icon={ICON_ARROWS}
+            iconChip="bg-emerald-50 text-emerald-600"
+          />
+          <HomeGameRow
+            to="/career"
+            title="CAREER QUIZ"
+            modes="Solo · Online"
+            icon={ICON_CLOCK}
+            iconChip="bg-amber-50 text-amber-600"
+          />
+          <HomeGameRow
+            to="/photo"
+            title="PHOTO QUIZ"
+            modes="Solo · Online"
+            icon={ICON_CAMERA}
+            iconChip="bg-violet-50 text-violet-600"
+          />
+        </nav>
 
-          <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-12">
-            {/* Flagship Tic-Tac-Toe. Wrapper is a <div> (not an anchor) so the two
-                sibling links — the body Link and the filled Quick Match CTA Link —
-                never nest. The single filled CTA is the page-level primary action;
-                "Solo · Local · Friend →" is a calm secondary text link into setup. */}
-            <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-elq-border bg-gradient-to-b from-white to-orange-50/40 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-elq-orange/40 hover:shadow-lg lg:col-span-7 lg:self-start">
-              <span aria-hidden="true" className="absolute inset-x-0 top-0 h-1 bg-elq-orange" />
-              <div className="grid gap-6 p-6 sm:p-8 md:grid-cols-[1.1fr_0.9fr]">
-                <div className="flex flex-col">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex h-12 w-12 items-center justify-center rounded-xl border border-orange-200 bg-orange-50 text-elq-cta">
-                      {ICON_TTT}
-                    </span>
-                    <span className="whitespace-nowrap rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-elq-cta">
-                      ★ Most played
-                    </span>
-                  </div>
-                  <Link to="/tictactoe" className="mt-4 block text-left">
-                    <h3 className="font-display text-4xl tracking-wide text-elq-dark sm:text-5xl">TIC-TAC-TOE</h3>
-                    <p className="mt-2 max-w-md text-sm leading-relaxed text-elq-muted">
-                      Claim cells on a 3×3 grid by naming players who match both the row and column clue. Outsmart a friend or beat the clock.
-                    </p>
-                  </Link>
-                  <div className="mt-5 flex items-center">
-                    {FLAGSHIP_CRESTS.map((crest, i) => (
-                      <img
-                        key={crest}
-                        src={`/logos/${crest}.png`}
-                        alt=""
-                        aria-hidden="true"
-                        className={`h-8 w-8 rounded-full border-2 border-white bg-white object-contain p-0.5 ${i === 0 ? "" : "-ml-2"}`}
-                      />
-                    ))}
-                    <span className="ml-3 text-xs font-semibold text-elq-muted">+ 84 clubs</span>
-                  </div>
-                  <ol className="mt-6 flex flex-col gap-2.5">
-                    {FLAGSHIP_STEPS.map((step, i) => (
-                      <li key={step} className="flex items-center gap-2.5">
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-orange-200 bg-orange-50 text-[11px] font-bold text-elq-cta">
-                          {i + 1}
-                        </span>
-                        <span className="text-sm leading-snug text-elq-muted">{step}</span>
-                      </li>
-                    ))}
-                  </ol>
-                  {/* Action row: one filled primary (Quick Match) plus a calm Solo
-                      text link. The button owns the single top margin (its baked-in
-                      mt-4); the link carries none and baseline-aligns to it, so there
-                      is no competing double margin. */}
-                  <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
-                    <HomeQuickMatchCta to="/tictactoe" />
-                    <Link
-                      to="/tictactoe"
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-elq-muted underline-offset-4 transition-colors hover:text-elq-dark hover:underline"
-                    >
-                      Solo · Local · Friend
-                      <span aria-hidden="true">→</span>
-                    </Link>
-                  </div>
-                  <p className="mt-2 text-xs text-elq-muted">
-                    Quick Match pairs you with an online 1v1 opponent.
-                  </p>
-                </div>
-
-                {/* Faded, grayscale decorative motif — never a live, claimable
-                    grid (no orange "claimed" cells, no coloured ownership tiles).
-                    aria-hidden + pointer-events-none keep it non-interactive. */}
-                <div
-                  data-testid="flagship-board"
-                  aria-hidden="true"
-                  className="pointer-events-none hidden aspect-square w-full max-w-[260px] grid-cols-3 gap-2 justify-self-end self-center opacity-90 [-webkit-mask-image:linear-gradient(to_bottom_right,#000_45%,transparent)] [mask-image:linear-gradient(to_bottom_right,#000_45%,transparent)] md:grid"
-                >
-                  {FLAGSHIP_BOARD.map((crest, i) =>
-                    crest ? (
-                      <div key={i} className="flex items-center justify-center rounded-xl border border-elq-border bg-slate-50">
-                        <img
-                          src={`/logos/${crest}.png`}
-                          alt=""
-                          className="h-3/5 w-3/5 rounded-full bg-white object-contain p-0.5 opacity-70 grayscale"
-                        />
-                      </div>
-                    ) : (
-                      <div key={i} className="rounded-xl border border-elq-border bg-slate-50/60" />
-                    )
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Four differentiated cards (2x2 on desktop/tablet, single column on
-                mobile). Each keeps its existing CTA testid, but the calm CTA is now a
-                low-emphasis "Play →" link that opens the game's setup on its Solo
-                default (Quick Match stays one tap away inside setup). */}
-            <div className="grid grid-cols-1 gap-4 sm:auto-rows-fr sm:grid-cols-2 sm:gap-5 lg:col-span-5 lg:self-start">
-              <GameMiniCard
-                to="/list"
-                title="GUESS THE LIST"
-                description="Name a full roster, all-time stat leaders, champions or MVP winners."
-                tag="Solo · Local · Online"
-                icon={ICON_PEOPLE}
-                accentBar="bg-elq-player2"
-                iconChip="border-red-200 bg-red-50 text-elq-player2"
-                cta={<HomeQuickMatchCta to="/list" label="Play" emphasis="quiet" />}
-              />
-              <GameMiniCard
-                to="/higherlower"
-                title="HIGHER OR LOWER"
-                description="Who posts the bigger stat? Build a streak — one miss ends the run."
-                tag="Solo"
-                icon={ICON_ARROWS}
-                accentBar="bg-emerald-600"
-                iconChip="border-emerald-200 bg-emerald-50 text-emerald-600"
-                cta={<HomePlayCta to="/higherlower" emphasis="quiet" />}
-              />
-              <GameMiniCard
-                to="/career"
-                title="CAREER QUIZ"
-                description="Guess the player from a club-by-club career timeline."
-                tag="Solo · Online"
-                icon={ICON_CLOCK}
-                accentBar="bg-amber-600"
-                iconChip="border-amber-200 bg-amber-50 text-amber-600"
-                cta={<HomeQuickMatchCta to="/career" label="Play" emphasis="quiet" />}
-              />
-              <GameMiniCard
-                to="/photo"
-                title="PHOTO QUIZ"
-                description="Name the EuroLeague player from his photo before the buzzer."
-                tag="Solo · Online"
-                icon={ICON_CAMERA}
-                accentBar="bg-violet-600"
-                iconChip="border-violet-200 bg-violet-50 text-violet-600"
-                cta={<HomeQuickMatchCta to="/photo" label="Play" emphasis="quiet" />}
-              />
-            </div>
-          </div>
-        </section>
-
-        <footer className="mt-10 text-center text-xs text-elq-muted">
-          Unofficial fan project · Data from the official EuroLeague API · Built by basketball fans
-        </footer>
-      </div>
+        <p className="mt-4 text-center text-xs text-elq-muted">3,000+ players · 25 seasons</p>
+      </main>
     </div>
   );
 }

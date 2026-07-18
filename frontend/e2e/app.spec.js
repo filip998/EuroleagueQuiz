@@ -83,13 +83,15 @@ async function cleanupQuickMatchPage(page) {
 }
 
 test.describe("Home Page", () => {
-  test("displays all three game mode cards", async ({ page }) => {
+  test("displays the complete game launcher", async ({ page }) => {
     await page.goto("/");
 
     await expect(page.getByText("TIC-TAC-TOE")).toBeVisible();
     await expect(page.getByText("GUESS THE LIST")).toBeVisible();
     await expect(page.getByText("HIGHER OR LOWER")).toBeVisible();
-    await expect(page.getByText("Choose your game")).toBeVisible();
+    await expect(page.getByText("CAREER QUIZ")).toBeVisible();
+    await expect(page.getByText("PHOTO QUIZ")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "CHOOSE YOUR GAME" })).toBeVisible();
   });
 
   test("navigates to TicTacToe setup and lands on Quick Match", async ({ page }) => {
@@ -104,12 +106,9 @@ test.describe("Home Page", () => {
     await expect(page.getByText("Start Game")).toBeVisible();
   });
 
-  test("home TicTacToe Quick Match CTA lands on the pool grid", async ({ page }) => {
+  test("home TicTacToe row lands on the pool grid", async ({ page }) => {
     await page.goto("/");
-    // Several home cards share the home-quick-match-cta testid: the flagship
-    // TicTacToe Quick Match button plus the calm "Play" mini-card links (which open
-    // each game's Solo setup default). Scope by href so the locator resolves to one.
-    await page.locator('[data-testid="home-quick-match-cta"][href="/tictactoe"]').click();
+    await page.getByRole("link", { name: /Most played.*TIC-TAC-TOE.*PLAY/ }).click();
 
     await expect(page).toHaveURL(/\/tictactoe$/);
     await expect(page.getByText("Pick a pool")).toBeVisible();
