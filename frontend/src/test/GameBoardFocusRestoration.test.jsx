@@ -2,7 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import GameBoard from "../GameBoard";
-import { submitMove, autocompletePlayer } from "../api";
+import {
+  submitMove,
+  autocompletePlayer,
+  connectTicTacToeRealtime,
+} from "../api";
 
 // Unlike GameBoard.test.jsx, this file intentionally does NOT mock
 // "../PlayerSearch" -- the focus-restoration bug lives in the interaction
@@ -74,6 +78,34 @@ function soloGame(overrides = {}) {
     },
     ...overrides,
   });
+}
+
+function onlineGame(overrides = {}) {
+  return activeGame({
+    mode: "online_friend",
+    ...overrides,
+  });
+}
+
+// A minimal fake websocket connection, mirroring the connector helper in
+// useOnlineGameRealtime.test.jsx, so online-mode tests in this file can
+// drive realtime broadcasts without a real socket.
+function createRealtimeConnector() {
+  const connections = [];
+  const connect = vi.fn(({ onMessage }) => {
+    const connection = {
+      open: true,
+      send: vi.fn(),
+      close: vi.fn(() => {
+        connection.open = false;
+      }),
+      isOpen: vi.fn(() => connection.open),
+      emit: (message) => onMessage(message),
+    };
+    connections.push(connection);
+    return connection;
+  });
+  return { connect, connections };
 }
 
 const boardRegion = () => document.querySelector('[aria-label="TicTacToe board"]');
@@ -410,4 +442,162 @@ describe("GameBoard keyboard focus restoration with the real PlayerSearch dialog
     expect(cell).toBeDisabled();
     expect(document.activeElement).not.toBe(document.body);
   });
+});
+
+describe("GameBoard online focus recovery (turn/claim changes, not just the result token)", () => {
+  it("moves focus to the board region after an online incorrect guess switches current_player away", async () => {
+    const connector = createRealtimeConnector();
+    connectTicTacToeRealtime.mockImplementation(connector.connect);
+
+    const user = userEvent.setup();
+    render(
+      <GameBoard
+        initialState={onlineGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    const cell = await openPickerAndSelect(
+      user,
+      /1 row and A column\. Available\. Choose a player\./
+    );
+
+    // Unlike Local/Solo, an online "incorrect" result still switches
+    // current_player to the opponent -- the same button that stays clickable
+    // in Local/Solo goes right back to natively `disabled` here via isMyTurn,
+    // so a result-token-only check ("incorrect stays focusable") is wrong.
+    act(() => {
+      connector.connections[0].emit({
+        kind: "state",
+        state: onlineGame({ current_player: 2 }),
+        result: "incorrect",
+        completedRound: null,
+        feedback: { message: "No match for both clues." },
+      });
+    });
+
+    await waitFor(() => expect(boardRegion()).toHaveFocus());
+    expect(cell).toBeDisabled();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  // The equivalent bounded-poll-resync scenario (an authoritative resync
+  // revealing the turn already changed because our own move's result
+  // broadcast was lost) is covered in GameBoard.test.jsx using the mocked
+  // realtime hook, which can drive a poll-shaped message directly without
+  // needing to control useOnlineGameRealtime's real setInterval (combining
+  // fake timers with userEvent's own internal scheduling here proved
+  // unreliable). The recovery model itself (willAttemptedCellRemainFocusable)
+  // is identical for both a direct result response and a poll settlement.
+
+  it("falls back to the board region on Cancel when the opener becomes disabled while the picker is still open", async () => {
+    const connector = createRealtimeConnector();
+    connectTicTacToeRealtime.mockImplementation(connector.connect);
+
+    const user = userEvent.setup();
+    render(
+      <GameBoard
+        initialState={onlineGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    const cell = screen.getByRole("button", {
+      name: /1 row and A column\. Available\. Choose a player\./,
+    });
+    await user.click(cell);
+    await screen.findByPlaceholderText("Type player name...");
+
+    // While the dialog is still open (no move attempted yet), a broadcast
+    // for something else entirely (e.g. the opponent's own move elsewhere on
+    // the board) switches current_player away -- the opener cell becomes
+    // natively disabled even though its own dialog never closed.
+    act(() => {
+      connector.connections[0].emit({
+        kind: "state",
+        state: onlineGame({ current_player: 2 }),
+        result: null,
+        completedRound: null,
+      });
+    });
+    expect(cell).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // useDialogFocus's own opener check would silently no-op on a disabled
+    // opener -- GameBoard supplies the board region as a fallback so focus
+    // never falls through to <body>.
+    await waitFor(() => expect(boardRegion()).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
+describe("GameBoard terminal focus recovery respects a deliberate focus change during the transition countdown", () => {
+  it("does not steal focus back from a persistent Home control the user tabbed to during the countdown", async () => {
+    const revealRound = {
+      columns: [axis("A"), axis("B"), axis("C")],
+      rows: [axis("1"), axis("2"), axis("3")],
+      status: "completed",
+      winner_player: 1,
+      cells: boardCells().map((cell, i) =>
+        i === 0
+          ? {
+              ...cell,
+              claimed_by_player: 1,
+              claimed_player_id: 99,
+              claimed_player_name: "Nando De Colo",
+            }
+          : cell
+      ),
+    };
+    submitMove.mockResolvedValue({
+      state: activeGame({
+        status: "finished",
+        winner_player: 1,
+        player1_score: 3,
+        round: revealRound,
+      }),
+      result: "match_won",
+      completedRound: revealRound,
+    });
+
+    const user = userEvent.setup();
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    await openPickerAndSelect(
+      user,
+      /1 row and A column\. Available\. Choose a player\./
+    );
+
+    // Mid round-transition banner: interim focus holds on the board region.
+    await waitFor(() => expect(boardRegion()).toHaveFocus());
+
+    // The user deliberately moves focus to the persistent Home control while
+    // the countdown is still running.
+    const homeButton = screen.getByRole("button", { name: "Back to home" });
+    homeButton.focus();
+    expect(homeButton).toHaveFocus();
+
+    // The real countdown elapses and the terminal Play Again screen mounts.
+    await waitFor(
+      () => expect(screen.getByRole("button", { name: "Play Again" })).toBeInTheDocument(),
+      { timeout: 4500 }
+    );
+
+    // Focus must NOT have been stolen back -- the user's deliberate choice
+    // is respected.
+    expect(homeButton).toHaveFocus();
+  }, 10000);
 });

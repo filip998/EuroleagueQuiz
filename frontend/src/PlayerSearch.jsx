@@ -25,6 +25,7 @@ export default function PlayerSearch({
   onSelect,
   onCancel,
   guessTheListMode,
+  fallbackFocusRef,
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -38,6 +39,7 @@ export default function PlayerSearch({
   const dialogRef = useDialogFocus({
     onClose: onCancel,
     initialFocusRef: inputRef,
+    fallbackFocusRef,
   });
   const cluePrompt = guessTheListMode
     ? ""

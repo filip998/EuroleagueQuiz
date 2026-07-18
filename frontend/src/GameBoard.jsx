@@ -268,6 +268,32 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const myPlayer = onlineInfo?.playerNumber;
   const realtimeUnavailableMessage = "Realtime connection unavailable. Reconnecting...";
 
+  // The ONE place that decides whether the attempted cell's button will
+  // remain a real, natively-enabled control under an INCOMING authoritative
+  // state -- rather than inferring it from the result token (e.g. "incorrect
+  // stays focusable"), which breaks the moment the two diverge. They do
+  // diverge online: an incorrect guess still switches `current_player` to
+  // the opponent, so the same "incorrect" result that leaves a Local/Solo
+  // cell clickable makes an online cell natively disabled via isMyTurn. The
+  // same authoritative check applies whether this update carries a result
+  // (a direct response to our own move) or is a background poll resync
+  // (result: null) that happens to reveal the same turn/claim change because
+  // our own move's result broadcast was lost. Mirrors baseClickable's
+  // structural conditions below, evaluated against the NEW state instead of
+  // the current one.
+  function willAttemptedCellRemainFocusable(incomingState, attemptedCell, willTransition) {
+    if (!incomingState || !attemptedCell || willTransition) return false;
+    if (incomingState.status !== "active") return false;
+    if (incomingState.pending_draw) return false;
+    if (isOnline && incomingState.current_player !== myPlayer) return false;
+    const cells = incomingState.round?.cells || [];
+    const cell = cells.find(
+      (c) =>
+        c.row_index === attemptedCell.row_index && c.col_index === attemptedCell.col_index
+    );
+    return !cell?.claimed_by_player;
+  }
+
   // Single place that arms the pending-move guard (ref + reactive mirror) so
   // every release path stays in lockstep.
   function beginPendingMove(attemptedCell) {
@@ -293,21 +319,27 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     const feedback = message.feedback || null;
     const attemptedCell = attemptedCellRef.current;
 
-    // Decide BEFORE mutating any state whether this update is about to make
-    // the just-attempted cell's button permanently unfocusable: either it is
-    // claimed for good (any ACCEPTED_MOVE_RESULTS outcome), or the game/round
-    // is no longer active (finished, or a strikes-out/timeout/forfeit ended
-    // it without a claim). An "incorrect" result while the game stays active
-    // is the one case the button remains focusable through -- see
-    // baseClickable below, which keeps it a real (non-natively-disabled)
-    // button during that transient window instead of needing this recovery.
-    // If keyboard focus is currently on that exact cell, arm a recovery
-    // target so the effect above can move focus somewhere stable/meaningful
-    // once the DOM reflects the change, instead of silently losing it to
-    // <body> the instant `disabled` flips true.
-    if (attemptedCell && result) {
-      const cellStaysFocusable = message.state?.status === "active" && result === "incorrect";
-      if (!cellStaysFocusable) {
+    // Decide BEFORE mutating any state whether the attempted cell's button
+    // is about to stop being a real, natively-enabled control -- claimed for
+    // good, the game/round no longer active, blocked by a pending draw, or
+    // (online) no longer this player's turn -- using the authoritative
+    // INCOMING state (see willAttemptedCellRemainFocusable above), not just
+    // the result token. This runs for BOTH a direct response to our own move
+    // AND a background poll resync (message.source === "poll", result: null)
+    // that can reveal the exact same turn/claim change if our own move's
+    // result broadcast was lost in transit. If keyboard focus is currently
+    // on that exact cell and it's not staying enabled, arm a recovery target
+    // so the effect above moves focus somewhere stable/meaningful once the
+    // DOM reflects the change, instead of silently losing it to <body> the
+    // instant `disabled` flips true.
+    if (attemptedCell) {
+      const willTransition = Boolean(message.completedRound) && ROUND_REVEAL_RESULTS.has(result);
+      const staysFocusable = willAttemptedCellRemainFocusable(
+        message.state,
+        attemptedCell,
+        willTransition
+      );
+      if (!staysFocusable) {
         const attemptedButton = document.querySelector(
           `[data-row-index="${attemptedCell.row_index}"][data-col-index="${attemptedCell.col_index}"]`
         );
@@ -434,17 +466,32 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     }
     // focusRecoveryTarget === "finished": a correct claim or a game-ending
     // result just arrived, but the game can still be sitting behind a
-    // "Next round in N..." transition banner (e.g. match_won) before the
-    // terminal Play Again screen actually mounts. Hold focus on the
-    // still-rendered board in the meantime; this effect re-runs every time
-    // isShowingFinishedResult flips, so it finishes the job (and only then
-    // clears the target) once the terminal screen is actually on screen.
-    if (isShowingFinishedResult && primaryResultActionRef.current) {
-      primaryResultActionRef.current.focus();
-      setFocusRecoveryTarget(null);
-    } else {
+    // "Next round in N..." transition banner (e.g. match_won) for several
+    // seconds before the terminal Play Again screen actually mounts. Hold
+    // focus on the still-rendered board in the meantime; this effect
+    // re-runs once isShowingFinishedResult flips, which is when the actual
+    // handoff below happens.
+    if (!isShowingFinishedResult) {
       boardRegionRef.current?.focus();
+      return;
     }
+    // The terminal screen just mounted. A multi-second countdown was a real
+    // window for the user to deliberately move focus elsewhere (e.g. tab to
+    // or click the persistent Home control) -- only claim Play Again if
+    // focus is still exactly where this recovery left it (the board region),
+    // on <body> (the browser's own blur-on-disable, not a deliberate user
+    // choice), or nowhere connected at all. Otherwise respect wherever the
+    // user actually put their focus and just clear the target.
+    const active = document.activeElement;
+    const userMovedFocusDeliberately =
+      active instanceof HTMLElement &&
+      active.isConnected &&
+      active !== document.body &&
+      active !== boardRegionRef.current;
+    if (!userMovedFocusDeliberately) {
+      primaryResultActionRef.current?.focus();
+    }
+    setFocusRecoveryTarget(null);
   }, [focusRecoveryTarget, isShowingFinishedResult]);
 
   // Sync timer
@@ -1466,6 +1513,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           colAxis={selectedCell.col_axis ?? round?.columns?.[selectedCell.col_index]}
           onSelect={handlePlayerSelect}
           onCancel={() => setSelectedCell(null)}
+          // If a realtime update (turn change, claim, ...) disables the
+          // opener cell while this dialog is open on top of it, restoring
+          // focus there on close would silently no-op -- fall back to the
+          // stable board region instead of losing focus to <body>.
+          fallbackFocusRef={boardRegionRef}
         />
       )}
     </div>

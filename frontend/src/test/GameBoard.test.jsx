@@ -753,6 +753,55 @@ describe("GameBoard pending-move guard", () => {
     });
     expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
   });
+
+  it("moves focus to the board region when a bounded poll resync reveals the turn already changed (lost result broadcast)", () => {
+    // Uses the mocked realtime hook so the poll settlement can be driven
+    // directly (source: "poll") without needing to control the shared
+    // hook's real setInterval; GameBoardFocusRestoration.test.jsx covers the
+    // equivalent scenario with the real dialog end to end where timers
+    // aren't involved.
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    const cell = screen.getAllByText("+")[0].closest("button");
+    fireEvent.click(cell);
+    // Simulate the user's keyboard focus resting on the just-clicked cell,
+    // as the real PlayerSearch/useDialogFocus stack would leave it once its
+    // dialog closes (covered end to end elsewhere); this mocked PlayerSearch
+    // stub doesn't move focus itself.
+    cell.focus();
+    expect(cell).toHaveFocus();
+
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+
+    // Neither a targeted STATE nor an ERROR broadcast for this move ever
+    // arrives -- the next authoritative poll resync reveals the turn already
+    // changed (our own move's result was lost in transit). The recovery
+    // model must be derived from the incoming authoritative state (turn,
+    // claim), not a result token that a poll settlement never carries.
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ current_player: 2 }),
+        result: null,
+        completedRound: null,
+        source: "poll",
+      });
+    });
+
+    expect(document.querySelector('[aria-label="TicTacToe board"]')).toHaveFocus();
+    expect(cell).toBeDisabled();
+    expect(document.activeElement).not.toBe(document.body);
+  });
 });
 
 describe("GameBoard claimed-vs-incorrect cell coloring race", () => {

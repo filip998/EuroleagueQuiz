@@ -8,7 +8,24 @@ function getFocusable(node) {
   return Array.from(node.querySelectorAll(FOCUSABLE_SELECTOR));
 }
 
-export function useDialogFocus({ open = true, onClose, initialFocusRef = null }) {
+// True only if calling `.focus()` on this element would actually move focus
+// to it right now -- connected to the document AND not natively disabled.
+// A disconnected element, or one whose `disabled` attribute flipped true
+// while a dialog was open on top of it (e.g. a game board cell that became
+// unavailable while a picker was open), silently no-ops on `.focus()`,
+// which is exactly how focus restoration used to go missing to `<body>`.
+function isRestorable(el) {
+  if (!(el instanceof HTMLElement) || !el.isConnected) return false;
+  if ("disabled" in el && el.disabled) return false;
+  return true;
+}
+
+export function useDialogFocus({
+  open = true,
+  onClose,
+  initialFocusRef = null,
+  fallbackFocusRef = null,
+}) {
   const dialogRef = useRef(null);
   const openerRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -63,9 +80,27 @@ export function useDialogFocus({ open = true, onClose, initialFocusRef = null })
       document.removeEventListener("keydown", handleKeyDown, true);
       document.body.style.overflow = previousBodyOverflow;
       const opener = openerRef.current;
-      if (opener && opener.isConnected) opener.focus();
+      // Restore to the opener when it's still a real, focusable control.
+      // Otherwise (disconnected, or disabled by something that changed while
+      // this dialog was open -- e.g. a realtime update elsewhere on the
+      // page) fall back to a caller-supplied stable control instead of
+      // silently leaving focus at <body>.
+      if (isRestorable(opener)) {
+        opener.focus();
+      } else {
+        // Intentionally read fresh here (not a value captured when this
+        // effect started): `fallbackFocusRef` points at a live DOM node
+        // (e.g. GameBoard's board-region container) that can itself remount
+        // to a different element while this dialog was open -- reading
+        // `.current` now, at cleanup time, is what gets the fallback that
+        // actually still exists, not a possibly-stale one from when the
+        // dialog opened.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        const fallback = fallbackFocusRef?.current;
+        if (isRestorable(fallback)) fallback.focus();
+      }
     };
-  }, [initialFocusRef, open]);
+  }, [initialFocusRef, fallbackFocusRef, open]);
 
   return dialogRef;
 }
