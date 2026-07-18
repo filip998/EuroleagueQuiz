@@ -1,7 +1,23 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { autocompletePlayer, autocompleteGuessTheListPlayer } from "./api";
-import { useListKeyboardNav } from "./useListKeyboardNav";
 import { buildCluePromptParts } from "./cluePrompt";
+import { useListKeyboardNav } from "./useListKeyboardNav";
+import { useDialogFocus } from "./useDialogFocus";
+
+function axisLabel(axis) {
+  return axis?.display_label || axis?.team_name || "Clue";
+}
+
+function playerInitials(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts.at(-1)[0]}`.toUpperCase();
+}
 
 export default function PlayerSearch({
   rowAxis,
@@ -13,97 +29,134 @@ export default function PlayerSearch({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState(null);
   const inputRef = useRef(null);
+  const titleId = useId();
+  const inputId = useId();
+  const listId = useId();
+  const optionIdPrefix = useId();
+  const dialogRef = useDialogFocus({
+    onClose: onCancel,
+    initialFocusRef: inputRef,
+  });
+  const cluePrompt = guessTheListMode
+    ? ""
+    : buildCluePromptParts(rowAxis, colAxis)
+        .map((part) => part.strong ?? part.text ?? "")
+        .join("");
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
+    let cancelled = false;
     const timer = setTimeout(async () => {
       if (query.length < 1) {
         setResults([]);
+        setSearchError(null);
+        setLoading(false);
         return;
       }
+
       setLoading(true);
+      setSearchError(null);
       try {
         const data = guessTheListMode
           ? await autocompleteGuessTheListPlayer(query)
           : await autocompletePlayer(query, null, null);
-        setResults(data.players || []);
+        if (!cancelled) setResults(data.players || []);
       } catch {
-        setResults([]);
+        if (!cancelled) {
+          setResults([]);
+          setSearchError("Player search is unavailable. Try again.");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }, 250);
-    return () => clearTimeout(timer);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [query, guessTheListMode]);
 
-  const { activeIndex, activeItemRef, handleKeyDown: handleNavKeyDown } =
-    useListKeyboardNav(results, onSelect, !loading);
+  const { activeIndex, activeItemRef, handleKeyDown } = useListKeyboardNav(
+    results,
+    onSelect,
+    !loading && !searchError
+  );
+  const activeOptionId =
+    activeIndex >= 0 ? `${optionIdPrefix}-${results[activeIndex]?.player_id}` : undefined;
 
-  function handleKeyDown(e) {
-    if (e.key === "Escape") {
-      onCancel();
-      return;
-    }
-    handleNavKeyDown(e);
-  }
-
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-overlay-in"
-      style={{ background: "rgba(15, 25, 35, 0.6)", backdropFilter: "blur(4px)" }}
+      className="animate-overlay-in fixed inset-0 z-50 flex items-end bg-slate-950/50 sm:items-center sm:justify-center sm:p-4"
       onClick={onCancel}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[80vh] flex flex-col animate-modal-in"
-        onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="ttt-responsive-dialog flex h-[min(66dvh,580px)] max-h-[calc(100dvh-56px)] w-full flex-col rounded-t-3xl bg-white shadow-2xl outline-none sm:h-auto sm:min-h-[460px] sm:max-w-md sm:rounded-2xl"
+        onClick={(event) => event.stopPropagation()}
       >
-        {/* Header */}
-        <div className="p-5 pb-0">
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="font-display text-2xl tracking-wide text-elq-dark">
-              SEARCH PLAYER
-            </h3>
+        <div
+          aria-hidden="true"
+          className="mx-auto mt-3 h-1 w-9 shrink-0 rounded-full bg-slate-300 sm:hidden"
+        />
+
+        <div className="shrink-0 px-4 pb-3 pt-3 sm:px-5 sm:pt-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 id={titleId} className="text-xl font-bold text-elq-dark">
+              Choose a player
+            </h2>
             <button
+              type="button"
               onClick={onCancel}
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-elq-muted hover:text-elq-text hover:bg-elq-bg transition-colors"
+              aria-label="Close"
+              className="flex h-11 w-11 items-center justify-center rounded-xl text-elq-muted transition-colors hover:bg-elq-bg hover:text-elq-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange"
             >
               <svg
-                className="w-5 h-5"
+                aria-hidden="true"
+                className="h-5 w-5"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
                 strokeWidth={2}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 18 18 6M6 6l12 12"
-                />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
-          <p className="text-xs text-elq-muted mb-4">
-            {guessTheListMode
-              ? "Search for a player you think was on this roster"
-              : buildCluePromptParts(rowAxis, colAxis).map((part, i) =>
-                  part.strong !== undefined ? (
-                    <span key={i} className="font-semibold text-elq-text">
-                      {part.strong}
-                    </span>
-                  ) : (
-                    <span key={i}>{part.text}</span>
-                  )
-                )}
-          </p>
 
-          {/* Search input */}
+          {guessTheListMode ? (
+            <p className="mb-4 text-sm text-elq-muted">
+              Search for a player you think was on this roster
+            </p>
+          ) : (
+            <div
+              aria-label={cluePrompt}
+              className="mb-4 flex flex-wrap items-center gap-2"
+            >
+              <span className="rounded-lg border border-elq-border bg-slate-50 px-2.5 py-2 text-xs font-semibold text-elq-text">
+                {axisLabel(rowAxis)}
+              </span>
+              <span aria-hidden="true" className="font-bold text-elq-muted">
+                +
+              </span>
+              <span className="rounded-lg border border-elq-border bg-slate-50 px-2.5 py-2 text-xs font-semibold text-elq-text">
+                {axisLabel(colAxis)}
+              </span>
+            </div>
+          )}
+
+          <label htmlFor={inputId} className="sr-only">
+            Search EuroLeague players
+          </label>
           <div className="relative">
             <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-elq-muted"
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-elq-muted"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -117,89 +170,160 @@ export default function PlayerSearch({
             </svg>
             <input
               ref={inputRef}
+              id={inputId}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls={listId}
+              aria-expanded={results.length > 0}
+              aria-activedescendant={activeOptionId}
+              aria-busy={loading}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(event) => setQuery(event.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Type player name..."
-              className="w-full pl-10 pr-4 py-3 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
+              autoComplete="off"
+              className="min-h-12 w-full rounded-xl border-2 border-elq-border bg-slate-50 py-3 pl-11 pr-12 text-base transition-colors focus:border-elq-cta focus:bg-white focus:outline-none focus:ring-0"
             />
+            {query && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery("");
+                  setResults([]);
+                  setLoading(false);
+                  setSearchError(null);
+                  inputRef.current?.focus();
+                }}
+                aria-label="Clear search"
+                className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg bg-slate-200 text-elq-muted hover:text-elq-text"
+              >
+                <svg
+                  aria-hidden="true"
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Results */}
-        <div className="flex-1 overflow-y-auto p-5 pt-3">
-          {loading && (
-            <div className="flex items-center justify-center py-8">
-              <svg
-                className="w-5 h-5 text-elq-orange animate-spin-slow"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-                />
-              </svg>
-            </div>
-          )}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-5">
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wider text-elq-muted">
+            Players
+          </div>
 
-          {!loading && results.length > 0 && (
-            <ul className="space-y-1">
-              {results.map((p, index) => (
-                <li key={p.player_id}>
-                  <button
-                    type="button"
-                    ref={index === activeIndex ? activeItemRef : undefined}
-                    aria-selected={index === activeIndex}
-                    onClick={() => onSelect(p)}
-                    className={`w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-elq-orange/5 hover:text-elq-orange transition-colors ${
-                      index === activeIndex ? "bg-elq-orange/5 text-elq-orange" : ""
-                    }`}
-                  >
-                    <span className="block truncate font-medium">{p.full_name}</span>
-                    {(p.nationality || p.era) && (
-                      <span className="mt-0.5 block truncate text-xs text-elq-muted">
-                        {[p.nationality, p.era].filter(Boolean).join(" \u00b7 ")}
+          <div aria-live="polite" aria-atomic="true">
+            {loading && (
+              <div role="status" className="flex items-center justify-center gap-2 py-8 text-sm text-elq-muted">
+                <svg
+                  aria-hidden="true"
+                  className="h-5 w-5 animate-spin-slow text-elq-cta"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+                Searching…
+              </div>
+            )}
+
+            {!loading && searchError && (
+              <p role="status" className="py-8 text-center text-sm text-red-700">
+                {searchError}
+              </p>
+            )}
+
+            {!loading && !searchError && results.length > 0 && (
+              <ul id={listId} role="listbox" aria-label="Player results" className="space-y-1">
+                {results.map((player, index) => {
+                  const highlighted = index === activeIndex;
+                  return (
+                    <li
+                      key={player.player_id}
+                      id={`${optionIdPrefix}-${player.player_id}`}
+                      role="option"
+                      ref={index === activeIndex ? activeItemRef : undefined}
+                      aria-selected={index === activeIndex}
+                      tabIndex={-1}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => onSelect(player)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onSelect(player);
+                        }
+                      }}
+                      className={`flex min-h-14 w-full cursor-pointer items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange ${
+                        highlighted ? "bg-orange-50" : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-xs font-bold text-elq-muted"
+                      >
+                        {playerInitials(player.full_name)}
                       </span>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-bold text-elq-dark">
+                          {player.full_name}
+                        </span>
+                        {(player.nationality || player.era) && (
+                          <span className="mt-0.5 block truncate text-xs text-elq-muted">
+                            {[player.nationality, player.era].filter(Boolean).join(" \u00b7 ")}
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
 
-          {!loading && query.length >= 1 && results.length === 0 && (
-            <p className="text-sm text-elq-muted text-center py-8">
-              No players found
-            </p>
-          )}
+            {!loading &&
+              !searchError &&
+              query.length >= 1 &&
+              results.length === 0 && (
+                <p role="status" className="py-8 text-center text-sm text-elq-muted">
+                  No players found
+                </p>
+              )}
+
+            {!loading && !searchError && query.length === 0 && (
+              <p className="py-8 text-center text-sm text-elq-muted">
+                Start typing to find a player.
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* Footer hint */}
-        <div className="px-5 py-3 border-t border-elq-border text-[11px] text-elq-muted text-center">
-          Press{" "}
-          <kbd className="px-1.5 py-0.5 rounded bg-elq-bg border border-elq-border text-[10px] font-mono">
+        <div className="hidden shrink-0 border-t border-elq-border px-5 py-3 text-center text-[11px] text-elq-muted sm:block">
+          <kbd className="rounded border border-elq-border bg-elq-bg px-1.5 py-0.5 font-mono text-[10px]">
+            &uarr;
+          </kbd>{" "}
+          <kbd className="rounded border border-elq-border bg-elq-bg px-1.5 py-0.5 font-mono text-[10px]">
+            &darr;
+          </kbd>{" "}
+          navigate
+          <span aria-hidden="true"> · </span>
+          <kbd className="rounded border border-elq-border bg-elq-bg px-1.5 py-0.5 font-mono text-[10px]">
+            Enter
+          </kbd>{" "}
+          select
+          <span aria-hidden="true"> · </span>
+          <kbd className="rounded border border-elq-border bg-elq-bg px-1.5 py-0.5 font-mono text-[10px]">
             Esc
           </kbd>{" "}
-          to cancel
-          {results.length > 0 && (
-            <>
-              {" "}&middot;{" "}
-              <kbd className="px-1.5 py-0.5 rounded bg-elq-bg border border-elq-border text-[10px] font-mono">
-                &uarr;&darr;
-              </kbd>{" "}
-              to navigate{" "}&middot;{" "}
-              <kbd className="px-1.5 py-0.5 rounded bg-elq-bg border border-elq-border text-[10px] font-mono">
-                Enter
-              </kbd>{" "}
-              to select
-            </>
-          )}
+          close
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

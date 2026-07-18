@@ -8,12 +8,15 @@ import { buildInviteUrl } from "../inviteLink";
 
 // Capture the options GameBoard hands to the realtime hook so tests can drive
 // server-pushed state (e.g. a disconnect forfeit) without a real WebSocket.
-const realtimeHolder = vi.hoisted(() => ({ opts: null }));
+const realtimeHolder = vi.hoisted(() => ({
+  opts: null,
+  sendAction: vi.fn(() => true),
+}));
 const playerSearchHolder = vi.hoisted(() => ({ props: null }));
 vi.mock("../useOnlineGameRealtime", () => ({
   useOnlineGameRealtime: (opts) => {
     realtimeHolder.opts = opts;
-    return {};
+    return { sendAction: realtimeHolder.sendAction };
   },
 }));
 
@@ -336,13 +339,30 @@ describe("GameBoard online resign", () => {
   });
 });
 
-describe("GameBoard wrong-guess feedback", () => {
+describe("GameBoard in-cell wrong-guess feedback", () => {
   const feedback = {
     message:
       "Nando De Colo matched the row clue EuroLeague champion, but not the column clue Played with Tornike Shengelia.",
+    failed_axes: [
+      {
+        side: "column",
+        axis_type: "played_with",
+        display_label: "Tornike Shengelia",
+        label: "Played with Tornike Shengelia",
+      },
+    ],
   };
 
-  it("renders backend feedback under the local incorrect banner", async () => {
+  function expectIncorrectCell(message = "No Tornike Shengelia match") {
+    const cell = screen.getByRole("button", {
+      name: /1 row and A column\. Incorrect\./,
+    });
+    expect(within(cell).getByText(message)).toBeInTheDocument();
+    expect(screen.queryByText("❌ Incorrect. Turn switches.")).not.toBeInTheDocument();
+    return cell;
+  }
+
+  it("renders concise feedback inside the attempted local cell", async () => {
     submitMove.mockResolvedValue({
       state: activeGame({ mode: "local_two_player", current_player: 2 }),
       result: "incorrect",
@@ -368,11 +388,11 @@ describe("GameBoard wrong-guess feedback", () => {
         player_id: 99,
       })
     );
-    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
-    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+    expectIncorrectCell();
+    expect(screen.getByText(feedback.message, { exact: false })).toBeInTheDocument();
   });
 
-  it("keeps timed local feedback visible after the turn timer syncs", async () => {
+  it("keeps timed local feedback mapped to the attempted cell after timer sync", async () => {
     submitMove.mockResolvedValue({
       state: activeGame({ mode: "local_two_player", current_player: 2, turn_seconds: 40 }),
       result: "incorrect",
@@ -398,11 +418,11 @@ describe("GameBoard wrong-guess feedback", () => {
         player_id: 99,
       })
     );
-    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
-    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+    expectIncorrectCell();
+    expect(screen.getByText(feedback.message, { exact: false })).toBeInTheDocument();
   });
 
-  it("renders realtime feedback under the online incorrect banner", async () => {
+  it("maps acting-player realtime feedback to the attempted online cell", async () => {
     render(
       <GameBoard
         initialState={activeGame()}
@@ -411,6 +431,14 @@ describe("GameBoard wrong-guess feedback", () => {
         onlineInfo={{ isOnline: true, playerNumber: 1 }}
       />
     );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+    expect(realtimeHolder.sendAction).toHaveBeenCalledWith("move", {
+      row_index: 0,
+      col_index: 0,
+      player_id: 99,
+    });
 
     act(() => {
       realtimeHolder.opts.onState({
@@ -420,11 +448,11 @@ describe("GameBoard wrong-guess feedback", () => {
       });
     });
 
-    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
-    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+    expectIncorrectCell();
+    expect(screen.getByText(feedback.message, { exact: false })).toBeInTheDocument();
   });
 
-  it("keeps the legacy terse incorrect copy when feedback is absent", async () => {
+  it("uses a concise fallback when structured feedback is absent", async () => {
     render(
       <GameBoard
         initialState={activeGame()}
@@ -434,6 +462,9 @@ describe("GameBoard wrong-guess feedback", () => {
       />
     );
 
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
     act(() => {
       realtimeHolder.opts.onState({
         state: activeGame({ current_player: 2 }),
@@ -441,8 +472,62 @@ describe("GameBoard wrong-guess feedback", () => {
       });
     });
 
-    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
+    expectIncorrectCell("No match for both clues");
     expect(screen.queryByText(/matched EuroLeague champion/)).not.toBeInTheDocument();
+  });
+});
+
+describe("GameBoard correct-answer feedback", () => {
+  it("crossfades the success check into the claimed player headshot", async () => {
+    const claimedRound = {
+      columns: [axis("A"), axis("B"), axis("C")],
+      rows: [axis("1"), axis("2"), axis("3")],
+      cells: boardCells().map((cell, index) =>
+        index === 0
+          ? {
+              ...cell,
+              claimed_by_player: 1,
+              claimed_player_id: 99,
+              claimed_player_name: "Nando De Colo",
+              claimed_player_image_url: "https://example.com/nando.png",
+            }
+          : cell
+      ),
+    };
+    submitMove.mockResolvedValue({
+      state: activeGame({
+        mode: "local_two_player",
+        current_player: 2,
+        round: claimedRound,
+      }),
+      result: "correct",
+    });
+
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    const name = await screen.findByText("Nando De Colo");
+    const cell = name.closest("button");
+    expect(cell.querySelector(".ttt-correct-check-enter")).toBeTruthy();
+    expect(screen.getByAltText("Nando De Colo").className).toContain("opacity-0");
+
+    await waitFor(
+      () => expect(cell.querySelector(".ttt-headshot-reveal")).toBeTruthy(),
+      { timeout: 1000 }
+    );
+    await waitFor(
+      () => expect(cell.querySelector(".ttt-correct-check")).toBeNull(),
+      { timeout: 1000 }
+    );
   });
 });
 
@@ -467,11 +552,11 @@ describe("GameBoard solo stakes", () => {
     );
 
     const progress = screen.getByLabelText("TicTacToe solo progress");
-    expect(within(progress).getByText("Make three in a row")).toBeInTheDocument();
+    expect(within(progress).getByText("Three in a row")).toBeInTheDocument();
     expect(within(progress).getByText("Claimed")).toBeInTheDocument();
     expect(within(progress).getByText("4/9")).toBeInTheDocument();
-    expect(within(progress).getByText("Strikes left")).toBeInTheDocument();
-    expect(within(progress).getByText("2/3")).toBeInTheDocument();
+    expect(within(progress).getByText("Strikes")).toBeInTheDocument();
+    expect(within(progress).getByText("2 left")).toBeInTheDocument();
     // The strike pips carry their meaning on an accessible label, not by shape.
     expect(
       within(progress).getByLabelText(/strikes used/i)
@@ -519,9 +604,13 @@ describe("GameBoard solo stakes", () => {
         player_id: 99,
       })
     );
-    expect(await screen.findByText("❌ Incorrect. Strike lost.")).toBeInTheDocument();
-    expect(screen.getByText("2 strikes remaining.")).toBeInTheDocument();
-    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /1 row and A column\. Incorrect\. No match for both clues/,
+      })
+    ).toBeInTheDocument();
+    expect(screen.getByText("2 left")).toBeInTheDocument();
+    expect(screen.getByText(feedback.message, { exact: false })).toBeInTheDocument();
   });
 
   it("shows the solo win result screen immediately when the board is won", async () => {
@@ -561,8 +650,13 @@ describe("GameBoard solo stakes", () => {
     expect(await screen.findByRole("heading", { name: "Solo board won!" })).toBeInTheDocument();
     expect(screen.queryByText("See Result")).not.toBeInTheDocument();
     expect(screen.queryByText(/Next board in/)).not.toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
     expect(screen.getAllByText(/Vasilije Micic/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("button", {
+        name: /1 row and A column\. Example answers: Vasilije Micic\./,
+      })
+    ).toBeInTheDocument();
   });
 
   it("shows the solo loss result screen immediately when strikes run out", async () => {
@@ -599,7 +693,7 @@ describe("GameBoard solo stakes", () => {
 
     expect(await screen.findByRole("heading", { name: "Out of strikes" })).toBeInTheDocument();
     expect(screen.queryByText("See Result")).not.toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
   });
 
   it("shows the solo draw result screen immediately when the board fills with no line", async () => {
@@ -636,7 +730,7 @@ describe("GameBoard solo stakes", () => {
 
     expect(await screen.findByRole("heading", { name: "Board complete" })).toBeInTheDocument();
     expect(screen.queryByText("See Result")).not.toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
   });
 
   it("uses Show answers to jump straight to the neutral result screen", async () => {
@@ -669,7 +763,7 @@ describe("GameBoard solo stakes", () => {
     // No "See Result" gate: Show answers reveals the result screen directly.
     expect(await screen.findByRole("heading", { name: "Answers revealed" })).toBeInTheDocument();
     expect(screen.queryByText("See Result")).not.toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
   });
 
   it("renders the defensive solo draw result screen for a full no-winner board", () => {
@@ -750,6 +844,11 @@ describe("GameBoard claimed-cell colors (issue #262)", () => {
     expect(button.className).not.toContain("bg-elq-player1-bg");
     expect(nameEl.className).toContain("text-emerald-800");
     expect(nameEl.className).not.toContain("text-elq-player1");
+    expect(
+      screen.getByRole("button", {
+        name: /1 row and A column\. Claimed by Solo Claim Pick\./,
+      })
+    ).toBeInTheDocument();
   });
 
   it("keeps the Player-1 blue identity for local 1v1 claimed cells", () => {
@@ -835,8 +934,9 @@ describe("GameBoard claimed-cell colors (issue #262)", () => {
       />
     );
 
-    const pickEl = screen.getByText(/Your pick: Reveal Pick/);
-    expect(pickEl.className).toContain("text-emerald-700");
+    const pickEl = screen.getByText("Reveal Pick");
+    expect(pickEl.closest("button").className).toContain("bg-emerald-100");
+    expect(pickEl.className).toContain("text-emerald-800");
     expect(pickEl.className).not.toContain("text-elq-player1");
   });
 });
@@ -1032,7 +1132,7 @@ describe("GameBoard end-of-game result", () => {
 
     // The end-of-game actions use the standardized, cross-game labels.
     expect(screen.getByText("Play Again")).toBeInTheDocument();
-    expect(screen.getByText("Home")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
   });
 
   it("renders a finished solo loss result screen after refresh", () => {
@@ -1062,7 +1162,7 @@ describe("GameBoard end-of-game result", () => {
 
     expect(screen.getByRole("heading", { name: "Out of strikes" })).toBeInTheDocument();
     expect(screen.getByText("Play Again")).toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
   });
 
   it("does not credit Player 2 when a finished online game has no winner", async () => {
@@ -1123,8 +1223,7 @@ describe("GameBoard header navigation", () => {
     const scoreboard = screen.getByLabelText("TicTacToe multiplayer scoreboard");
     expect(within(scoreboard).getByText("Alice")).toBeInTheDocument();
     expect(within(scoreboard).getByText("Bob")).toBeInTheDocument();
-    expect(within(scoreboard).getByText("Round 1")).toBeInTheDocument();
-    expect(within(scoreboard).getByText("First to 3")).toBeInTheDocument();
+    expect(within(scoreboard).getByText(/Round 1.*First to 3/)).toBeInTheDocument();
 
     const pill = within(scoreboard).getByText("You are Alice").closest("div");
     expect(pill.querySelector(".bg-elq-player1")).toBeTruthy();
@@ -1314,8 +1413,8 @@ describe("GameBoard desktop Solo command rail (issue #266)", () => {
 
     // Rail teaches via "How to play"; the always-on clue legend and the full
     // guide's first-run card / objective line are intentionally dropped here.
-    expect(screen.getAllByTestId("ttt-howto-trigger")).toHaveLength(1);
-    expect(within(rail).getByTestId("ttt-howto-trigger")).toBeInTheDocument();
+    expect(screen.getAllByTestId("ttt-help-trigger")).toHaveLength(1);
+    expect(within(rail).getByTestId("ttt-help-trigger")).toBeInTheDocument();
     expect(screen.queryByTestId("ttt-legend-trigger")).not.toBeInTheDocument();
     expect(screen.queryByTestId("ttt-objective")).not.toBeInTheDocument();
     expect(screen.queryByTestId("ttt-howto")).not.toBeInTheDocument();
@@ -1380,7 +1479,7 @@ describe("GameBoard desktop Solo command rail (issue #266)", () => {
       await screen.findByRole("heading", { name: "Answers revealed" })
     ).toBeInTheDocument();
     expect(screen.queryByText("See Result")).not.toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
   });
 
   it("keeps Local 1v1 on the stacked layout even at desktop width", () => {
@@ -1398,4 +1497,3 @@ describe("GameBoard desktop Solo command rail (issue #266)", () => {
     expect(screen.getByLabelText("TicTacToe multiplayer scoreboard")).toBeInTheDocument();
   });
 });
-

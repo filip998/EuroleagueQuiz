@@ -13,10 +13,16 @@ async function startTicTacToeQuickMatch(page, { nickname, preset = "Standard" })
 }
 
 async function waitForOnlineBoard(page, { ownName, opponentName }) {
-  await expect(page.getByText(new RegExp(`Online.*${ownName}.*Player [12]`))).toBeVisible({
+  await expect(page.getByTestId("ttt-mode-indicator")).toContainText("Online", {
     timeout: 15000,
   });
-  await expect(page.getByText(opponentName, { exact: true })).toBeVisible({
+  const scoreboard = page.getByRole("group", {
+    name: "TicTacToe multiplayer scoreboard",
+  });
+  await expect(scoreboard).toContainText(ownName, {
+    timeout: 15000,
+  });
+  await expect(scoreboard).toContainText(opponentName, {
     timeout: 15000,
   });
   await expect(page.getByRole("button", { name: "Resign" })).toBeVisible();
@@ -50,10 +56,13 @@ async function playVisibleMove(gameId, playerA, playerB) {
   const page = await currentTurnPage(gameId, playerA, playerB);
   await page.getByRole("button", { name: "+" }).first().click();
   await page.getByPlaceholder("Type player name...").fill("a");
-  const firstResult = page.locator("ul button").first();
+  const firstResult = page.getByRole("option").first();
   await expect(firstResult).toBeVisible({ timeout: 10000 });
   await firstResult.click();
-  await expect(page.getByText(/Correct|Incorrect|Turn switches/)).toBeVisible({
+  const feedbackCell = page.locator(
+    '[data-row-index][aria-label*="Incorrect"], [data-row-index][aria-label*="Claimed by"]'
+  ).first();
+  await expect(feedbackCell).toBeVisible({
     timeout: 15000,
   });
 }
@@ -111,7 +120,7 @@ test.describe("Home Page", () => {
     await page.getByRole("link", { name: /Most played.*TIC-TAC-TOE.*PLAY/ }).click();
 
     await expect(page).toHaveURL(/\/tictactoe$/);
-    await expect(page.getByText("Pick a pool")).toBeVisible();
+    await expect(page.getByText("Choose a pace")).toBeVisible();
     await expect(page.getByTestId("quick-pick-standard")).toBeVisible();
   });
 
@@ -121,7 +130,7 @@ test.describe("Home Page", () => {
 
     // Online -> Quick Match is the default: a one-click pool grid, not the old
     // Create/Join toggle or a separate Find Match button.
-    await expect(page.getByText("Pick a pool")).toBeVisible();
+    await expect(page.getByText("Choose a pace")).toBeVisible();
     await expect(page.getByTestId("quick-pick-blitz")).toBeVisible();
     await expect(page.getByTestId("quick-pick-standard")).toBeVisible();
     await expect(page.getByTestId("quick-pick-long")).toBeVisible();

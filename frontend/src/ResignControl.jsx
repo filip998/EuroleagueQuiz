@@ -20,7 +20,7 @@ export default function ResignControl({ onResign, disabled = false, inline = fal
               type="button"
               onClick={onResign}
               disabled={disabled}
-              className="px-5 py-2 bg-red-500 text-white font-medium rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
+              className="min-h-11 px-5 py-2 bg-red-500 text-white font-medium rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50"
             >
               Resign
             </button>
@@ -28,7 +28,7 @@ export default function ResignControl({ onResign, disabled = false, inline = fal
               type="button"
               onClick={() => setConfirming(false)}
               disabled={disabled}
-              className="px-5 py-2 bg-white border border-elq-border text-elq-text font-medium rounded-lg hover:bg-elq-bg transition-colors disabled:opacity-50"
+              className="min-h-11 px-5 py-2 bg-white border border-elq-border text-elq-text font-medium rounded-lg hover:bg-elq-bg transition-colors disabled:opacity-50"
             >
               Keep playing
             </button>
@@ -39,7 +39,7 @@ export default function ResignControl({ onResign, disabled = false, inline = fal
           type="button"
           onClick={() => setConfirming(true)}
           disabled={disabled}
-          className="text-sm text-elq-muted hover:text-red-500 transition-colors underline underline-offset-2"
+          className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm text-elq-muted hover:text-red-500 transition-colors underline underline-offset-2"
         >
           Resign
         </button>

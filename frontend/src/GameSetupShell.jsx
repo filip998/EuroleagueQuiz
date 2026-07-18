@@ -42,8 +42,57 @@ export default function GameSetupShell({
   error,
   children,
   extra,
+  compact = false,
 }) {
   const a = ACCENTS[accent] ?? ACCENTS.player1;
+
+  if (compact) {
+    return (
+      <div className="elq-auth-safe-top min-h-screen flex flex-col">
+        <div className="h-1 bg-elq-orange" />
+        <header className="border-b border-elq-border bg-white">
+          <div className="mx-auto flex min-h-[58px] w-full max-w-[920px] items-center gap-3 px-4 py-2">
+            {onHome && <LogoMini onClick={onHome} className="shrink-0" />}
+            <div className="min-w-0">
+              <h1 className="font-display text-[1.75rem] leading-none tracking-wide text-elq-dark sm:text-3xl">
+                {title}
+              </h1>
+              {tagline && (
+                <p className="mt-0.5 truncate text-xs text-elq-muted sm:text-sm">
+                  {tagline}
+                </p>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <div className="flex-1 px-4 py-4 sm:py-6 lg:py-9">
+          <div
+            className="mx-auto w-full max-w-[920px]"
+            data-testid="game-setup-content"
+          >
+            <div className="lg:rounded-2xl lg:border lg:border-elq-border lg:bg-white lg:p-7 lg:shadow-lg lg:shadow-black/5">
+              {children}
+              {error && (
+                <div
+                  role="alert"
+                  className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-center text-sm text-red-700"
+                >
+                  {error}
+                </div>
+              )}
+            </div>
+
+            {extra && (
+              <div className={`${CARD_CLASS} mt-6 p-6 sm:p-8`}>
+                {extra}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="elq-auth-safe-top min-h-screen flex flex-col">

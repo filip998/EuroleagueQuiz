@@ -81,19 +81,38 @@ html[data-auth-chrome="reserve"] {
 }
 
 @keyframes timer-critical {
-  0%, 100% { transform: scale(1); color: #DC2626; }
-  50% { transform: scale(1.08); color: #EF4444; }
+  0%, 100% { transform: scale(1); color: var(--color-elq-player2); }
+  50% { transform: scale(1.08); color: var(--color-elq-player2); }
 }
 
 @keyframes cell-claim {
-  0% { transform: scale(0.85); opacity: 0; }
-  60% { transform: scale(1.05); }
+  0% { transform: scale(0.96); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes ttt-correct-check-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ttt-correct-check-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.92); }
+}
+
+@keyframes ttt-headshot-reveal {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 @keyframes modal-in {
   from { opacity: 0; transform: scale(0.95) translateY(8px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes ttt-sheet-in {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes overlay-in {
@@ -128,11 +147,33 @@ html[data-auth-chrome="reserve"] {
 }
 
 .animate-cell-claim {
-  animation: cell-claim 0.4s ease-out both;
+  animation: cell-claim 180ms var(--elq-ease-out-quint) both;
+}
+
+.ttt-correct-check-enter {
+  animation: ttt-correct-check-in 180ms var(--elq-ease-out-quint) both;
+}
+
+.ttt-correct-check-exit {
+  animation: ttt-correct-check-out 180ms var(--elq-ease-out-quint) both;
+}
+
+.ttt-headshot-reveal {
+  animation: ttt-headshot-reveal 220ms var(--elq-ease-out-quint) both;
 }
 
 .animate-modal-in {
   animation: modal-in 0.25s ease-out both;
+}
+
+.ttt-responsive-dialog {
+  animation: ttt-sheet-in 240ms var(--elq-ease-out-quint) both;
+}
+
+@media (min-width: 640px) {
+  .ttt-responsive-dialog {
+    animation: modal-in 180ms var(--elq-ease-out-quint) both;
+  }
 }
 
 .animate-overlay-in {
@@ -190,9 +231,23 @@ html[data-auth-chrome="reserve"] {
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in-up,
   .animate-slide-down,
+  .animate-cell-claim,
   .animate-modal-in,
-  .animate-overlay-in {
+  .animate-overlay-in,
+  .ttt-correct-check-enter,
+  .ttt-correct-check-exit,
+  .ttt-headshot-reveal,
+  .ttt-responsive-dialog {
     animation: none;
+  }
+
+  .ttt-correct-check-exit {
+    opacity: 0;
+  }
+
+  .ttt-headshot-reveal {
+    opacity: 1;
+    transform: none;
   }
 
   .home-launcher {
@@ -231,20 +286,6 @@ select {
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 36px;
-}
-
-/*
- * Issue #259: the TicTacToe board must fit a laptop viewport without scrolling.
- * The first-run onboarding card is the tallest piece of optional chrome above
- * the grid, so on short viewports we drop it from flow and let the always-present
- * "How to play" affordance carry onboarding. The element stays in the DOM (tests
- * and tall-screen users keep it) — only its layout cost is removed where height
- * is scarce.
- */
-@media (max-height: 920px) {
-  .ttt-howto-firstrun {
-    display: none;
-  }
 }
 
 /*

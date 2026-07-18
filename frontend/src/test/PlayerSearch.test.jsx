@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PlayerSearch from "../PlayerSearch";
 
@@ -22,6 +23,25 @@ const natAxis = (name) => ({ axis_type: "nationality", value: name, display_labe
 const barca = teamAxis("Barcelona", "BAR");
 const madrid = teamAxis("Real Madrid", "RMB");
 
+function PickerHarness() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open picker
+      </button>
+      {open && (
+        <PlayerSearch
+          rowAxis={barca}
+          colAxis={madrid}
+          onSelect={() => {}}
+          onCancel={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
 describe("PlayerSearch", () => {
   const mockOnSelect = vi.fn();
   const mockOnCancel = vi.fn();
@@ -42,8 +62,8 @@ describe("PlayerSearch", () => {
       />
     );
 
-    expect(screen.getByText("SEARCH PLAYER")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Type player name...")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Choose a player" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Search EuroLeague players" })).toHaveFocus();
   });
 
   it("shows full club names (not raw codes) for a team-vs-team prompt", () => {
@@ -61,7 +81,7 @@ describe("PlayerSearch", () => {
     // The raw upstream codes must never surface in the prompt.
     expect(screen.queryByText("BAR")).not.toBeInTheDocument();
     expect(screen.queryByText("RMB")).not.toBeInTheDocument();
-    expect(screen.getByText(/played for both/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/played for both/i)).toBeInTheDocument();
   });
 
   it("derives a mixed-axis prompt (team x nationality) with no blanks or codes", () => {
@@ -76,8 +96,7 @@ describe("PlayerSearch", () => {
 
     expect(screen.getByText("Real Madrid")).toBeInTheDocument();
     expect(screen.getByText("Serbia")).toBeInTheDocument();
-    expect(screen.getByText(/played for/)).toBeInTheDocument();
-    expect(screen.getByText(/is from/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/played for.*is from/i)).toBeInTheDocument();
   });
 
   it("shows Guess the List description when guessTheListMode is true", () => {
@@ -122,9 +141,30 @@ describe("PlayerSearch", () => {
     );
 
     // Click the outer overlay div
-    const overlay = screen.getByText("SEARCH PLAYER").closest(".fixed");
+    const overlay = screen.getByRole("dialog", { name: "Choose a player" }).parentElement;
     fireEvent.click(overlay);
     expect(mockOnCancel).toHaveBeenCalled();
+  });
+
+  it("traps focus, locks background scrolling, and restores the opener", async () => {
+    const user = userEvent.setup();
+    render(<PickerHarness />);
+
+    const opener = screen.getByRole("button", { name: "Open picker" });
+    await user.click(opener);
+    expect(document.body.style.overflow).toBe("hidden");
+
+    const input = screen.getByRole("combobox", { name: "Search EuroLeague players" });
+    expect(input).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(input).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe("");
+    expect(opener).toHaveFocus();
   });
 
   it("searches with debounce and shows results", async () => {
@@ -255,6 +295,60 @@ describe("PlayerSearch", () => {
     });
   });
 
+  it("surfaces search failures instead of presenting them as an empty result", async () => {
+    autocompletePlayer.mockRejectedValue(new Error("offline"));
+
+    render(
+      <PlayerSearch
+        rowAxis={barca}
+        colAxis={madrid}
+        onSelect={mockOnSelect}
+        onCancel={mockOnCancel}
+      />
+    );
+
+    await userEvent.type(screen.getByPlaceholderText("Type player name..."), "luka");
+
+    expect(
+      await screen.findByText("Player search is unavailable. Try again.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No players found")).not.toBeInTheDocument();
+  });
+
+  it("clears a pending search without leaving the picker stuck loading", async () => {
+    let resolveSearch;
+    autocompletePlayer.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveSearch = resolve;
+      })
+    );
+    const user = userEvent.setup();
+
+    render(
+      <PlayerSearch
+        rowAxis={barca}
+        colAxis={madrid}
+        onSelect={mockOnSelect}
+        onCancel={mockOnCancel}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Type player name...");
+    await user.type(input, "luka");
+    await waitFor(() => expect(autocompletePlayer).toHaveBeenCalled());
+    expect(screen.getByText("Searching…")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(input).toHaveValue("");
+    expect(screen.getByText("Start typing to find a player.")).toBeInTheDocument();
+    expect(screen.queryByText("Searching…")).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveSearch({ players: [{ player_id: 1, full_name: "Luka Doncic" }] });
+    });
+    expect(screen.queryByText("Luka Doncic")).not.toBeInTheDocument();
+  });
+
   it("uses autocompleteGuessTheListPlayer in Guess the List mode", async () => {
     autocompleteGuessTheListPlayer.mockResolvedValue({
       players: [{ player_id: 3, full_name: "Nikola Mirotic" }],
@@ -301,8 +395,9 @@ describe("PlayerSearch", () => {
       expect(screen.getByText("Luka Samanic")).toBeInTheDocument()
     );
 
-    const first = screen.getByText("Luka Doncic").closest("button");
-    const second = screen.getByText("Luka Samanic").closest("button");
+    const first = screen.getByRole("option", { name: "Luka Doncic" });
+    const second = screen.getByRole("option", { name: "Luka Samanic" });
+    expect(first).not.toHaveClass("bg-orange-50");
 
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(first).toHaveAttribute("aria-selected", "true");
@@ -344,7 +439,7 @@ describe("PlayerSearch", () => {
 
     expect(mockOnSelect).not.toHaveBeenCalled();
     expect(
-      screen.getByText("Luka Doncic").closest("button")
+      screen.getByRole("option", { name: "Luka Doncic" })
     ).toHaveAttribute("aria-selected", "false");
   });
 });

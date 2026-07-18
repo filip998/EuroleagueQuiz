@@ -51,10 +51,70 @@ export default function GameModeSelector({
   onSubChange,
   subModes = DEFAULT_SUB_MODES,
   disabled = false,
+  compact = false,
 }) {
   if (!modes || modes.length < 2) return null;
 
   const cols = modes.length === 2 ? "grid-cols-2" : "grid-cols-3";
+
+  if (compact) {
+    return (
+      <fieldset>
+        <legend className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-2">
+          Game mode
+        </legend>
+        <div
+          className={`grid ${cols} gap-1 rounded-xl border border-elq-border bg-slate-200/70 p-1`}
+        >
+          {modes.map((key) => {
+            const m = MODE_META[key];
+            if (!m) return null;
+            const active = mode === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onModeChange(key)}
+                disabled={disabled}
+                aria-pressed={active}
+                className={`min-h-11 rounded-lg px-2 text-sm font-semibold transition-[background-color,color,box-shadow] disabled:cursor-not-allowed disabled:opacity-60 ${
+                  active
+                    ? "bg-white text-elq-cta shadow-sm ring-1 ring-elq-cta/25"
+                    : "text-elq-muted hover:text-elq-text"
+                }`}
+              >
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {mode === "online" && (
+          <div
+            className="mt-3 grid gap-1 rounded-xl border border-elq-border bg-slate-200/70 p-1"
+            style={{ gridTemplateColumns: `repeat(${subModes.length}, minmax(0, 1fr))` }}
+          >
+            {subModes.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => onSubChange(value)}
+                disabled={disabled}
+                aria-pressed={sub === value}
+                className={`min-h-11 rounded-lg px-2 text-sm font-semibold transition-[background-color,color,box-shadow] disabled:cursor-not-allowed disabled:opacity-60 ${
+                  sub === value
+                    ? "bg-white text-elq-cta shadow-sm ring-1 ring-elq-cta/20"
+                    : "text-elq-muted hover:text-elq-text"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      </fieldset>
+    );
+  }
 
   return (
     <div>
