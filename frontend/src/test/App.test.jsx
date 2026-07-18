@@ -83,7 +83,7 @@ describe("App", () => {
     expect(screen.getByText("HIGHER OR LOWER")).toBeInTheDocument();
     expect(screen.getByText("CAREER QUIZ")).toBeInTheDocument();
     expect(screen.getByText("PHOTO QUIZ")).toBeInTheDocument();
-    expect(screen.getByText("Choose your game")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /choose your game/i })).toBeInTheDocument();
   });
 
   it("navigates to TicTacToe setup when clicking the card", () => {
@@ -92,28 +92,21 @@ describe("App", () => {
     expect(screen.getByTestId("game-setup")).toBeInTheDocument();
   });
 
-  it("renders a Quick Match CTA on the TicTacToe card that opens setup", () => {
+  it("renders a featured TicTacToe row that opens setup", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
-    const cta = screen
-      .getAllByTestId("home-quick-match-cta")
-      .find((el) => el.getAttribute("href") === "/tictactoe");
-    expect(cta).toBeDefined();
-    expect(cta).toHaveTextContent("Quick Match");
-    fireEvent.click(cta);
+    const row = screen.getByRole("link", { name: /most played.*tic-tac-toe.*play/i });
+    expect(row).toHaveAttribute("href", "/tictactoe");
+    fireEvent.click(row);
     expect(screen.getByTestId("game-setup")).toBeInTheDocument();
   });
 
-  it("renders a calm Play CTA on the Photo Quiz card that opens setup on its Solo default", () => {
+  it("opens Photo Quiz setup on its Solo default from the launcher row", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
-    const cta = screen
-      .getAllByTestId("home-quick-match-cta")
-      .find((el) => el.getAttribute("href") === "/photo");
-    expect(cta).toBeDefined();
-    expect(cta).toHaveTextContent("Play");
-    fireEvent.click(cta);
+    const row = screen.getByRole("link", { name: /photo quiz/i });
+    expect(row).toHaveAttribute("href", "/photo");
+    fireEvent.click(row);
     const setup = screen.getByTestId("photo-setup");
     expect(setup).toBeInTheDocument();
-    // Solo default: no forced ?quick=1 → Online.
     expect(setup).toHaveAttribute("data-initial-mode", "solo");
   });
 
@@ -123,17 +116,13 @@ describe("App", () => {
     expect(screen.getByTestId("guess-the-list-setup")).toBeInTheDocument();
   });
 
-  it("renders a calm Play CTA on the Guess the List card that opens setup on its Solo default", () => {
+  it("opens Guess the List setup on its Solo default from the launcher row", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
-    const cta = screen
-      .getAllByTestId("home-quick-match-cta")
-      .find((el) => el.getAttribute("href") === "/list");
-    expect(cta).toBeDefined();
-    expect(cta).toHaveTextContent("Play");
-    fireEvent.click(cta);
+    const row = screen.getByRole("link", { name: /guess the list/i });
+    expect(row).toHaveAttribute("href", "/list");
+    fireEvent.click(row);
     const setup = screen.getByTestId("guess-the-list-setup");
     expect(setup).toBeInTheDocument();
-    // Solo default: no forced ?quick=1 → Online → Race.
     expect(setup).toHaveAttribute("data-initial-mode", "solo");
     expect(setup).toHaveAttribute("data-initial-online-game-type", "classic");
   });
@@ -228,20 +217,11 @@ describe("App", () => {
     expect(screen.getByTestId("hl-setup")).toBeInTheDocument();
   });
 
-  it("renders a persistent low-emphasis Play CTA on the Higher or Lower card that opens setup", () => {
+  it("renders a fully clickable Higher or Lower launcher row", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
-    const cta = screen.getByTestId("home-play-cta");
-    // Persistent: present in the DOM without any hover interaction...
-    expect(cta).toBeInTheDocument();
-    expect(cta).toHaveAttribute("href", "/higherlower");
-    expect(cta).toHaveTextContent("Play");
-    // ...rendered as the shared low-emphasis CTA link (accent text, not a filled
-    // button), and never the old hover-only reveal.
-    expect(cta.className).toContain("text-elq-cta");
-    expect(cta.className).not.toContain("bg-elq-cta");
-    expect(cta.className).not.toContain("opacity-0");
-    expect(cta.className).not.toContain("group-hover:opacity-100");
-    fireEvent.click(cta);
+    const row = screen.getByRole("link", { name: /higher or lower/i });
+    expect(row).toHaveAttribute("href", "/higherlower");
+    fireEvent.click(row);
     expect(screen.getByTestId("hl-setup")).toBeInTheDocument();
   });
 
@@ -397,22 +377,36 @@ describe("HomePage UI variant", () => {
     render(<MemoryRouter><HomePage variant="classic" /></MemoryRouter>);
     expect(screen.getByText("TICTACTOE")).toBeInTheDocument();
     expect(screen.queryByText("TIC-TAC-TOE")).not.toBeInTheDocument();
-    expect(screen.queryByText(/how well do you know/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("★ Most played")).not.toBeInTheDocument();
   });
 
   it("renders the refined home when variant is 'refined'", () => {
     render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
     expect(screen.getByText("TIC-TAC-TOE")).toBeInTheDocument();
-    expect(screen.getByText(/how well do you know/i)).toBeInTheDocument();
+    expect(screen.getByText("Tap a game to start.")).toBeInTheDocument();
     expect(screen.queryByText("TICTACTOE")).not.toBeInTheDocument();
   });
 
-  it("renders every game mode and the section heading in both variants", () => {
+  it("uses the game-first launcher without depending on viewport detection", () => {
+    render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
+
+    expect(screen.getByRole("heading", { name: /choose your game/i })).toBeInTheDocument();
+    expect(screen.queryByText(/how well do you know/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Name a player who fits both clues")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /tic-tac-toe/i })).toHaveAttribute("href", "/tictactoe");
+    expect(screen.getByText("★ Most played")).toBeInTheDocument();
+  });
+
+  it("renders every game and the launcher heading in both variants", () => {
     for (const variant of ["classic", "refined"]) {
       const { unmount } = render(
         <MemoryRouter><HomePage variant={variant} /></MemoryRouter>
       );
-      expect(screen.getByText("Choose your game")).toBeInTheDocument();
+      if (variant === "refined") {
+        expect(screen.getByRole("heading", { name: /choose your game/i })).toBeInTheDocument();
+      } else {
+        expect(screen.getByText(/choose your game/i)).toBeInTheDocument();
+      }
       expect(screen.getByText("GUESS THE LIST")).toBeInTheDocument();
       expect(screen.getByText("HIGHER OR LOWER")).toBeInTheDocument();
       expect(screen.getByText("CAREER QUIZ")).toBeInTheDocument();
@@ -421,86 +415,54 @@ describe("HomePage UI variant", () => {
     }
   });
 
-  it("shows the flagship 'how it works' steps in refined but not classic", () => {
-    const { unmount } = render(
-      <MemoryRouter><HomePage variant="refined" /></MemoryRouter>
-    );
-    expect(
-      screen.getByText("Name a player who fits both clues")
-    ).toBeInTheDocument();
-    unmount();
-
-    render(<MemoryRouter><HomePage variant="classic" /></MemoryRouter>);
-    expect(
-      screen.queryByText("Name a player who fits both clues")
-    ).not.toBeInTheDocument();
+  it("keeps marketing prose out of the refined launcher", () => {
+    render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
+    expect(screen.queryByText(/how well do you know/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/five ways to test/i)).not.toBeInTheDocument();
   });
 });
 
-describe("Refined home action hierarchy (#241)", () => {
-  it("keeps the flagship Quick Match as the only filled primary CTA", () => {
+describe("Universal refined game launcher", () => {
+  const gameRows = [
+    [/tic-tac-toe/i, "/tictactoe"],
+    [/guess the list/i, "/list"],
+    [/higher or lower/i, "/higherlower"],
+    [/career quiz/i, "/career"],
+    [/photo quiz/i, "/photo"],
+  ];
+
+  it.each(gameRows)("makes the full %s row navigate to %s", (name, href) => {
     render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
-    const flagship = screen
-      .getAllByTestId("home-quick-match-cta")
-      .find((el) => el.getAttribute("href") === "/tictactoe");
-    expect(flagship).toBeDefined();
-    expect(flagship).toHaveTextContent("Quick Match");
-    // The flagship is the page-level primary action: a solid filled button.
-    expect(flagship.className).toContain("bg-elq-cta");
+    expect(screen.getByRole("link", { name })).toHaveAttribute("href", href);
   });
 
-  // Each mini card keeps its existing testid but renders a low-emphasis "Play" link
-  // that opens the game's setup on its Solo default (no forced ?quick=1).
-  it.each([
-    ["/list", "home-quick-match-cta"],
-    ["/career", "home-quick-match-cta"],
-    ["/photo", "home-quick-match-cta"],
-    ["/higherlower", "home-play-cta"],
-  ])("renders a low-emphasis Solo-default Play CTA for %s", (href, testid) => {
+  it("gives every game row tactile press feedback without delaying navigation", () => {
     render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
-    const cta = screen
-      .getAllByTestId(testid)
-      .find((el) => el.getAttribute("href") === href);
-    expect(cta).toBeDefined();
-    expect(cta).toHaveTextContent("Play");
-    // Quieter than the flagship: accent text link, not a filled button.
-    expect(cta.className).toContain("text-elq-cta");
-    expect(cta.className).not.toContain("bg-elq-cta");
+    const links = screen.getByRole("navigation", { name: "EuroLeague quiz games" })
+      .querySelectorAll("a");
+
+    expect(links).toHaveLength(5);
+    links.forEach((link) => {
+      expect(link).toHaveClass("home-game-row");
+    });
   });
 
-  it("opens Career Quiz setup on its Solo default from the calm Play CTA", () => {
+  it("keeps TicTacToe visually dominant without adding a second nested link", () => {
+    render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
+    const featured = screen.getByRole("link", { name: /most played.*tic-tac-toe.*play/i });
+    expect(within(featured).getByText("★ Most played")).toHaveClass("text-elq-cta");
+    expect(within(featured).getByText("PLAY")).toHaveClass("bg-elq-cta");
+    expect(featured.querySelectorAll("a")).toHaveLength(0);
+  });
+
+  it("opens Career Quiz setup on its Solo default from the launcher row", () => {
     render(<MemoryRouter><App /></MemoryRouter>);
-    const cta = screen
-      .getAllByTestId("home-quick-match-cta")
-      .find((el) => el.getAttribute("href") === "/career");
-    expect(cta).toBeDefined();
-    fireEvent.click(cta);
-    const setup = screen.getByTestId("career-setup");
-    expect(setup).toBeInTheDocument();
-    expect(setup).toHaveAttribute("data-initial-mode", "solo");
-  });
-
-  it("replaces the fake 'Solo · 1v1 · Online' pill with a real Solo · Local · Friend link into setup", () => {
-    render(<MemoryRouter><HomePage variant="refined" /></MemoryRouter>);
-    expect(screen.queryByText("Solo · 1v1 · Online")).not.toBeInTheDocument();
-    const link = screen.getByRole("link", { name: /solo . local . friend/i });
-    expect(link).toHaveAttribute("href", "/tictactoe");
-    // A text link, not a button/pill — must not carry the filled CTA style.
-    expect(link.className).not.toContain("bg-elq-cta");
-  });
-
-  it("qualifies Quick Match as online with adjacent helper copy in refined only", () => {
-    const { unmount } = render(
-      <MemoryRouter><HomePage variant="refined" /></MemoryRouter>
-    );
-    expect(screen.getByText(/online 1v1/i)).toBeInTheDocument();
-    unmount();
-    render(<MemoryRouter><HomePage variant="classic" /></MemoryRouter>);
-    expect(screen.queryByText(/online 1v1/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: /career quiz/i }));
+    expect(screen.getByTestId("career-setup")).toHaveAttribute("data-initial-mode", "solo");
   });
 });
 
-describe("Refined home tag taxonomy + mode guidance (#243)", () => {
+describe("Refined launcher mode guidance", () => {
   const renderRefined = () =>
     render(
       <MemoryRouter>
@@ -508,57 +470,42 @@ describe("Refined home tag taxonomy + mode guidance (#243)", () => {
       </MemoryRouter>
     );
 
-  it("labels every mini card with one consistent mode/availability tag", () => {
+  it("labels every row with its available modes", () => {
     renderRefined();
-    // Guess the List: solo + local + online.
-    expect(screen.getByText("Solo · Local · Online")).toBeInTheDocument();
-    // Career Quiz and Photo Quiz: solo + online (no local 1v1).
+    expect(screen.getAllByText("Solo · Local · Online")).toHaveLength(2);
     expect(screen.getAllByText("Solo · Online")).toHaveLength(2);
-    // The "Streak" mechanic is no longer a mode tag...
-    expect(screen.queryByText("Streak")).not.toBeInTheDocument();
-    // ...it stays in Higher or Lower's description instead.
-    expect(screen.getByText(/build a streak/i)).toBeInTheDocument();
   });
 
-  it("tags Higher or Lower as Solo-only without colliding with the legend's Solo token", () => {
+  it("labels Higher or Lower as Solo-only", () => {
     renderRefined();
-    const holCard = screen.getByText("HIGHER OR LOWER").closest("div.group");
-    expect(holCard).not.toBeNull();
-    expect(within(holCard).getByText("Solo")).toBeInTheDocument();
+    const row = screen.getByRole("link", { name: /higher or lower/i });
+    expect(within(row).getByText("Solo")).toBeInTheDocument();
   });
 
-  it("keeps the ★ Most played accolade visually distinct from the mode chips", () => {
+  it("keeps the Most played accolade distinct from the mode label", () => {
     renderRefined();
-    const accolade = screen.getByText("★ Most played");
-    const modeChip = screen.getByText("Solo · Local · Online");
-    // Accolade is a soft-filled orange badge; mode chips are muted outlines.
-    expect(accolade).toHaveClass("bg-orange-50");
-    expect(accolade).toHaveClass("text-elq-cta");
-    expect(modeChip).not.toHaveClass("bg-orange-50");
-    expect(modeChip).toHaveClass("text-elq-muted");
+    const featured = screen.getByRole("link", { name: /most played.*tic-tac-toe/i });
+    expect(within(featured).getByText("★ Most played")).toHaveClass("text-elq-cta");
+    expect(within(featured).getByText("Solo · Local · Online")).toHaveClass("text-elq-muted");
   });
 
-  it("surfaces the mode legend under the heading and drops the far-right micro-line", () => {
+  it("uses one short instruction instead of a mode legend", () => {
     renderRefined();
-    expect(
-      screen.queryByText("Jump in solo, pass-and-play, or matchmake online")
-    ).not.toBeInTheDocument();
-    const legend = screen.getByText(/mode tags show how to play/i);
-    expect(legend).toHaveTextContent(/Solo.*Local 1v1.*Online/);
+    expect(screen.getByText("Tap a game to start.")).toBeInTheDocument();
+    expect(screen.queryByText(/mode tags show how to play/i)).not.toBeInTheDocument();
   });
 
-  it("does not leak the #243 legend or mode tags into the classic variant", () => {
+  it("does not add refined mode labels to the classic variant", () => {
     render(
       <MemoryRouter>
         <HomePage variant="classic" />
       </MemoryRouter>
     );
-    expect(screen.queryByText(/mode tags show how to play/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Solo · Local · Online")).not.toBeInTheDocument();
   });
 });
 
-describe("Refined home flagship board affordance + polish (#242)", () => {
+describe("Refined launcher layout", () => {
   const renderRefined = () =>
     render(
       <MemoryRouter>
@@ -566,50 +513,17 @@ describe("Refined home flagship board affordance + polish (#242)", () => {
       </MemoryRouter>
     );
 
-  it("renders the 3×3 motif as a non-interactive decorative backdrop, not a claimable grid", () => {
+  it("removes the old marketing and decorative flagship surfaces", () => {
     renderRefined();
-    const board = screen.getByTestId("flagship-board");
-    // Decorative: removed from the a11y tree and non-interactive.
-    expect(board).toHaveAttribute("aria-hidden", "true");
-    expect(board.className).toContain("pointer-events-none");
-    // No live-game signals: no claimable links, and none of the old orange
-    // "claimed" cells / coloured ownership tiles remain inside the motif.
-    expect(board.querySelector("a")).toBeNull();
-    expect(board.querySelector(".bg-elq-cta")).toBeNull();
-    expect(board.querySelector(".bg-orange-50")).toBeNull();
-  });
-
-  it("omits the decorative flagship board from the classic variant", () => {
-    render(
-      <MemoryRouter>
-        <HomePage variant="classic" />
-      </MemoryRouter>
-    );
     expect(screen.queryByTestId("flagship-board")).not.toBeInTheDocument();
+    expect(screen.queryByText("+ 84 clubs")).not.toBeInTheDocument();
+    expect(screen.queryByText(/quick match pairs/i)).not.toBeInTheDocument();
   });
 
-  it("places the '+ 84 clubs' crest strip ahead of the primary action so they don't compete", () => {
+  it("keeps one narrow launcher column at every viewport", () => {
     renderRefined();
-    const clubs = screen.getByText("+ 84 clubs");
-    const primary = screen
-      .getAllByTestId("home-quick-match-cta")
-      .find((el) => el.getAttribute("href") === "/tictactoe");
-    expect(primary).toBeDefined();
-    // crest strip precedes the flagship primary CTA in document order.
-    expect(
-      clubs.compareDocumentPosition(primary) & clubs.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-  });
-
-  it("keeps the flagship Solo link free of its own top margin (single action-row margin source)", () => {
-    renderRefined();
-    const solo = screen.getByRole("link", { name: /solo . local . friend/i });
-    expect(solo.className).not.toContain("mt-4");
-  });
-
-  it("equalises the 2×2 mini-card rows so their CTAs align across rows", () => {
-    renderRefined();
-    const grid = screen.getByText("GUESS THE LIST").closest("div.group").parentElement;
-    expect(grid.className).toContain("auto-rows-fr");
+    const navigation = screen.getByRole("navigation", { name: "EuroLeague quiz games" });
+    expect(navigation).toHaveClass("flex", "flex-col");
+    expect(navigation.closest("main")).toHaveClass("home-launcher", "max-w-md");
   });
 });

@@ -363,15 +363,16 @@ The home page ships in two interchangeable variants, selected once at build time
 by the `VITE_UI_VARIANT` environment variable and resolved in
 `frontend/src/uiVariant.js`:
 
-- **`refined`** *(default)* — the "Refined Light" home: a centered hero
-  (`HOW WELL DO YOU KNOW THE EUROLEAGUE?`), a static stat strip, and a
-  `Choose your game` lobby with a flagship **Tic-Tac-Toe** card beside a 2×2 grid
-  of the four other modes. The lobby has one clear action hierarchy: the flagship
-  carries the single filled primary CTA — **Quick Match** (qualified as online 1v1 by
-  adjacent helper copy) plus a low-emphasis `Solo · Local · Friend →` text link — while
-  the four mini cards use calm, low-emphasis **Play →** links that open each game's
-  setup on its **Solo** default (Quick Match is then one tap away inside setup). Each
-  card keeps its existing route, `HomeQuickMatchCta` / `HomePlayCta`, and test IDs.
+- **`refined`** *(default)* — a compact game-first launcher shared by phone and
+  desktop. All five games are visible in one narrow, scannable column; the complete
+  row is the tap/click target, each row names its available modes, and
+  **Tic-Tac-Toe** receives the stronger orange treatment and the only filled
+  **Play** affordance. Rows provide immediate tactile feedback on pointer-down
+  (`scale(0.98)`, 120ms release) without delaying navigation; reduced-motion users
+  keep the pressed-color feedback without the transform. On arrival, the launcher
+  materializes as one unit over 220ms (`opacity` plus a 6px/0.995 settle) rather
+  than staggering functional choices; fine-pointer hover adds a restrained 2px
+  lift before handing off to the press state.
 - **`classic`** — the original flat five-card grid, preserved pixel-for-pixel apart
   from the shared accessible CTA fill (see **Accessible color tokens** below). Set
   `VITE_UI_VARIANT=classic` (e.g. in `frontend/.env.development` or the deploy build)
@@ -392,16 +393,17 @@ surface that carries white text on an AA-compliant fill, in **both** UI variants
   the auth Sign-In button, and the countdown/status badges use `bg-elq-cta` /
   `hover:bg-elq-cta-dark`; `--color-elq-orange` stays `#FF6600` for decorative accents
   (borders, chips, `/opacity` tints, icons, focus rings) so the broader look is
-  unchanged. The shared `HomeQuickMatchCta` / `HomePlayCta` use the same token two ways
-  via an `emphasis` prop: the default `primary` is the filled `bg-elq-cta` button, and
-  `quiet` is a low-emphasis `text-elq-cta` accent text link (no fill) — `#C2410C` clears
-  AA as body text too.
+  unchanged. The classic variant's shared `HomeQuickMatchCta` / `HomePlayCta` use the
+  same token two ways via an `emphasis` prop: the default `primary` is the filled
+  `bg-elq-cta` button, and `quiet` is a low-emphasis `text-elq-cta` accent text link
+  (no fill) — `#C2410C` clears AA as body text too.
 - The refined variant additionally darkens `--color-elq-muted` → `#566677` (≈5.9:1 on
   white, ≈5.5:1 on `--color-elq-bg`) for body/label/placeholder text, scoped under a
   higher-specificity `html[data-ui="refined"]` block.
 
-A `prefers-reduced-motion: reduce` guard disables the entrance reveals
-(`.animate-fade-in-up`, `.animate-slide-down`) without ever gating content visibility.
+A `prefers-reduced-motion: reduce` guard disables entrance reveals without ever
+gating content visibility, and removes the refined launcher's press transform
+while preserving its pressed-color feedback.
 
 ### Shared Pre-Game Setup UX
 
