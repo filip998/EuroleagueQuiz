@@ -232,19 +232,28 @@ with a 10-game minimum, plus 30+ points in one game and 1,000+ EuroLeague career
 points summed from `player_season_stats`. The 3,000-point legend tier is defined
 for future use but not shipped as an axis because its pool is below the guard.
 
-The TicTacToe board ships additive onboarding chrome in
-`frontend/src/TicTacToeGuide.jsx`, rendered above the grid in every mode by
-`GameBoard.jsx`: a persistent one-line objective, a dismissible first-run
-how-to (the "seen" flag is stored try/catch-safe in `localStorage` under
-`elq_ttt_howto_seen`, degrading to always-showing when storage is unavailable),
-and an always-present **How to play** / **Clue legend** affordance row. The
-how-to and legend open as portal-mounted, focus-trapped dialogs (role=`dialog`,
-`aria-modal`, Esc/backdrop close, focus restoration, `prefers-reduced-motion`
-path) so they are never clipped by the board's overflow. The legend explains
-every axis type the backend can serve (`team`, `nationality`, `played_with`,
-`season`, `position`, `champion`, `stat_milestone`) with type-level copy aligned
-to the per-cell search prompt; it touches no game state, routes, or existing
-data-testids, so solo/local/online/anonymous play is unaffected.
+The TicTacToe frontend uses an opt-in compact variant of the shared setup
+components, leaving the other games unchanged. On mobile it prioritizes the
+mode and next action; on desktop the same DOM becomes a two-column setup.
+Standard is the emphasized Quick Match pool, with Blitz and Long available as
+secondary one-tap choices.
+
+`GameBoard.jsx` uses compact Solo and multiplayer status bars and exposes one
+**Help** action through `TicTacToeGuide.jsx`. Help combines **How to play** and
+**Clue types** in a tabbed, portal-mounted sheet on mobile and dialog on desktop.
+It is focus-trapped, closes with Escape or the backdrop, restores focus, and
+honors reduced motion. The clue tab explains every backend axis type (`team`,
+`nationality`, `played_with`, `season`, `position`, `champion`,
+`stat_milestone`) without hardcoding a specific milestone.
+
+Player selection uses the responsive `PlayerSearch.jsx` picker: a mobile bottom
+sheet and desktop dialog with dialog/combobox/listbox semantics, keyboard
+navigation, focus restoration, and explicit loading, empty, and error states.
+Wrong-answer feedback appears temporarily in the attempted cell; correct
+answers show a restrained check-to-headshot transition. Terminal states keep
+the completed board visible and render sample answers inside its cells instead
+of in a detached reveal card. These changes are frontend-only and preserve game
+state, routes, API payloads, realtime behavior, and anonymous play.
 
 Solo TicTacToe has a terminal board objective instead of an endless next-board
 loop: three in a row returns `solo_won` and finishes the game, each wrong answer
@@ -252,8 +261,8 @@ spends one of three strikes, exhausting strikes returns `solo_lost`, and a
 defensive no-line full-board state returns `solo_drawn`. The serialized
 `solo_progress` block reports claimed cells, strike usage, and boards won for
 the live progress panel. The neutral **Show answers** control finishes the solo
-game, reveals sample answers, and routes to the same Play Again/Home result
-screen.
+game and renders the same board-backed answer state with Play Again/Home
+actions.
 
 Online TicTacToe, Guess the List, Career Quiz, and Photo Quiz share an **Online Game Realtime Module**. The backend
 Module in `backend/app/services/realtime.py` owns WebSocket connection cleanup,

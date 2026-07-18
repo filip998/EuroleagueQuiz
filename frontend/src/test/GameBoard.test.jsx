@@ -8,12 +8,15 @@ import { buildInviteUrl } from "../inviteLink";
 
 // Capture the options GameBoard hands to the realtime hook so tests can drive
 // server-pushed state (e.g. a disconnect forfeit) without a real WebSocket.
-const realtimeHolder = vi.hoisted(() => ({ opts: null }));
+const realtimeHolder = vi.hoisted(() => ({
+  opts: null,
+  sendAction: vi.fn(() => true),
+}));
 const playerSearchHolder = vi.hoisted(() => ({ props: null }));
 vi.mock("../useOnlineGameRealtime", () => ({
   useOnlineGameRealtime: (opts) => {
     realtimeHolder.opts = opts;
-    return {};
+    return { sendAction: realtimeHolder.sendAction };
   },
 }));
 
@@ -267,7 +270,7 @@ describe("GameBoard online resign", () => {
     fireEvent.click(screen.getByText("Resign"));
 
     await waitFor(() => expect(giveUpGame).toHaveBeenCalledWith(7, 1));
-    expect(await screen.findByText("You resigned.")).toBeInTheDocument();
+    expect(await screen.findByText("You resigned.", { selector: "p" })).toBeInTheDocument();
   });
 
   it("renders an opponent resignation delivered over realtime", async () => {
@@ -289,7 +292,7 @@ describe("GameBoard online resign", () => {
       });
     });
 
-    expect(await screen.findByText("Your opponent resigned.")).toBeInTheDocument();
+    expect(await screen.findByText("Your opponent resigned.", { selector: "p" })).toBeInTheDocument();
   });
 
   it("renders a disconnect forfeit delivered over realtime", async () => {
@@ -312,7 +315,7 @@ describe("GameBoard online resign", () => {
       });
     });
 
-    expect(await screen.findByText("Your opponent left the game.")).toBeInTheDocument();
+    expect(await screen.findByText("Your opponent left the game.", { selector: "p" })).toBeInTheDocument();
     // The terminal banner is suppressed in favour of the finished-screen subtitle.
     expect(screen.queryByText(/Reconnecting/)).not.toBeInTheDocument();
   });
@@ -336,13 +339,30 @@ describe("GameBoard online resign", () => {
   });
 });
 
-describe("GameBoard wrong-guess feedback", () => {
+describe("GameBoard in-cell wrong-guess feedback", () => {
   const feedback = {
     message:
       "Nando De Colo matched the row clue EuroLeague champion, but not the column clue Played with Tornike Shengelia.",
+    failed_axes: [
+      {
+        side: "column",
+        axis_type: "played_with",
+        display_label: "Tornike Shengelia",
+        label: "Played with Tornike Shengelia",
+      },
+    ],
   };
 
-  it("renders backend feedback under the local incorrect banner", async () => {
+  function expectIncorrectCell(message = "No Tornike Shengelia match") {
+    const cell = screen.getByRole("button", {
+      name: /1 row and A column\. Incorrect\./,
+    });
+    expect(within(cell).getByText(message)).toBeInTheDocument();
+    expect(screen.queryByText("❌ Incorrect. Turn switches.")).not.toBeInTheDocument();
+    return cell;
+  }
+
+  it("renders concise feedback inside the attempted local cell", async () => {
     submitMove.mockResolvedValue({
       state: activeGame({ mode: "local_two_player", current_player: 2 }),
       result: "incorrect",
@@ -368,11 +388,11 @@ describe("GameBoard wrong-guess feedback", () => {
         player_id: 99,
       })
     );
-    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
-    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+    expectIncorrectCell();
+    expect(screen.getByText(feedback.message, { exact: false })).toBeInTheDocument();
   });
 
-  it("keeps timed local feedback visible after the turn timer syncs", async () => {
+  it("keeps timed local feedback mapped to the attempted cell after timer sync", async () => {
     submitMove.mockResolvedValue({
       state: activeGame({ mode: "local_two_player", current_player: 2, turn_seconds: 40 }),
       result: "incorrect",
@@ -398,11 +418,11 @@ describe("GameBoard wrong-guess feedback", () => {
         player_id: 99,
       })
     );
-    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
-    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+    expectIncorrectCell();
+    expect(screen.getByText(feedback.message, { exact: false })).toBeInTheDocument();
   });
 
-  it("renders realtime feedback under the online incorrect banner", async () => {
+  it("maps acting-player realtime feedback to the attempted online cell", async () => {
     render(
       <GameBoard
         initialState={activeGame()}
@@ -411,6 +431,14 @@ describe("GameBoard wrong-guess feedback", () => {
         onlineInfo={{ isOnline: true, playerNumber: 1 }}
       />
     );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+    expect(realtimeHolder.sendAction).toHaveBeenCalledWith("move", {
+      row_index: 0,
+      col_index: 0,
+      player_id: 99,
+    });
 
     act(() => {
       realtimeHolder.opts.onState({
@@ -420,11 +448,11 @@ describe("GameBoard wrong-guess feedback", () => {
       });
     });
 
-    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
-    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+    expectIncorrectCell();
+    expect(screen.getByText(feedback.message, { exact: false })).toBeInTheDocument();
   });
 
-  it("keeps the legacy terse incorrect copy when feedback is absent", async () => {
+  it("uses a concise fallback when structured feedback is absent", async () => {
     render(
       <GameBoard
         initialState={activeGame()}
@@ -434,6 +462,9 @@ describe("GameBoard wrong-guess feedback", () => {
       />
     );
 
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
     act(() => {
       realtimeHolder.opts.onState({
         state: activeGame({ current_player: 2 }),
@@ -441,8 +472,444 @@ describe("GameBoard wrong-guess feedback", () => {
       });
     });
 
-    expect(await screen.findByText("❌ Incorrect. Turn switches.")).toBeInTheDocument();
+    expectIncorrectCell("No match for both clues");
     expect(screen.queryByText(/matched EuroLeague champion/)).not.toBeInTheDocument();
+  });
+});
+
+describe("GameBoard correct-answer feedback", () => {
+  it("crossfades the success check into the claimed player headshot", async () => {
+    const claimedRound = {
+      columns: [axis("A"), axis("B"), axis("C")],
+      rows: [axis("1"), axis("2"), axis("3")],
+      cells: boardCells().map((cell, index) =>
+        index === 0
+          ? {
+              ...cell,
+              claimed_by_player: 1,
+              claimed_player_id: 99,
+              claimed_player_name: "Nando De Colo",
+              claimed_player_image_url: "https://example.com/nando.png",
+            }
+          : cell
+      ),
+    };
+    submitMove.mockResolvedValue({
+      state: activeGame({
+        mode: "local_two_player",
+        current_player: 2,
+        round: claimedRound,
+      }),
+      result: "correct",
+    });
+
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    const name = await screen.findByText("Nando De Colo");
+    const cell = name.closest("button");
+    expect(cell.querySelector(".ttt-correct-check-enter")).toBeTruthy();
+    expect(screen.getByAltText("Nando De Colo").className).toContain("opacity-0");
+
+    await waitFor(
+      () => expect(cell.querySelector(".ttt-headshot-reveal")).toBeTruthy(),
+      { timeout: 1000 }
+    );
+    await waitFor(
+      () => expect(cell.querySelector(".ttt-correct-check")).toBeNull(),
+      { timeout: 1000 }
+    );
+  });
+
+  it("treats a correct final no-line move (round_drawn) as an accepted move with check-to-headshot feedback", async () => {
+    const claimedRound = {
+      columns: [axis("A"), axis("B"), axis("C")],
+      rows: [axis("1"), axis("2"), axis("3")],
+      cells: boardCells().map((cell, index) =>
+        index === 0
+          ? {
+              ...cell,
+              claimed_by_player: 1,
+              claimed_player_id: 99,
+              claimed_player_name: "Nando De Colo",
+              claimed_player_image_url: "https://example.com/nando.png",
+            }
+          : cell
+      ),
+    };
+    // The backend only returns round_drawn when the final cell of a full board
+    // was claimed correctly (no three-in-row), so this is an accepted move
+    // like round_won/board_complete, not a rejected one.
+    submitMove.mockResolvedValue({
+      state: activeGame({
+        mode: "local_two_player",
+        current_player: 2,
+        round: claimedRound,
+      }),
+      result: "round_drawn",
+      completedRound: claimedRound,
+    });
+
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    const name = await screen.findByText("Nando De Colo");
+    const cell = name.closest("button");
+    expect(cell.querySelector(".ttt-correct-check-enter")).toBeTruthy();
+  });
+});
+
+describe("GameBoard pending-move guard", () => {
+  it("ignores a second PlayerSearch activation fired before the online move broadcast returns", () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    // Both calls happen synchronously in the same tick, before React can
+    // re-render and clear `selectedCell` -- exactly the rapid-second-activation
+    // race the guard exists for.
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+      playerSearchHolder.props.onSelect(player);
+    });
+
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a second PlayerSearch activation fired before submitMove settles (local/HTTP)", async () => {
+    let resolveSubmit;
+    submitMove.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve;
+        })
+    );
+
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    await act(async () => {
+      playerSearchHolder.props.onSelect(player);
+      playerSearchHolder.props.onSelect(player);
+    });
+
+    expect(submitMove).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSubmit({
+        state: activeGame({ mode: "local_two_player", current_player: 2 }),
+        result: "correct",
+      });
+    });
+
+    // The guard releases once the deferred response lands, so a genuinely new
+    // move afterwards is still possible.
+    fireEvent.click(screen.getAllByText("+")[1]);
+    fireEvent.click(screen.getByText("select-player"));
+    await waitFor(() => expect(submitMove).toHaveBeenCalledTimes(2));
+  });
+
+  it("releases the pending guard on a realtime ERROR (e.g. a retryable server rejection) so a later selection can send", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+
+    // The server rejects the move (e.g. the cell was claimed a moment
+    // earlier by the opponent) -- this arrives as an ERROR envelope, never as
+    // a state/result broadcast, so it must be routed to the same release path
+    // or the guard would stay engaged forever.
+    act(() => {
+      realtimeHolder.opts.onError("Cell already claimed.");
+    });
+    expect(await screen.findByText("Cell already claimed.")).toBeInTheDocument();
+
+    // A subsequent selection must be able to send again.
+    fireEvent.click(screen.getAllByText("+")[1]);
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases the pending guard on a bounded poll resync when the move's own result broadcast was lost", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+
+    // Neither an ERROR nor the targeted STATE broadcast for our move ever
+    // arrives (dropped connection / lost message), but the periodic
+    // authoritative GET /games/{id} resync (source: "poll") still lands with
+    // result:null. That alone must be enough to release the guard so the
+    // player is never soft-locked waiting for a reply that will never come.
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ current_player: 2 }),
+        result: null,
+        completedRound: null,
+        source: "poll",
+      });
+    });
+
+    fireEvent.click(screen.getAllByText("+")[1]);
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not release the pending guard on an unrelated poll resync alone (result absent, source not poll)", async () => {
+    // Guards against over-eager release: a plain realtime STATE broadcast
+    // with no result and no explicit poll source (e.g. a stray duplicate of
+    // the initial connect snapshot) must not be treated as proof our specific
+    // pending move can be abandoned.
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ current_player: 1 }),
+        result: null,
+        completedRound: null,
+      });
+    });
+
+    // PlayerSearch already closed after the first activation and the guard
+    // is still engaged, so no cell is clickable to reopen it -- but even a
+    // direct re-invocation of the (stale) onSelect callback must still be a
+    // no-op, since the synchronous guard -- not the closed dialog -- is what
+    // is protecting against a second send here.
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves focus to the board region when a bounded poll resync reveals the turn already changed (lost result broadcast)", () => {
+    // Uses the mocked realtime hook so the poll settlement can be driven
+    // directly (source: "poll") without needing to control the shared
+    // hook's real setInterval; GameBoardFocusRestoration.test.jsx covers the
+    // equivalent scenario with the real dialog end to end where timers
+    // aren't involved.
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    const cell = screen.getAllByText("+")[0].closest("button");
+    fireEvent.click(cell);
+    // Simulate the user's keyboard focus resting on the just-clicked cell,
+    // as the real PlayerSearch/useDialogFocus stack would leave it once its
+    // dialog closes (covered end to end elsewhere); this mocked PlayerSearch
+    // stub doesn't move focus itself.
+    cell.focus();
+    expect(cell).toHaveFocus();
+
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+
+    // Neither a targeted STATE nor an ERROR broadcast for this move ever
+    // arrives -- the next authoritative poll resync reveals the turn already
+    // changed (our own move's result was lost in transit). The recovery
+    // model must be derived from the incoming authoritative state (turn,
+    // claim), not a result token that a poll settlement never carries.
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ current_player: 2 }),
+        result: null,
+        completedRound: null,
+        source: "poll",
+      });
+    });
+
+    expect(document.querySelector('[aria-label="TicTacToe board"]')).toHaveFocus();
+    expect(cell).toBeDisabled();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
+describe("GameBoard claimed-vs-incorrect cell coloring race", () => {
+  it("prioritizes a newly-claimed cell over this viewer's own stale wrong-guess tint", async () => {
+    const feedback = { message: "No match for both clues." };
+    submitMove.mockResolvedValue({
+      state: activeGame({ mode: "local_two_player", current_player: 2 }),
+      result: "incorrect",
+      feedback,
+    });
+
+    render(
+      <GameBoard
+        initialState={activeGame({ mode: "local_two_player" })}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: false }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    fireEvent.click(screen.getByText("select-player"));
+
+    const incorrectCell = await screen.findByRole("button", {
+      name: /1 row and A column\. Incorrect\./,
+    });
+    expect(incorrectCell.className).toContain("bg-red-50");
+
+    // The opponent claims the very same cell (row 0 / col 0) while this
+    // viewer's 2400ms wrong-feedback window is still open.
+    const claimedRound = {
+      columns: [axis("A"), axis("B"), axis("C")],
+      rows: [axis("1"), axis("2"), axis("3")],
+      cells: boardCells().map((cell, index) =>
+        index === 0
+          ? {
+              ...cell,
+              claimed_by_player: 2,
+              claimed_player_id: 5,
+              claimed_player_name: "Opponent Pick",
+            }
+          : cell
+      ),
+    };
+    act(() => {
+      realtimeHolder.opts?.onState?.({
+        state: activeGame({
+          mode: "local_two_player",
+          current_player: 1,
+          round: claimedRound,
+        }),
+        result: null,
+      });
+    });
+
+    const claimedCell = screen.getByText("Opponent Pick").closest("button");
+    expect(claimedCell.className).not.toContain("bg-red-50");
+    expect(claimedCell.className).toContain("bg-elq-player2-bg");
+  });
+});
+
+describe("GameBoard end-of-game live announcement", () => {
+  function liveRegionText() {
+    return document.querySelector('[aria-live="polite"]')?.textContent || "";
+  }
+
+  it("announces the perspective-aware resignation reason, not the raw result key", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 2 }}
+      />
+    );
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ status: "finished", winner_player: 2 }),
+        result: "resigned",
+      });
+    });
+
+    await screen.findByText("Your opponent resigned.", { selector: "p" });
+    expect(liveRegionText()).toContain("Your opponent resigned.");
+    expect(liveRegionText()).not.toMatch(/^resigned$/);
+  });
+
+  it("announces the perspective-aware disconnect reason, not the raw result key", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 2 }}
+      />
+    );
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ status: "finished", winner_player: 2 }),
+        result: "opponent_left",
+      });
+    });
+
+    await screen.findByText("Your opponent left the game.", { selector: "p" });
+    expect(liveRegionText()).toContain("Your opponent left the game.");
+    expect(liveRegionText()).not.toMatch(/opponent_left/);
   });
 });
 
@@ -467,11 +934,11 @@ describe("GameBoard solo stakes", () => {
     );
 
     const progress = screen.getByLabelText("TicTacToe solo progress");
-    expect(within(progress).getByText("Make three in a row")).toBeInTheDocument();
+    expect(within(progress).getByText("Three in a row")).toBeInTheDocument();
     expect(within(progress).getByText("Claimed")).toBeInTheDocument();
     expect(within(progress).getByText("4/9")).toBeInTheDocument();
-    expect(within(progress).getByText("Strikes left")).toBeInTheDocument();
-    expect(within(progress).getByText("2/3")).toBeInTheDocument();
+    expect(within(progress).getByText("Strikes")).toBeInTheDocument();
+    expect(within(progress).getByText("2 left")).toBeInTheDocument();
     // The strike pips carry their meaning on an accessible label, not by shape.
     expect(
       within(progress).getByLabelText(/strikes used/i)
@@ -519,9 +986,13 @@ describe("GameBoard solo stakes", () => {
         player_id: 99,
       })
     );
-    expect(await screen.findByText("❌ Incorrect. Strike lost.")).toBeInTheDocument();
-    expect(screen.getByText("2 strikes remaining.")).toBeInTheDocument();
-    expect(screen.getByText(feedback.message)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /1 row and A column\. Incorrect\. No match for both clues/,
+      })
+    ).toBeInTheDocument();
+    expect(screen.getByText("2 left")).toBeInTheDocument();
+    expect(screen.getByText(feedback.message, { exact: false })).toBeInTheDocument();
   });
 
   it("shows the solo win result screen immediately when the board is won", async () => {
@@ -561,8 +1032,13 @@ describe("GameBoard solo stakes", () => {
     expect(await screen.findByRole("heading", { name: "Solo board won!" })).toBeInTheDocument();
     expect(screen.queryByText("See Result")).not.toBeInTheDocument();
     expect(screen.queryByText(/Next board in/)).not.toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
     expect(screen.getAllByText(/Vasilije Micic/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("button", {
+        name: /1 row and A column\. Example answers: Vasilije Micic\./,
+      })
+    ).toBeInTheDocument();
   });
 
   it("shows the solo loss result screen immediately when strikes run out", async () => {
@@ -599,7 +1075,7 @@ describe("GameBoard solo stakes", () => {
 
     expect(await screen.findByRole("heading", { name: "Out of strikes" })).toBeInTheDocument();
     expect(screen.queryByText("See Result")).not.toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
   });
 
   it("shows the solo draw result screen immediately when the board fills with no line", async () => {
@@ -636,7 +1112,7 @@ describe("GameBoard solo stakes", () => {
 
     expect(await screen.findByRole("heading", { name: "Board complete" })).toBeInTheDocument();
     expect(screen.queryByText("See Result")).not.toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
   });
 
   it("uses Show answers to jump straight to the neutral result screen", async () => {
@@ -669,7 +1145,7 @@ describe("GameBoard solo stakes", () => {
     // No "See Result" gate: Show answers reveals the result screen directly.
     expect(await screen.findByRole("heading", { name: "Answers revealed" })).toBeInTheDocument();
     expect(screen.queryByText("See Result")).not.toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
   });
 
   it("renders the defensive solo draw result screen for a full no-winner board", () => {
@@ -750,6 +1226,11 @@ describe("GameBoard claimed-cell colors (issue #262)", () => {
     expect(button.className).not.toContain("bg-elq-player1-bg");
     expect(nameEl.className).toContain("text-emerald-800");
     expect(nameEl.className).not.toContain("text-elq-player1");
+    expect(
+      screen.getByRole("button", {
+        name: /1 row and A column\. Claimed by Solo Claim Pick\./,
+      })
+    ).toBeInTheDocument();
   });
 
   it("keeps the Player-1 blue identity for local 1v1 claimed cells", () => {
@@ -835,8 +1316,9 @@ describe("GameBoard claimed-cell colors (issue #262)", () => {
       />
     );
 
-    const pickEl = screen.getByText(/Your pick: Reveal Pick/);
-    expect(pickEl.className).toContain("text-emerald-700");
+    const pickEl = screen.getByText("Reveal Pick");
+    expect(pickEl.closest("button").className).toContain("bg-emerald-100");
+    expect(pickEl.className).toContain("text-emerald-800");
     expect(pickEl.className).not.toContain("text-elq-player1");
   });
 });
@@ -952,7 +1434,7 @@ describe("GameBoard end-of-game result", () => {
       });
     });
 
-    expect(await screen.findByText("Your opponent resigned.")).toBeInTheDocument();
+    expect(await screen.findByText("Your opponent resigned.", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByText(/WINS!/)).toBeInTheDocument();
     expect(screen.queryByText("Waiting for opponent...")).not.toBeInTheDocument();
   });
@@ -1021,7 +1503,7 @@ describe("GameBoard end-of-game result", () => {
 
     // The unified result screen replaces the board inline — it is not a
     // dismissible modal, so the forfeit reason and winner stay on screen.
-    expect(await screen.findByText("Your opponent resigned.")).toBeInTheDocument();
+    expect(await screen.findByText("Your opponent resigned.", { selector: "p" })).toBeInTheDocument();
     expect(screen.getByText(/WINS!/)).toBeInTheDocument();
 
     // The old dismissible modal is gone: no Close button, no "View result" pill,
@@ -1032,7 +1514,7 @@ describe("GameBoard end-of-game result", () => {
 
     // The end-of-game actions use the standardized, cross-game labels.
     expect(screen.getByText("Play Again")).toBeInTheDocument();
-    expect(screen.getByText("Home")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument();
   });
 
   it("renders a finished solo loss result screen after refresh", () => {
@@ -1062,7 +1544,7 @@ describe("GameBoard end-of-game result", () => {
 
     expect(screen.getByRole("heading", { name: "Out of strikes" })).toBeInTheDocument();
     expect(screen.getByText("Play Again")).toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
   });
 
   it("does not credit Player 2 when a finished online game has no winner", async () => {
@@ -1123,8 +1605,7 @@ describe("GameBoard header navigation", () => {
     const scoreboard = screen.getByLabelText("TicTacToe multiplayer scoreboard");
     expect(within(scoreboard).getByText("Alice")).toBeInTheDocument();
     expect(within(scoreboard).getByText("Bob")).toBeInTheDocument();
-    expect(within(scoreboard).getByText("Round 1")).toBeInTheDocument();
-    expect(within(scoreboard).getByText("First to 3")).toBeInTheDocument();
+    expect(within(scoreboard).getByText(/Round 1.*First to 3/)).toBeInTheDocument();
 
     const pill = within(scoreboard).getByText("You are Alice").closest("div");
     expect(pill.querySelector(".bg-elq-player1")).toBeTruthy();
@@ -1314,8 +1795,8 @@ describe("GameBoard desktop Solo command rail (issue #266)", () => {
 
     // Rail teaches via "How to play"; the always-on clue legend and the full
     // guide's first-run card / objective line are intentionally dropped here.
-    expect(screen.getAllByTestId("ttt-howto-trigger")).toHaveLength(1);
-    expect(within(rail).getByTestId("ttt-howto-trigger")).toBeInTheDocument();
+    expect(screen.getAllByTestId("ttt-help-trigger")).toHaveLength(1);
+    expect(within(rail).getByTestId("ttt-help-trigger")).toBeInTheDocument();
     expect(screen.queryByTestId("ttt-legend-trigger")).not.toBeInTheDocument();
     expect(screen.queryByTestId("ttt-objective")).not.toBeInTheDocument();
     expect(screen.queryByTestId("ttt-howto")).not.toBeInTheDocument();
@@ -1380,7 +1861,7 @@ describe("GameBoard desktop Solo command rail (issue #266)", () => {
       await screen.findByRole("heading", { name: "Answers revealed" })
     ).toBeInTheDocument();
     expect(screen.queryByText("See Result")).not.toBeInTheDocument();
-    expect(screen.getByText("Answer reveal")).toBeInTheDocument();
+    expect(screen.getByText("Examples are not the only valid answers.")).toBeInTheDocument();
   });
 
   it("keeps Local 1v1 on the stacked layout even at desktop width", () => {
@@ -1398,4 +1879,3 @@ describe("GameBoard desktop Solo command rail (issue #266)", () => {
     expect(screen.getByLabelText("TicTacToe multiplayer scoreboard")).toBeInTheDocument();
   });
 });
-

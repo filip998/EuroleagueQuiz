@@ -102,6 +102,36 @@ function ScoreboardCenter({ timer, statusText }) {
   );
 }
 
+function CompactPlayer({ seat, player, isYou }) {
+  const styles = SEAT_STYLES[seat];
+  const { name, score, active } = player || {};
+
+  return (
+    <div
+      aria-label={`${name} score ${score}`}
+      className="flex min-w-0 flex-col items-center justify-center px-2 py-2 text-center"
+    >
+      <div className="flex max-w-full items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-elq-dark">
+        <span className="truncate">{name}</span>
+        {isYou && (
+          <>
+            <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${styles.dot}`} />
+            <span className="sr-only">You are {name}</span>
+          </>
+        )}
+      </div>
+      <div className={`font-display text-3xl font-bold leading-none ${styles.score}`}>
+        {score}
+      </div>
+      {active && (
+        <span className="mt-1 text-[9px] font-bold uppercase tracking-wide text-elq-muted">
+          Turn
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function OnlineScoreboard({
   ariaLabel = "Online match scoreboard",
   title = null,
@@ -112,10 +142,59 @@ export default function OnlineScoreboard({
   timer = null,
   statusText = null,
   showSeatBars = true,
+  compact = false,
 }) {
   const validSeat = youPlayerNumber === 1 || youPlayerNumber === 2;
   const youStyles = validSeat ? SEAT_STYLES[youPlayerNumber] : null;
   const youName = validSeat ? players[youPlayerNumber - 1]?.name : null;
+
+  if (compact) {
+    return (
+      <section
+        role="group"
+        aria-label={ariaLabel}
+        className="mb-3 animate-fade-in-up"
+      >
+        <div className="grid min-h-[84px] grid-cols-[1fr_1.15fr_1fr] items-stretch overflow-hidden rounded-2xl border border-elq-border bg-white shadow-sm">
+          <CompactPlayer
+            seat={1}
+            player={players[0]}
+            isYou={youPlayerNumber === 1}
+          />
+          <div className="flex min-w-0 flex-col items-center justify-center border-x border-elq-border px-2 py-2 text-center">
+            {timer && timer.seconds != null ? (
+              <div
+                role="timer"
+                aria-label={`${timer.seconds} seconds left`}
+                className={`font-mono text-3xl font-bold leading-none tabular-nums ${
+                  timer.critical ? "animate-timer-critical" : "text-elq-dark"
+                }`}
+              >
+                {timer.seconds}
+                <span className="ml-0.5 text-base font-normal text-elq-muted">s</span>
+              </div>
+            ) : (
+              <div className="font-display text-2xl tracking-wide text-elq-dark">VS</div>
+            )}
+            {statusText && (
+              <div className="mt-1 max-w-full truncate text-[10px] font-semibold text-elq-muted">
+                {statusText}
+              </div>
+            )}
+          </div>
+          <CompactPlayer
+            seat={2}
+            player={players[1]}
+            isYou={youPlayerNumber === 2}
+          />
+        </div>
+        <div className="mt-2 text-center text-[10px] font-bold uppercase tracking-[0.16em] text-elq-muted">
+          {roundNumber != null ? `Round ${roundNumber}` : "Round -"}
+          {targetWins != null && ` \u00b7 First to ${targetWins}`}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section

@@ -32,7 +32,107 @@ export default function QuickMatchPanel({
   defaultPreset = null,
   label = "Pick a pool",
   formatPresence = defaultFormatPresence,
+  layout = "list",
+  helper = null,
+  footer = null,
 }) {
+  if (layout === "featured") {
+    const featured =
+      presets.find((preset) => preset.key === defaultPreset) ?? presets[0];
+    const secondary = presets.filter((preset) => preset.key !== featured?.key);
+
+    const renderPresence = (preset) =>
+      preset.key === pendingPreset
+        ? "Searching…"
+        : formatPresence(pools?.[preset.key]);
+
+    const renderCard = (preset, isFeatured) => {
+      const isPending = preset.key === pendingPreset;
+      return (
+        <button
+          key={preset.key}
+          type="button"
+          onClick={() => onPick(preset.key)}
+          disabled={disabled}
+          data-testid={`quick-pick-${preset.key}`}
+          aria-busy={isPending}
+          className={`group w-full rounded-xl border bg-white text-left transition-[border-color,background-color,box-shadow,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange focus-visible:ring-offset-2 disabled:cursor-not-allowed ${
+            isFeatured
+              ? "border-2 border-elq-cta bg-orange-50/60 p-3"
+              : "border-elq-border p-3"
+          } ${
+            disabled && !isPending
+              ? "opacity-50"
+              : "hover:border-elq-cta/60 hover:shadow-sm active:scale-[0.99]"
+          }`}
+        >
+          <span className="flex items-center justify-between gap-3">
+            <span className="min-w-0">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-bold text-elq-text">
+                  {preset.label}
+                </span>
+                {preset.key === defaultPreset && (
+                  <span className="rounded-full bg-orange-200 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-elq-cta-dark">
+                    Recommended
+                  </span>
+                )}
+              </span>
+              <span className="mt-1 block text-xs text-elq-muted">
+                {preset.detail}
+              </span>
+            </span>
+            {isFeatured ? (
+              <span className="inline-flex min-h-11 min-w-[76px] shrink-0 items-center justify-center rounded-xl bg-elq-cta px-4 text-sm font-bold text-white group-hover:bg-elq-cta-dark">
+                {isPending ? "Wait…" : "Play"}
+              </span>
+            ) : (
+              <svg
+                aria-hidden="true"
+                data-testid={`affordance-${preset.key}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4 shrink-0 text-elq-cta"
+              >
+                <path d="m9 6 6 6-6 6" />
+              </svg>
+            )}
+          </span>
+          <span
+            className={`mt-2 block truncate text-[11px] text-elq-muted ${
+              isFeatured ? "" : "sm:text-right"
+            }`}
+            data-testid={`presence-${preset.key}`}
+          >
+            {renderPresence(preset)}
+          </span>
+        </button>
+      );
+    };
+
+    return (
+      <div>
+        <div className="mb-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-elq-muted">
+            {label}
+          </p>
+          {helper && <p className="mt-0.5 text-xs text-elq-muted">{helper}</p>}
+        </div>
+        {featured && renderCard(featured, true)}
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {secondary.map((preset) => renderCard(preset, false))}
+        </div>
+        {footer && (
+          <p className="mt-3 text-center text-xs text-elq-muted">{footer}</p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="mb-6">
       <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-3">

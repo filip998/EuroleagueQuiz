@@ -1,11 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getGame, submitMove, offerDraw, respondDraw, giveUpGame, cancelQuickMatchTicTacToe, connectTicTacToeRealtime } from "./api";
 import { REALTIME_CLIENT_ACTIONS } from "./realtimeSchema";
 import { optimizeHeadshot, handleHeadshotError, HEADSHOT_WIDTHS } from "./imageUrl";
 import { useOnlineGameRealtime } from "./useOnlineGameRealtime";
 import PlayerSearch from "./PlayerSearch";
 import BoardHeaderNav from "./BoardHeaderNav";
-import GameResult from "./GameResult";
 import { winnerDisplayName } from "./winnerName";
 import OnlineScoreboard from "./OnlineScoreboard";
 import ClubLogo from "./ClubLogo";
@@ -31,9 +30,25 @@ const AXIS_CHIP_STYLES = {
   stat_milestone: "bg-rose-50 text-rose-800 border-rose-200",
 };
 
+const RESULT_TONE_STYLES = {
+  success: "border-emerald-300 bg-emerald-50 text-emerald-900",
+  danger: "border-red-300 bg-red-50 text-red-900",
+  neutral: "border-sky-300 bg-sky-50 text-sky-900",
+  reveal: "border-orange-300 bg-orange-50 text-orange-950",
+};
+
 const SOLO_STRIKE_LIMIT = 3;
 const SOLO_TOTAL_CELLS = 9;
 const SOLO_TERMINAL_RESULTS = new Set(["solo_won", "solo_lost", "solo_drawn", "gave_up"]);
+const ACCEPTED_MOVE_RESULTS = new Set([
+  "correct",
+  "round_won",
+  "round_drawn",
+  "match_won",
+  "board_complete",
+  "solo_won",
+  "solo_drawn",
+]);
 const ROUND_REVEAL_RESULTS = new Set([
   "round_won",
   "round_drawn",
@@ -71,60 +86,13 @@ function clueText(axis) {
   return axis?.display_label || axis?.team_name || "Clue";
 }
 
-function SoloAnswerReveal({ round }) {
-  const cellsWithAnswers =
-    round?.cells?.filter((cell) => cell.sample_answers?.length || cell.claimed_player_name) || [];
-  if (!cellsWithAnswers.length) return null;
+function shortIncorrectFeedback(feedback) {
+  const failedAxes = feedback?.failed_axes || [];
+  if (failedAxes.length !== 1) return "No match for both clues";
 
-  return (
-    <div className="mb-6 text-left">
-      <h3 className="text-sm font-bold uppercase tracking-wide text-elq-muted mb-2">
-        Answer reveal
-      </h3>
-      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-        {cellsWithAnswers.map((cell) => (
-          <div
-            key={`${cell.row_index}-${cell.col_index}`}
-            className="rounded-xl border border-elq-border bg-elq-bg/70 p-3"
-          >
-            <div className="text-sm font-semibold text-elq-dark">
-              {clueText(cell.row_axis)} × {clueText(cell.col_axis)}
-            </div>
-            {cell.claimed_player_name && (
-              <div className="text-sm text-emerald-700 mt-1">
-                Your pick: {cell.claimed_player_name}
-              </div>
-            )}
-            {cell.sample_answers?.length > 0 && (
-              <div className="text-sm text-elq-muted mt-1">
-                {cell.claimed_player_name ? "Also works: " : "Examples: "}
-                {cell.sample_answers.join(", ")}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function SoloEndStats({ progress }) {
-  return (
-    <div className="grid grid-cols-2 gap-2 mb-5 text-sm">
-      <div className="rounded-xl bg-elq-bg border border-elq-border p-3">
-        <div className="text-elq-muted">Cells claimed</div>
-        <div className="font-bold text-elq-dark">
-          {progress.claimedCells}/{progress.totalCells}
-        </div>
-      </div>
-      <div className="rounded-xl bg-elq-bg border border-elq-border p-3">
-        <div className="text-elq-muted">Strikes</div>
-        <div className="font-bold text-elq-dark">
-          {progress.strikesUsed}/{progress.strikeLimit}
-        </div>
-      </div>
-    </div>
-  );
+  const label =
+    failedAxes[0]?.display_label || failedAxes[0]?.label || "this clue";
+  return label.length <= 18 ? `No ${label} match` : "Doesn’t match this clue";
 }
 
 function isRoundFull(round) {
@@ -151,6 +119,7 @@ function soloResultPresentation(game, progress, lastResult, round) {
       title: "Solo board won!",
       subtitle: `Three in a row with ${progress.strikesRemaining} strike${progress.strikesRemaining === 1 ? "" : "s"} left.`,
       celebrate: true,
+      tone: "success",
     };
   }
   if (result === "solo_lost") {
@@ -159,6 +128,7 @@ function soloResultPresentation(game, progress, lastResult, round) {
       title: "Out of strikes",
       subtitle: `You used all ${progress.strikeLimit} strikes before completing a line.`,
       celebrate: false,
+      tone: "danger",
     };
   }
   if (result === "solo_drawn") {
@@ -167,6 +137,7 @@ function soloResultPresentation(game, progress, lastResult, round) {
       title: "Board complete",
       subtitle: "No three-in-a-row on the finished board.",
       celebrate: false,
+      tone: "neutral",
     };
   }
   return {
@@ -174,6 +145,7 @@ function soloResultPresentation(game, progress, lastResult, round) {
     title: "Answers revealed",
     subtitle: "Study the board, then try again when you are ready.",
     celebrate: false,
+    tone: "reveal",
   };
 }
 
@@ -213,7 +185,7 @@ export function AxisLabel({ axis }) {
         <ClubLogo code={axis.team_code} size={28} alt={axis.team_name || label} />
       )}
       {isPlayedWith && (
-        <span className="text-[9px] font-bold uppercase tracking-wide opacity-80 leading-none">
+        <span className="text-[9px] font-bold uppercase tracking-wide leading-none">
           {"\ud83e\udd1d"} Played with
         </span>
       )}
@@ -243,15 +215,52 @@ export function AxisLabel({ axis }) {
 }
 
 export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo }) {
-  const [game, setGame] = useState(initialState?.game || initialState);
+  const initialGame = initialState?.game || initialState;
+  const [game, setGame] = useState(initialGame);
+  const [terminalRound, setTerminalRound] = useState(
+    initialGame?.status === "finished" ? initialGame.round : null
+  );
   const [selectedCell, setSelectedCell] = useState(null);
   const [lastResult, setLastResult] = useState(null);
   const [lastFeedback, setLastFeedback] = useState(null);
+  const [cellFeedback, setCellFeedback] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [timeLeft, setTimeLeft] = useState(null);
   const [roundTransition, setRoundTransition] = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  const attemptedCellRef = useRef(null);
+  // Synchronous guard against a second move firing before the first settles.
+  // React state (e.g. `selectedCell`/`loading`) only takes effect on the next
+  // render, so a second PlayerSearch activation in the same tick (fast
+  // double-tap/double-Enter before the closing re-render lands) could still
+  // read the stale `selectedCell` and dispatch another submitMove/realtime
+  // move. A ref is mutated immediately and closes that window.
+  const pendingMoveRef = useRef(false);
+  // Reactive mirror of pendingMoveRef so the board can visibly/accessibly
+  // reflect "a move is in flight" (cells stop looking clickable, aria-disabled
+  // while the request is outstanding) without ever gating the native
+  // `disabled` attribute on it -- see isClickable/baseClickable below, which
+  // keep the attempted cell's button focusable so focus restoration from the
+  // closing PlayerSearch dialog has somewhere to land.
+  const [movePending, setMovePending] = useState(false);
+  // A cell that just became permanently unfocusable (claimed, or the game
+  // ended) can silently blur to <body> the instant its `disabled` attribute
+  // flips true, if the user was still focused on it via keyboard. When that
+  // is detected, this records where focus should land instead: "board" (a
+  // stable, always-focusable board region -- the game continues, just not on
+  // this exact cell anymore) or "finished" (the terminal Play Again action).
+  // Set by handleRealtimeState, applied and cleared by the effect below.
+  const [focusRecoveryTarget, setFocusRecoveryTarget] = useState(null);
+  const boardRegionRef = useRef(null);
+  const primaryResultActionRef = useRef(null);
+  // The actual DOM node of the cell button that opened PlayerSearch, captured
+  // explicitly at click time (not inferred from document.activeElement).
+  // Safari/iOS Safari and Firefox on macOS commonly do NOT move focus to a
+  // button on a plain pointer/tap, so relying on activeElement alone would
+  // capture <body> as the "opener" there and never restore to the real
+  // trigger. Passed to PlayerSearch as an explicit, deterministic triggerRef.
+  const selectedCellTriggerRef = useRef(null);
 
   const isSolo = game?.mode === "single_player";
   // A solo / local game must never be treated as online, even if `onlineInfo`
@@ -266,11 +275,116 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const myPlayer = onlineInfo?.playerNumber;
   const realtimeUnavailableMessage = "Realtime connection unavailable. Reconnecting...";
 
+  // The ONE place that decides whether the attempted cell's button will
+  // remain a real, natively-enabled control under an INCOMING authoritative
+  // state -- rather than inferring it from the result token (e.g. "incorrect
+  // stays focusable"), which breaks the moment the two diverge. They do
+  // diverge online: an incorrect guess still switches `current_player` to
+  // the opponent, so the same "incorrect" result that leaves a Local/Solo
+  // cell clickable makes an online cell natively disabled via isMyTurn. The
+  // same authoritative check applies whether this update carries a result
+  // (a direct response to our own move) or is a background poll resync
+  // (result: null) that happens to reveal the same turn/claim change because
+  // our own move's result broadcast was lost. Mirrors baseClickable's
+  // structural conditions below, evaluated against the NEW state instead of
+  // the current one.
+  function willAttemptedCellRemainFocusable(incomingState, attemptedCell, willTransition) {
+    if (!incomingState || !attemptedCell || willTransition) return false;
+    if (incomingState.status !== "active") return false;
+    if (incomingState.pending_draw) return false;
+    if (isOnline && incomingState.current_player !== myPlayer) return false;
+    const cells = incomingState.round?.cells || [];
+    const cell = cells.find(
+      (c) =>
+        c.row_index === attemptedCell.row_index && c.col_index === attemptedCell.col_index
+    );
+    return !cell?.claimed_by_player;
+  }
+
+  // Single place that arms the pending-move guard (ref + reactive mirror) so
+  // every release path stays in lockstep.
+  function beginPendingMove(attemptedCell) {
+    attemptedCellRef.current = attemptedCell;
+    pendingMoveRef.current = true;
+    setMovePending(true);
+  }
+
+  // Single place that clears the pending-move guard. Called whenever we have
+  // proof the outstanding move can no longer be waited on: a state broadcast
+  // that actually carries a result, a realtime error (the move was rejected
+  // or the connection dropped before/after sending it), a failed send, an
+  // HTTP rejection, or -- as a bounded fallback for a broadcast that was lost
+  // in transit -- the next authoritative poll resync (see handleRealtimeState).
+  function releasePendingMove() {
+    attemptedCellRef.current = null;
+    pendingMoveRef.current = false;
+    setMovePending(false);
+  }
+
   function handleRealtimeState(message) {
     const result = message.result;
     const feedback = message.feedback || null;
+    const attemptedCell = attemptedCellRef.current;
+
+    // Decide BEFORE mutating any state whether the attempted cell's button
+    // is about to stop being a real, natively-enabled control -- claimed for
+    // good, the game/round no longer active, blocked by a pending draw, or
+    // (online) no longer this player's turn -- using the authoritative
+    // INCOMING state (see willAttemptedCellRemainFocusable above), not just
+    // the result token. This runs for BOTH a direct response to our own move
+    // AND a background poll resync (message.source === "poll", result: null)
+    // that can reveal the exact same turn/claim change if our own move's
+    // result broadcast was lost in transit. If keyboard focus is currently
+    // on that exact cell and it's not staying enabled, arm a recovery target
+    // so the effect above moves focus somewhere stable/meaningful once the
+    // DOM reflects the change, instead of silently losing it to <body> the
+    // instant `disabled` flips true.
+    if (attemptedCell) {
+      const willTransition = Boolean(message.completedRound) && ROUND_REVEAL_RESULTS.has(result);
+      const staysFocusable = willAttemptedCellRemainFocusable(
+        message.state,
+        attemptedCell,
+        willTransition
+      );
+      if (!staysFocusable) {
+        const attemptedButton = document.querySelector(
+          `[data-row-index="${attemptedCell.row_index}"][data-col-index="${attemptedCell.col_index}"]`
+        );
+        if (attemptedButton && document.activeElement === attemptedButton) {
+          setFocusRecoveryTarget(message.state?.status === "finished" ? "finished" : "board");
+        }
+      }
+    }
+
     setGame(message.state);
+    if (message.state?.status === "finished") {
+      setTerminalRound(message.completedRound || message.state.round || null);
+    }
     setError(null);
+
+    if (attemptedCell && result === "incorrect") {
+      setCellFeedback({
+        ...attemptedCell,
+        kind: "incorrect",
+        message: shortIncorrectFeedback(feedback),
+      });
+    } else if (attemptedCell && ACCEPTED_MOVE_RESULTS.has(result)) {
+      setCellFeedback({ ...attemptedCell, kind: "correct", phase: "check" });
+    }
+    if (result) {
+      releasePendingMove();
+    } else if (message.source === "poll" && pendingMoveRef.current) {
+      // Bounded recovery: this is the periodic authoritative GET /games/{id}
+      // resync (see useOnlineGameRealtime), not a targeted broadcast for our
+      // move. If a move is still marked pending by the time it lands, the
+      // move's own result broadcast was lost (or the socket dropped and
+      // reconnected without replaying it) -- release the guard so the player
+      // is never soft-locked waiting for a reply that will never arrive. The
+      // resync already reflects whatever actually happened on the server, so
+      // there is nothing further to reconcile here beyond unblocking input.
+      releasePendingMove();
+    }
+
     if (result && message.completedRound && ROUND_REVEAL_RESULTS.has(result)) {
       startRoundTransition(result, message.completedRound, feedback);
     } else if (result) {
@@ -282,6 +396,28 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     }
   }
 
+  // A server-rejected move (claimed cell, player not found, a pending draw
+  // that raced ahead, ...) arrives as a realtime ERROR envelope tagged
+  // { source: "realtime" } by useOnlineGameRealtime, not a state/result
+  // broadcast, so it would never reach handleRealtimeState's result-based
+  // release above. Routing every REALTIME error through the same release
+  // keeps a retryable rejection (or a dropped connection) from ever
+  // soft-locking the board; releasing when nothing is pending is a no-op.
+  //
+  // A background POLL failure (source: "poll") is a different thing
+  // entirely: it is just a transient GET hiccup fetching the periodic
+  // authoritative resync, unrelated to whether any specific action was
+  // accepted or rejected. Treating it as a move rejection would release the
+  // guard for a move that may still be perfectly in flight, opening the door
+  // to a second move sending while the first is still outstanding. Only
+  // surface it as a connection message; never release on it.
+  function handleRealtimeError(message, meta) {
+    if (meta?.source !== "poll") {
+      releasePendingMove();
+    }
+    setError(message);
+  }
+
   const realtime = useOnlineGameRealtime({
     enabled: isOnline,
     gameId: game?.id,
@@ -290,11 +426,80 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     connect: connectTicTacToeRealtime,
     fetchState: getGame,
     onState: handleRealtimeState,
-    onError: setError,
+    onError: handleRealtimeError,
   });
 
   const round = game?.round;
   const soloProgress = isSolo ? buildSoloProgress(game, round) : null;
+
+  useEffect(() => {
+    if (!cellFeedback) return undefined;
+    const timer =
+      cellFeedback.kind === "correct" && cellFeedback.phase === "check"
+        ? setTimeout(
+            () =>
+              setCellFeedback((current) =>
+                current?.kind === "correct"
+                  ? { ...current, phase: "headshot" }
+                  : current
+              ),
+            380
+          )
+        : setTimeout(
+            () => setCellFeedback(null),
+            cellFeedback.kind === "correct" ? 480 : 2400
+          );
+    return () => clearTimeout(timer);
+  }, [cellFeedback]);
+
+  // Mirrors `showFinishedResult` (computed further below, after this
+  // component's early-return gates) using only state already available this
+  // early -- hooks must run unconditionally on every render, so this effect
+  // has to sit above those gates and can't reference a `const` declared after
+  // them.
+  const isShowingFinishedResult = game?.status === "finished" && !roundTransition;
+
+  // Runs after the render where the attempted cell's button actually became
+  // disabled (see handleRealtimeState below, which decides IF/where to
+  // recover focus to). Deferred to an effect rather than done inline so the
+  // recovery target (board region / Play Again button) is guaranteed to
+  // already exist in the DOM for the render it needs to apply to.
+  useEffect(() => {
+    if (!focusRecoveryTarget) return;
+    if (focusRecoveryTarget === "board") {
+      boardRegionRef.current?.focus();
+      setFocusRecoveryTarget(null);
+      return;
+    }
+    // focusRecoveryTarget === "finished": a correct claim or a game-ending
+    // result just arrived, but the game can still be sitting behind a
+    // "Next round in N..." transition banner (e.g. match_won) for several
+    // seconds before the terminal Play Again screen actually mounts. Hold
+    // focus on the still-rendered board in the meantime; this effect
+    // re-runs once isShowingFinishedResult flips, which is when the actual
+    // handoff below happens.
+    if (!isShowingFinishedResult) {
+      boardRegionRef.current?.focus();
+      return;
+    }
+    // The terminal screen just mounted. A multi-second countdown was a real
+    // window for the user to deliberately move focus elsewhere (e.g. tab to
+    // or click the persistent Home control) -- only claim Play Again if
+    // focus is still exactly where this recovery left it (the board region),
+    // on <body> (the browser's own blur-on-disable, not a deliberate user
+    // choice), or nowhere connected at all. Otherwise respect wherever the
+    // user actually put their focus and just clear the target.
+    const active = document.activeElement;
+    const userMovedFocusDeliberately =
+      active instanceof HTMLElement &&
+      active.isConnected &&
+      active !== document.body &&
+      active !== boardRegionRef.current;
+    if (!userMovedFocusDeliberately) {
+      primaryResultActionRef.current?.focus();
+    }
+    setFocusRecoveryTarget(null);
+  }, [focusRecoveryTarget, isShowingFinishedResult]);
 
   // Sync timer
   useEffect(() => {
@@ -365,7 +570,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     // Solo terminal results (solo_won/solo_lost/solo_drawn/gave_up) only occur in
     // single_player mode and skip the "See Result" gate: the finished game state
     // already carries the revealed round, so we record the result and let the
-    // solo GameResult branch render immediately instead of pausing on a banner.
+    // solo board-backed result render immediately instead of pausing on a banner.
     if (SOLO_TERMINAL_RESULTS.has(result)) {
       setLastResult(result);
       setLastFeedback(feedback);
@@ -380,43 +585,57 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     setSelectedCell(null);
   }
 
-  function handleCellClick(cell) {
+  function handleCellClick(cell, triggerElement) {
     if (game.status !== "active") return;
     if (cell.claimed_by_player) return;
     if (game.pending_draw) return;
     if (isOnline && game.current_player !== myPlayer) return;
+    selectedCellTriggerRef.current = triggerElement instanceof HTMLElement ? triggerElement : null;
     setSelectedCell(cell);
     setError(null);
     setLastResult(null);
     setLastFeedback(null);
+    setCellFeedback(null);
   }
 
   async function handlePlayerSelect(player) {
-    if (!selectedCell) return;
+    // Bail out synchronously if a move is already in flight (online: waiting
+    // on the realtime broadcast; local/HTTP: waiting on submitMove) so a rapid
+    // second PlayerSearch activation can never issue a second move.
+    if (!selectedCell || pendingMoveRef.current) return;
+    const attemptedCell = {
+      row_index: selectedCell.row_index,
+      col_index: selectedCell.col_index,
+    };
+    beginPendingMove(attemptedCell);
+    setSelectedCell(null);
     setLoading(true);
     setError(null);
     try {
       if (isOnline) {
-        if (realtime.sendAction(REALTIME_CLIENT_ACTIONS.MOVE, {
-          row_index: selectedCell.row_index,
-          col_index: selectedCell.col_index,
+        const sent = realtime.sendAction(REALTIME_CLIENT_ACTIONS.MOVE, {
+          row_index: attemptedCell.row_index,
+          col_index: attemptedCell.col_index,
           player_id: player.player_id,
-        })) {
-          setSelectedCell(null);
-        } else {
+        });
+        if (!sent) {
+          releasePendingMove();
           setError(realtimeUnavailableMessage);
         }
+        // On success the guard stays engaged until the realtime broadcast (or
+        // a realtime error, or a bounded poll resync) releases it -- see
+        // handleRealtimeState/handleRealtimeError.
         return;
       }
 
       const res = await submitMove(game.id, {
-        row_index: selectedCell.row_index,
-        col_index: selectedCell.col_index,
+        row_index: attemptedCell.row_index,
+        col_index: attemptedCell.col_index,
         player_id: player.player_id,
       });
       handleRealtimeState(res);
-      setSelectedCell(null);
     } catch (err) {
+      releasePendingMove();
       setError(err.message);
     } finally {
       setLoading(false);
@@ -544,8 +763,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     );
   }
 
-  const displayRound = roundTransition?.completedRound || round;
   const inTransition = !!roundTransition;
+  const showFinishedResult = game.status === "finished" && !inTransition;
+  const displayRound =
+    (game.status === "finished" ? terminalRound : null) ||
+    roundTransition?.completedRound ||
+    round;
 
   const currentPlayerName =
     game.current_player === 1 ? game.player1_name : game.player2_name;
@@ -579,14 +802,20 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   // left command rail, so the only chrome above the board pane is the page header
   // + the column-header row. That frees a lot of vertical space, so the reserve
   // drops sharply and the per-cell cap is raised to use the freed height/width.
-  const boardReserve = isSoloDesktop
+  const boardReserve = showFinishedResult
+    ? "330px"
+    : isSoloDesktop
     ? "230px"
     : isSolo
-      ? "404px"
+      ? "306px"
       : isOnline
-        ? "552px"
-        : "524px";
-  const boardCellMax = isSoloDesktop ? "240px" : "176px";
+        ? "340px"
+        : "326px";
+  const boardCellMax = showFinishedResult
+    ? "150px"
+    : isSoloDesktop
+      ? "240px"
+      : "176px";
   const boardSizingStyle = {
     animationDelay: "100ms",
     containerType: "inline-size",
@@ -643,34 +872,27 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         ? "Better luck next time."
         : "Match complete \u2014 well played!");
 
-  if (isSolo && game.status === "finished" && !inTransition) {
-    const presentation = soloResultPresentation(game, soloProgress, lastResult, round);
-    return (
-      <GameResult
-        emoji={presentation.emoji}
-        title={presentation.title}
-        subtitle={presentation.subtitle}
-        onPlayAgain={onNewGame}
-        onHome={onHome}
-        celebrate={presentation.celebrate}
-      >
-        <SoloEndStats progress={soloProgress} />
-        <SoloAnswerReveal round={round} />
-      </GameResult>
+  let finishedPresentation = null;
+  if (showFinishedResult && isSolo) {
+    finishedPresentation = soloResultPresentation(
+      game,
+      soloProgress,
+      lastResult,
+      displayRound
     );
-  }
-
-  if (!isSolo && game.status === "finished" && !inTransition) {
+  } else if (showFinishedResult) {
     const finishedWinnerName = winnerDisplayName(game);
-    return (
-      <GameResult
-        title={finishedWinnerName ? `${finishedWinnerName} WINS!` : "No winner"}
-        subtitle={finishedSubtitle}
-        onPlayAgain={onNewGame}
-        onHome={onHome}
-        celebrate={iWon}
-      />
-    );
+    finishedPresentation = {
+      emoji: finishedWinnerName ? "\ud83c\udfc6" : "\ud83e\udd1d",
+      title: finishedWinnerName ? `${finishedWinnerName} WINS!` : "No winner",
+      subtitle: finishedSubtitle,
+      tone:
+        game.winner_player == null
+          ? "neutral"
+          : iWon || !isOnline
+            ? "success"
+            : "danger",
+    };
   }
 
   // Render fragments shared by the stacked column (mobile Solo, Local 1v1,
@@ -679,62 +901,63 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   // (e.g. getByText("Show answers")) never match duplicate nodes.
   const soloProgressCard = isSolo ? (
     <div
-      className="w-full bg-white rounded-2xl border border-elq-border shadow-sm p-3 sm:p-4 mb-3 animate-fade-in-up"
+      className="mb-3 grid min-h-[84px] w-full grid-cols-3 overflow-hidden rounded-2xl border border-elq-border bg-white shadow-sm animate-fade-in-up"
       aria-label="TicTacToe solo progress"
     >
-      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-elq-muted">
-            Objective
-          </div>
-          <div className="text-base sm:text-lg font-bold text-elq-dark">
-            Make three in a row
-          </div>
-          {soloProgress.boardsWon > 0 && (
-            <div className="mt-0.5 text-xs font-semibold text-elq-muted">
-              Boards won: {soloProgress.boardsWon}
-            </div>
-          )}
+      <div className="flex min-w-0 flex-col items-center justify-center px-2 py-2 text-center">
+        <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-elq-muted">
+          Claimed
         </div>
-        <div className="flex items-center gap-5 sm:gap-7">
-          <div className="text-center">
-            <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-elq-muted">
-              Claimed
-            </div>
-            <div className="font-display text-2xl sm:text-3xl font-bold leading-none text-elq-dark">
-              {soloProgress.claimedCells}/{soloProgress.totalCells}
-            </div>
-          </div>
-          <div className="text-center">
-            <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-elq-muted">
-              Strikes left
-            </div>
-            <div
-              className="mt-1 flex items-center justify-center gap-1.5"
-              role="img"
-              aria-label={`${soloProgress.strikesUsed} of ${soloProgress.strikeLimit} strikes used, ${soloProgress.strikesRemaining} remaining`}
-            >
-              {Array.from({ length: soloProgress.strikeLimit }).map((_, i) => (
-                <span
-                  key={i}
-                  aria-hidden="true"
-                  className={`h-3 w-3 rounded-full border-2 ${
-                    i < soloProgress.strikesUsed
-                      ? "border-red-600 bg-red-600"
-                      : "border-elq-border bg-transparent"
-                  }`}
-                />
-              ))}
-              <span
-                aria-hidden="true"
-                className={`ml-1 font-display text-xl font-bold leading-none ${
-                  soloProgress.strikesRemaining <= 1 ? "text-red-700" : "text-elq-dark"
-                }`}
-              >
-                {soloProgress.strikesRemaining}/{soloProgress.strikeLimit}
-              </span>
-            </div>
-          </div>
+        <div className="font-display text-3xl font-bold leading-none text-emerald-700">
+          {soloProgress.claimedCells}/{soloProgress.totalCells}
+        </div>
+        {soloProgress.boardsWon > 0 && (
+          <span className="sr-only">Boards won: {soloProgress.boardsWon}</span>
+        )}
+      </div>
+
+      <div className="flex min-w-0 flex-col items-center justify-center border-x border-elq-border px-2 py-2 text-center">
+        <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-elq-muted">
+          Goal
+        </div>
+        <div aria-hidden="true" className="mt-1 flex gap-1">
+          <span className="h-3 w-3 rounded-sm bg-elq-cta" />
+          <span className="h-3 w-3 rounded-sm bg-elq-cta" />
+          <span className="h-3 w-3 rounded-sm bg-elq-cta" />
+        </div>
+        <div className="mt-1 text-[10px] font-semibold leading-none text-elq-dark">
+          Three in a row
+        </div>
+      </div>
+
+      <div className="flex min-w-0 flex-col items-center justify-center px-2 py-2 text-center">
+        <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-elq-muted">
+          Strikes
+        </div>
+        <div
+          className="mt-1 flex items-center justify-center gap-1"
+          role="img"
+          aria-label={`${soloProgress.strikesUsed} of ${soloProgress.strikeLimit} strikes used, ${soloProgress.strikesRemaining} remaining`}
+        >
+          {Array.from({ length: soloProgress.strikeLimit }).map((_, index) => (
+            <span
+              key={index}
+              aria-hidden="true"
+              className={`h-2.5 w-2.5 rounded-full border-2 ${
+                index < soloProgress.strikesUsed
+                  ? "border-red-600 bg-red-600"
+                  : "border-slate-300 bg-transparent"
+              }`}
+            />
+          ))}
+          <span
+            aria-hidden="true"
+            className={`ml-1 text-xs font-bold ${
+              soloProgress.strikesRemaining <= 1 ? "text-red-700" : "text-elq-dark"
+            }`}
+          >
+            {soloProgress.strikesRemaining} left
+          </span>
         </div>
       </div>
     </div>
@@ -768,14 +991,18 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         statusText={
           game.status === "finished"
             ? `\ud83c\udf89 ${game.winner_player === 1 ? game.player1_name : game.player2_name} wins!`
+            : isOnline && !isMyTurn
+              ? "Waiting for opponent..."
             : `${currentPlayerName}'s turn`
         }
+        compact
       />
     </div>
   ) : null;
 
   const feedbackBanner =
-    lastResult && !["resigned", "opponent_left"].includes(lastResult) ? (
+   lastResult &&
+   !["resigned", "opponent_left", "correct", "incorrect"].includes(lastResult) ? (
       <div className="w-full mb-2 animate-slide-down">
         <div
           className={`p-2 rounded-xl text-center text-sm font-medium ${
@@ -820,7 +1047,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   // board shrinks to the grid's content width and stays centered.
   const boardPane = (
     <div className="w-full animate-fade-in-up" style={boardSizingStyle}>
-      <div className="mx-auto w-fit max-w-full">
+      <div
+        ref={boardRegionRef}
+        tabIndex={-1}
+        aria-label="TicTacToe board"
+        className="mx-auto w-fit max-w-full outline-none"
+      >
         {/* Column headers */}
         <div className="grid gap-1.5 mb-1.5" style={boardGridStyle}>
           <div />
@@ -838,47 +1070,151 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                 (c) => c.row_index === ri && c.col_index === ci
               );
               const claimed = cell?.claimed_by_player;
-              const isClickable =
+              const activeCellFeedback =
+                cellFeedback?.row_index === ri && cellFeedback?.col_index === ci
+                  ? cellFeedback
+                  : null;
+              // baseClickable covers every reason a cell is PERMANENTLY
+              // inert for the rest of this round (claimed, mid-transition,
+              // game not active, blocked by a pending draw, not this
+              // player's turn) and drives the native `disabled` attribute
+              // below. Two things are intentionally kept OUT of it, both
+              // transient/reversible rather than structural:
+              //   - `movePending`/`loading`: a move is in flight for THIS
+              //     cell (online broadcast, or local/HTTP submitMove).
+              //   - an "incorrect" activeCellFeedback: the guess was wrong,
+              //     but the cell was never claimed, so it goes right back to
+              //     being clickable once the ~2.4s feedback window clears.
+              // Gating `disabled` on either would make the just-attempted
+              // cell's button unfocusable the instant it happens (mid-render,
+              // same commit as the state update), so:
+              //   - useDialogFocus's opener-focus restoration (when
+              //     PlayerSearch unmounts) would silently no-op, and
+              //   - a wrong guess would force an unnecessary focus recovery
+              //     every single time instead of just staying put.
+              // Blocking activation (via isClickable/onClick) and surfacing
+              // aria-disabled is enough to keep the board from looking or
+              // acting interactive while transiently blocked, without
+              // sacrificing focus. A cell that becomes claimed (correct) or a
+              // game/round that stops being active DOES permanently drop out
+              // of baseClickable -- handleRealtimeState's focus-recovery
+              // above is what keeps keyboard focus from being lost to <body>
+              // in that genuinely-permanent case.
+              const transientlyBlocked =
+                movePending || loading || activeCellFeedback?.kind === "incorrect";
+              const baseClickable =
                 !claimed &&
                 !inTransition &&
                 game.status === "active" &&
                 !game.pending_draw &&
                 isMyTurn;
+              const isClickable = baseClickable && !transientlyBlocked;
               const showSamples =
-                inTransition && !claimed && cell?.sample_answers?.length > 0;
+                (inTransition || showFinishedResult) &&
+                !claimed &&
+                cell?.sample_answers?.length > 0;
               const showClaimedSamples =
-                inTransition && claimed && cell?.sample_answers?.length > 0;
+                (inTransition || showFinishedResult) &&
+                claimed &&
+                cell?.sample_answers?.length > 0;
+              const showCorrectFeedback =
+                !showFinishedResult &&
+                claimed &&
+                activeCellFeedback?.kind === "correct";
 
               // Solo has no opponent, so a claimed cell uses a neutral/positive
               // green accent instead of the Player-1 blue identity color (which
               // implies a second player). Local 1v1 / Online keep blue/red.
               let cellBg = "border-elq-border bg-white";
-              if (isSolo && claimed) cellBg = "border-emerald-600/30 bg-emerald-100";
+              if (!claimed && activeCellFeedback?.kind === "incorrect") {
+                cellBg = "border-red-300 bg-red-50";
+              } else if (isSolo && claimed) cellBg = "border-emerald-600/30 bg-emerald-100";
               else if (claimed === 1) cellBg = "border-elq-player1/30 bg-elq-player1-bg";
               else if (claimed === 2) cellBg = "border-elq-player2/30 bg-elq-player2-bg";
               else if (isClickable) cellBg = "border-elq-border bg-white cursor-pointer group hover:border-elq-orange/50 hover:shadow-md active:bg-elq-orange/5 motion-safe:hover:scale-[1.02] motion-safe:active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange focus-visible:ring-offset-2 focus-visible:z-10";
-              else if (showSamples) cellBg = "border-elq-border bg-sky-50/50";
+              else if (showSamples) {
+                cellBg = showFinishedResult
+                  ? "border-emerald-300 bg-emerald-50/70"
+                  : "border-elq-border bg-sky-50/50";
+              }
+              if (showCorrectFeedback) {
+                cellBg += " ring-2 ring-emerald-400/70";
+              }
+
+              const rowLabel = clueText(displayRound.rows[ri]);
+              const colLabel = clueText(displayRound.columns[ci]);
+              // True whenever the cell is transiently (not permanently)
+              // blocked: aria-disabled should say so regardless of which
+              // transient reason applies, but the "Move in progress" wording
+              // below only ever surfaces when nothing more specific (like
+              // the "Incorrect. ..." branch, checked first) already covers it.
+              const pendingBlocked = baseClickable && transientlyBlocked;
+              const stateLabel = claimed
+                ? `Claimed by ${cell.claimed_player_name || `player ${claimed}`}`
+                : activeCellFeedback?.kind === "incorrect"
+                  ? `Incorrect. ${activeCellFeedback.message}`
+                  : showSamples
+                    ? `Example answers: ${cell.sample_answers.join(", ")}`
+                    : showFinishedResult
+                      ? "No example available"
+                    : isClickable
+                      ? "Available. Choose a player"
+                      : pendingBlocked
+                        ? "Available. Move in progress"
+                        : "Available";
 
               return (
                 <button
                   key={ci}
                   type="button"
-                  onClick={() => isClickable && handleCellClick(cell)}
-                  disabled={!isClickable}
+                  onClick={(event) => isClickable && handleCellClick(cell, event.currentTarget)}
+                  disabled={!baseClickable}
+                  aria-disabled={pendingBlocked ? "true" : undefined}
+                  aria-label={`${rowLabel} row and ${colLabel} column. ${stateLabel}.`}
+                  data-row-index={ri}
+                  data-col-index={ci}
                   className={`relative aspect-square rounded-xl border-2 flex items-center justify-center transition-all duration-200 text-center p-1.5 overflow-hidden min-w-0 ${cellBg}`}
                 >
                   {claimed ? (
                     <div className="animate-cell-claim flex flex-col items-center gap-0.5 w-full min-w-0">
-                      {cell.claimed_player_image_url && !inTransition && (
-                        <img
-                          src={optimizeHeadshot(cell.claimed_player_image_url, { width: HEADSHOT_WIDTHS.cell })}
-                          alt={cell.claimed_player_name || ""}
-                          className="ttt-claimed-headshot w-5 h-5 sm:w-6 sm:h-6 rounded-full object-cover object-top border border-slate-200"
-                          onError={(e) => handleHeadshotError(e, cell.claimed_player_image_url, (ev) => { ev.currentTarget.style.display = "none"; })}
-                        />
+                      {(showCorrectFeedback ||
+                        (cell.claimed_player_image_url &&
+                          !inTransition &&
+                          !showFinishedResult)) && (
+                        <span className="relative block h-7 w-7 shrink-0">
+                          {cell.claimed_player_image_url &&
+                            !inTransition &&
+                            !showFinishedResult && (
+                              <img
+                                src={optimizeHeadshot(cell.claimed_player_image_url, { width: HEADSHOT_WIDTHS.cell })}
+                                alt={cell.claimed_player_name || ""}
+                                className={`ttt-claimed-headshot absolute inset-0 h-7 w-7 rounded-full border border-slate-200 object-cover object-top ${
+                                  showCorrectFeedback &&
+                                  activeCellFeedback.phase === "check"
+                                    ? "opacity-0"
+                                    : showCorrectFeedback
+                                      ? "ttt-headshot-reveal"
+                                      : ""
+                                }`}
+                                onError={(e) => handleHeadshotError(e, cell.claimed_player_image_url, (ev) => { ev.currentTarget.style.display = "none"; })}
+                              />
+                            )}
+                          {showCorrectFeedback && (
+                            <span
+                              aria-hidden="true"
+                              className={`ttt-correct-check absolute inset-0 flex items-center justify-center rounded-full bg-emerald-600 text-base font-bold text-white ${
+                                activeCellFeedback.phase === "headshot"
+                                  ? "ttt-correct-check-exit"
+                                  : "ttt-correct-check-enter"
+                              }`}
+                            >
+                              ✓
+                            </span>
+                          )}
+                        </span>
                       )}
                       <div
-                        className={`ttt-claimed-name font-bold w-full min-w-0 ${
+                        className={`ttt-claimed-name w-full min-w-0 font-bold capitalize ${
                           isSolo && claimed
                             ? "text-emerald-800"
                             : claimed === 1
@@ -889,11 +1225,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                         {cell.claimed_player_name || `P${claimed}`}
                       </div>
                       {showClaimedSamples && (
-                        <div className="mt-1 w-full space-y-0.5">
-                          {cell.sample_answers.map((name, i) => (
+                        <div aria-hidden="true" className="mt-1 w-full space-y-0.5">
+                          {cell.sample_answers.slice(0, 2).map((name, i) => (
                             <div
                               key={i}
-                              className={`text-[11px] not-italic leading-tight truncate ${
+                              className={`truncate text-[10px] not-italic capitalize leading-tight ${
                                 isSolo ? "text-emerald-700" : "text-elq-muted"
                               }`}
                             >
@@ -903,22 +1239,49 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                         </div>
                       )}
                     </div>
+                  ) : activeCellFeedback?.kind === "incorrect" ? (
+                    <div className="flex w-full min-w-0 flex-col items-center gap-1 text-red-700">
+                      <span
+                        aria-hidden="true"
+                        className="flex h-6 w-6 items-center justify-center rounded-full bg-red-100 text-sm font-bold"
+                      >
+                        ×
+                      </span>
+                      <span className="max-w-full text-[10px] font-bold leading-tight">
+                        {activeCellFeedback.message}
+                      </span>
+                    </div>
                   ) : showSamples ? (
-                    <div className="w-full space-y-0.5">
-                      {cell.sample_answers.map((name, i) => (
+                    <div aria-hidden="true" className="w-full space-y-0.5">
+                      {cell.sample_answers.slice(0, 3).map((name, i) => (
                         <div
                           key={i}
-                          className="text-[11px] not-italic text-elq-muted leading-tight truncate"
+                          className={`truncate not-italic capitalize leading-tight tracking-tight ${
+                            i === 0
+                              ? "text-[10px] font-semibold text-elq-text"
+                              : "text-[9px] text-elq-muted"
+                          }`}
                         >
                           {name}
                         </div>
                       ))}
                     </div>
-                  ) : isClickable ? (
-                    <span className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full border-2 border-elq-orange-dark/40 text-elq-orange-dark text-2xl sm:text-3xl font-bold leading-none transition-colors group-hover:border-elq-orange-dark group-hover:bg-elq-orange/10">
+                  ) : showFinishedResult ? (
+                    <span aria-hidden="true" className="text-lg text-slate-300">
+                      —
+                    </span>
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className={`flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full border-2 text-2xl sm:text-3xl font-bold leading-none transition-colors ${
+                        isClickable
+                          ? "border-elq-orange-dark/40 text-elq-orange-dark group-hover:border-elq-orange-dark group-hover:bg-elq-orange/10"
+                          : "border-slate-200 text-slate-300"
+                      }`}
+                    >
                       +
                     </span>
-                  ) : null}
+                  )}
                 </button>
               );
             })}
@@ -932,7 +1295,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     <button
       onClick={handleGiveUp}
       disabled={loading}
-      className="text-sm text-elq-muted hover:text-elq-text transition-colors underline underline-offset-2"
+      className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm text-elq-muted underline underline-offset-2 transition-colors hover:text-elq-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange"
     >
       Show answers
     </button>
@@ -981,7 +1344,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
             <button
               onClick={handleOfferDraw}
               disabled={loading}
-              className="text-sm text-elq-muted hover:text-elq-text transition-colors underline underline-offset-2"
+              className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm text-elq-muted underline underline-offset-2 transition-colors hover:text-elq-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange"
             >
               Offer Draw
             </button>
@@ -993,46 +1356,111 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       </div>
     ) : null;
 
+  const finishedSummary = finishedPresentation ? (
+    <div
+      className={`mb-3 flex items-center gap-3 rounded-2xl border p-3 shadow-sm ${
+        RESULT_TONE_STYLES[finishedPresentation.tone] || RESULT_TONE_STYLES.reveal
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/70 text-2xl"
+      >
+        {finishedPresentation.emoji}
+      </span>
+      <div className="min-w-0">
+        <h1 className="text-xl font-bold leading-tight">
+          {finishedPresentation.title}
+        </h1>
+        <p className="mt-0.5 text-sm opacity-75">
+          {finishedPresentation.subtitle}
+        </p>
+      </div>
+    </div>
+  ) : null;
+
+  const finishedActions = showFinishedResult ? (
+    <div className="mt-3 grid grid-cols-[1.35fr_1fr] gap-2">
+      <button
+        ref={primaryResultActionRef}
+        type="button"
+        onClick={onNewGame}
+        className="min-h-12 rounded-xl bg-elq-cta px-4 text-sm font-bold text-white transition-colors hover:bg-elq-cta-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange focus-visible:ring-offset-2"
+      >
+        Play Again
+      </button>
+      <button
+        type="button"
+        onClick={onHome}
+        className="min-h-12 rounded-xl border border-elq-border bg-white px-4 text-sm font-bold text-elq-dark transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange focus-visible:ring-offset-2"
+      >
+        Home
+      </button>
+    </div>
+  ) : null;
+
+  const modeLabel = isSolo
+    ? "Solo"
+    : game.mode === "local_two_player"
+      ? "Local 1v1"
+      : "Online";
+  const liveAnnouncement = lastResult
+    ? [
+        // Terminal forfeit results have no generic phrasing in resultMessages;
+        // prefer the perspective-aware reason ("You resigned." / "Your opponent
+        // left the game.") already computed above so the live region never reads
+        // out the raw result key ("resigned", "opponent_left") to screen readers.
+        finishedReason || resultMessages[lastResult] || lastResult,
+        lastFeedback?.message,
+        game.status === "active" ? `${currentPlayerName}'s turn.` : null,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : game.status === "active"
+      ? `${currentPlayerName}'s turn.`
+      : "";
+
   return (
     <div className="elq-auth-safe-top min-h-screen flex flex-col">
-      {/* Orange accent bar */}
-      <div className="h-1 bg-gradient-to-r from-elq-orange to-elq-orange-light" />
+      <div className="h-1 bg-elq-orange" />
 
-      {/* Header bar */}
       <div className="bg-white border-b border-elq-border">
         <div
           className={`${
             isSoloDesktop ? "max-w-6xl" : "max-w-2xl"
-          } mx-auto px-4 py-3 flex items-center justify-between`}
+          } mx-auto grid min-h-12 grid-cols-[1fr_auto_1fr] items-center px-4`}
         >
-          <BoardHeaderNav onHome={onHome} />
-          {isSoloDesktop ? (
+          <BoardHeaderNav onHome={onHome} className="-ml-2 min-h-11 px-2" />
+          <span
+            data-testid="ttt-mode-indicator"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-elq-text"
+          >
             <span
-              data-testid="ttt-mode-indicator"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-elq-text"
-            >
-              <span className="h-2 w-2 rounded-full bg-elq-orange" aria-hidden="true" />
-              Solo
-            </span>
-          ) : (
-            <span />
-          )}
+              className={`h-2 w-2 rounded-full ${
+                game.mode === "online_friend" ? "bg-emerald-500" : "bg-elq-orange"
+              }`}
+              aria-hidden="true"
+            />
+            {modeLabel}
+          </span>
+          <span />
         </div>
       </div>
 
-      {/* Online indicator */}
-      {isOnline && (
-        <div className="bg-elq-bg text-center py-1 text-xs text-elq-muted border-b border-elq-border">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            Online
-            {game.status === "active" && !isMyTurn && <span className="text-elq-orange ml-1">Waiting for opponent...</span>}
-          </span>
-        </div>
-      )}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {liveAnnouncement}
+      </div>
 
-      {/* Main content */}
-      {isSoloDesktop ? (
+      {showFinishedResult ? (
+        <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-3">
+          {finishedSummary}
+          {boardPane}
+          <p className="mt-1 text-center text-xs text-elq-muted">
+            Examples are not the only valid answers.
+          </p>
+          {finishedActions}
+        </main>
+      ) : isSoloDesktop ? (
         <div className="flex-1 min-h-0 w-full max-w-6xl mx-auto flex gap-6 px-4 py-4">
           {/* Left command rail: objective + progress pinned top, transient
               feedback/error in a bounded scroll area (so a long banner can never
@@ -1048,7 +1476,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
               {errorBanner}
             </div>
             <div className="shrink-0 mt-3 flex flex-col items-start gap-3 border-t border-elq-border pt-3">
-              <HowToPlayControl />
+              <HowToPlayControl fallbackFocusRef={boardRegionRef} />
               {game.status === "active" && !inTransition && showAnswersButton}
             </div>
           </aside>
@@ -1059,7 +1487,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           </div>
         </div>
       ) : (
-      <div className="flex-1 flex flex-col items-center px-4 py-3 sm:py-4 max-w-2xl mx-auto w-full">
+      <div className="flex-1 flex flex-col items-center px-4 py-2 sm:py-3 max-w-2xl mx-auto w-full">
         {/* Scoreboard */}
         {isSolo ? soloProgressCard : onlineScoreboard}
 
@@ -1069,16 +1497,16 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
         {/* Error */}
         {errorBanner}
 
-        {/* Onboarding: objective, first-run how-to, clue legend */}
+        {/* Objective and the combined Help sheet */}
         <div className="w-full">
-          <TicTacToeGuide />
+          <TicTacToeGuide fallbackFocusRef={boardRegionRef} />
         </div>
         {/* Board */}
         {boardPane}
 
         {/* Answer reveal button for solo mode */}
         {isSolo && game.status === "active" && !inTransition && (
-          <div className="mt-4 text-center">{showAnswersButton}</div>
+          <div className="mt-2 text-center">{showAnswersButton}</div>
         )}
 
         {/* Draw + resign controls (online / local 1v1) */}
@@ -1093,6 +1521,15 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           colAxis={selectedCell.col_axis ?? round?.columns?.[selectedCell.col_index]}
           onSelect={handlePlayerSelect}
           onCancel={() => setSelectedCell(null)}
+          // Explicit opener: deterministic regardless of whether the browser
+          // actually moved focus to the clicked cell (Safari/Firefox commonly
+          // don't on a plain pointer/tap).
+          triggerRef={selectedCellTriggerRef}
+          // If a realtime update (turn change, claim, ...) disables the
+          // opener cell while this dialog is open on top of it, restoring
+          // focus there on close would silently no-op -- fall back to the
+          // stable board region instead of losing focus to <body>.
+          fallbackFocusRef={boardRegionRef}
         />
       )}
     </div>

@@ -27,6 +27,15 @@ export function useOnlineGameRealtime({
 }) {
   const connectionRef = useRef(null);
   const realtimeVersionRef = useRef(0);
+  // Bumped every time sendAction actually sends a client action. Lets a
+  // background poll -- which can be in flight for the whole 2-10s interval --
+  // recognize, once it resolves or rejects, whether a NEWER action was sent
+  // while it was outstanding. A poll captured before that newer send reflects
+  // server state from before the action even arrived, so surfacing it (as a
+  // resync OR as an error) after the fact could misattribute feedback to the
+  // newer attempt or release a pending guard that a completely different,
+  // still-outstanding action owns. See the poll effect below.
+  const actionEpochRef = useRef(0);
   const onStateRef = useRef(onState);
   const onErrorRef = useRef(onError);
   const authTokenProviderVersion = useSyncExternalStore(
@@ -79,7 +88,11 @@ export function useOnlineGameRealtime({
     function handleMessage(message, version) {
       if (closed || version !== activeVersion) return;
       if (message.kind === REALTIME_MESSAGE_TYPES.ERROR) {
-        onErrorRef.current?.(message.error);
+        // A server action-rejection ERROR envelope is authoritative about the
+        // action that was just sent (e.g. the cell was already claimed) --
+        // tag it distinctly from a background poll's fetch failure so a
+        // consumer can tell them apart (see the poll effect below).
+        onErrorRef.current?.(message.error, { source: "realtime" });
         return;
       }
       if (message.kind === REALTIME_MESSAGE_TYPES.STATE) {
@@ -143,9 +156,20 @@ export function useOnlineGameRealtime({
 
     const interval = setInterval(async () => {
       const realtimeVersionAtStart = realtimeVersionRef.current;
+      const actionEpochAtStart = actionEpochRef.current;
       try {
         const state = await fetchState(gameId);
-        if (closed || realtimeVersionAtStart !== realtimeVersionRef.current) return;
+        if (
+          closed ||
+          realtimeVersionAtStart !== realtimeVersionRef.current ||
+          actionEpochAtStart !== actionEpochRef.current
+        ) {
+          // Either a realtime broadcast, or a newer outgoing action, arrived
+          // while this GET was in flight -- this snapshot predates it and
+          // must not be surfaced (it could revert already-current state or
+          // release a pending guard that belongs to the newer action).
+          return;
+        }
         onStateRef.current?.({
           kind: REALTIME_MESSAGE_TYPES.STATE,
           state,
@@ -155,8 +179,12 @@ export function useOnlineGameRealtime({
           source: "poll",
         });
       } catch (err) {
-        if (closed) return;
-        onErrorRef.current?.(err.message);
+        if (closed || actionEpochAtStart !== actionEpochRef.current) return;
+        // A background poll's fetch failure is not a rejection of any
+        // specific action -- tag it so a consumer never conflates it with an
+        // action-rejection ERROR envelope (which arrives via handleMessage
+        // above, tagged { source: "realtime" }).
+        onErrorRef.current?.(err.message, { source: "poll" });
       }
     }, intervalMs);
 
@@ -176,6 +204,10 @@ export function useOnlineGameRealtime({
   const sendAction = useCallback((action, payload = {}) => {
     const connection = connectionRef.current;
     if (!connection?.isOpen?.()) return false;
+    // Advance the action epoch BEFORE sending so any poll already in flight
+    // (captured with an older epoch above) is recognized as stale relative to
+    // this action once it resolves or rejects.
+    actionEpochRef.current += 1;
     connection.send({ action, ...payload });
     return true;
   }, []);

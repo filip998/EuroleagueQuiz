@@ -13,10 +13,16 @@ async function startTicTacToeQuickMatch(page, { nickname, preset = "Standard" })
 }
 
 async function waitForOnlineBoard(page, { ownName, opponentName }) {
-  await expect(page.getByText(new RegExp(`Online.*${ownName}.*Player [12]`))).toBeVisible({
+  await expect(page.getByTestId("ttt-mode-indicator")).toContainText("Online", {
     timeout: 15000,
   });
-  await expect(page.getByText(opponentName, { exact: true })).toBeVisible({
+  const scoreboard = page.getByRole("group", {
+    name: "TicTacToe multiplayer scoreboard",
+  });
+  await expect(scoreboard).toContainText(ownName, {
+    timeout: 15000,
+  });
+  await expect(scoreboard).toContainText(opponentName, {
     timeout: 15000,
   });
   await expect(page.getByRole("button", { name: "Resign" })).toBeVisible();
@@ -48,12 +54,30 @@ async function currentTurnPage(gameId, playerA, playerB) {
 
 async function playVisibleMove(gameId, playerA, playerB) {
   const page = await currentTurnPage(gameId, playerA, playerB);
-  await page.getByRole("button", { name: "+" }).first().click();
+  // Capture a specific currently-available cell via its stateful aria-label
+  // (set whenever a cell is actually clickable) plus its stable data
+  // coordinates, rather than matching on "+" (only present in some clue
+  // labels, e.g. a "15+ PPG season" stat-milestone chip) or asserting on the
+  // first feedback-cell anywhere on the board (which a prior move's cell can
+  // already satisfy).
+  const availableCell = page
+    .locator('[data-row-index][data-col-index][aria-label*="Available. Choose a player"]')
+    .first();
+  await expect(availableCell).toBeVisible({ timeout: 10000 });
+  const rowIndex = await availableCell.getAttribute("data-row-index");
+  const colIndex = await availableCell.getAttribute("data-col-index");
+  await availableCell.click();
   await page.getByPlaceholder("Type player name...").fill("a");
-  const firstResult = page.locator("ul button").first();
+  const firstResult = page.getByRole("option").first();
   await expect(firstResult).toBeVisible({ timeout: 10000 });
   await firstResult.click();
-  await expect(page.getByText(/Correct|Incorrect|Turn switches/)).toBeVisible({
+  // Wait for this exact cell (not just any cell) to reflect the move result,
+  // proving each call resolves a distinct move rather than reusing another
+  // cell's already-settled feedback.
+  const targetCell = page.locator(
+    `[data-row-index="${rowIndex}"][data-col-index="${colIndex}"]`
+  );
+  await expect(targetCell).toHaveAttribute("aria-label", /Incorrect|Claimed by/, {
     timeout: 15000,
   });
 }
@@ -111,7 +135,7 @@ test.describe("Home Page", () => {
     await page.getByRole("link", { name: /Most played.*TIC-TAC-TOE.*PLAY/ }).click();
 
     await expect(page).toHaveURL(/\/tictactoe$/);
-    await expect(page.getByText("Pick a pool")).toBeVisible();
+    await expect(page.getByText("Choose a pace")).toBeVisible();
     await expect(page.getByTestId("quick-pick-standard")).toBeVisible();
   });
 
@@ -121,7 +145,7 @@ test.describe("Home Page", () => {
 
     // Online -> Quick Match is the default: a one-click pool grid, not the old
     // Create/Join toggle or a separate Find Match button.
-    await expect(page.getByText("Pick a pool")).toBeVisible();
+    await expect(page.getByText("Choose a pace")).toBeVisible();
     await expect(page.getByTestId("quick-pick-blitz")).toBeVisible();
     await expect(page.getByTestId("quick-pick-standard")).toBeVisible();
     await expect(page.getByTestId("quick-pick-long")).toBeVisible();
@@ -228,7 +252,13 @@ test.describe.serial("TicTacToe Quick Match Flow", () => {
       await playerA.getByText("Resign the match? Your opponent wins.").waitFor();
       await playerA.getByRole("button", { name: "Resign" }).click();
 
-      await expect(playerA.getByText("You resigned.")).toBeVisible({ timeout: 15000 });
+      // "You resigned." is intentionally announced twice: once visibly in the
+      // result subtitle, and once in the sr-only aria-live region (so screen
+      // readers get the same perspective-aware wording instead of a raw
+      // "resigned" result key). Scope to the visible <main> result screen.
+      await expect(
+        playerA.getByRole("main").getByText("You resigned.")
+      ).toBeVisible({ timeout: 15000 });
       await expect(playerA.getByText(/Quick Bob WINS!/)).toBeVisible({ timeout: 15000 });
       await expect(playerB.getByText(/Quick Bob WINS!/)).toBeVisible({ timeout: 15000 });
     } finally {

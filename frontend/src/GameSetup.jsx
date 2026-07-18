@@ -190,48 +190,56 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "",
       tagline="Claim the grid with the right players."
       onHome={onBack}
       error={error}
+      compact
     >
-      <form onSubmit={handleSubmit}>
-        <GameModeSelector
-          modes={["solo", "local", "online"]}
-          mode={mode}
-          onModeChange={setMode}
-          sub={onlineSub}
-          onSubChange={setOnlineSub}
-          subModes={ONLINE_SUB_MODES}
-          disabled={picking}
-        />
+      <form
+        onSubmit={handleSubmit}
+        className="lg:grid lg:grid-cols-[0.9fr_1.1fr] lg:divide-x lg:divide-elq-border"
+      >
+        <div className="lg:pr-7">
+          <GameModeSelector
+            modes={["solo", "local", "online"]}
+            mode={mode}
+            onModeChange={setMode}
+            sub={onlineSub}
+            onSubChange={setOnlineSub}
+            subModes={ONLINE_SUB_MODES}
+            disabled={picking}
+            compact
+          />
 
-        {isFriend && (
-          <div className="grid grid-cols-2 gap-1 p-1 mb-6 bg-elq-bg rounded-xl border border-elq-border">
-            {FRIEND_SUB_MODES.map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setFriendSub(value)}
-                aria-pressed={friendSub === value}
-                className={`py-2 rounded-lg text-sm font-semibold transition-colors ${
-                  friendSub === value
-                    ? "bg-white text-elq-orange shadow-sm"
-                    : "text-elq-muted hover:text-elq-text"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+          {isFriend && (
+            <div className="mt-3 grid grid-cols-2 gap-1 rounded-xl border border-elq-border bg-slate-200/70 p-1">
+              {FRIEND_SUB_MODES.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setFriendSub(value)}
+                  aria-pressed={friendSub === value}
+                  className={`min-h-11 rounded-lg text-sm font-semibold transition-[background-color,color,box-shadow] ${
+                    friendSub === value
+                      ? "bg-white text-elq-cta shadow-sm ring-1 ring-elq-cta/20"
+                      : "text-elq-muted hover:text-elq-text"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
 
-        <div className="border-t border-elq-border mb-6" />
-
-        {isQuick ? (
-          <>
+          {(isQuick || isFriend) && (
             <NameField
-              className="mb-6"
+              className="mt-4"
               value={player1Name}
               onChange={handlePlayer1NameChange}
               disabled={picking}
             />
+          )}
+        </div>
+
+        <div className="mt-5 lg:mt-0 lg:pl-7">
+          {isQuick ? (
             <QuickMatchPanel
               presets={QUICK_MATCH_PRESETS}
               pools={pools}
@@ -239,94 +247,94 @@ export default function GameSetup({ onGameCreated, onBack, initialJoinCode = "",
               disabled={picking}
               pendingPreset={pendingPreset}
               defaultPreset={prefs?.quickPreset ?? DEFAULT_QUICK_MATCH_PRESET}
+              label="Choose a pace"
+              helper="Tap once to start searching"
+              footer="All pools start immediately when another player is available."
+              layout="featured"
             />
-          </>
-        ) : (
-          <>
-            {isJoin ? (
-              <div className="space-y-4 mb-8">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-elq-muted mb-2">
-                    Game Code
+          ) : (
+            <>
+              {isJoin ? (
+                <div className="mb-5">
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-elq-muted">
+                    Game code
                   </label>
                   <input
                     value={joinCode}
                     onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                     placeholder="ABC123"
                     maxLength={6}
-                    className="w-full px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] rounded-xl border-2 border-elq-border bg-elq-bg focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors"
+                    className="min-h-12 w-full rounded-xl border-2 border-elq-border bg-white px-4 py-3 text-center font-mono text-2xl tracking-[0.5em] transition-colors focus:border-elq-orange focus:outline-none focus:ring-0"
                   />
                 </div>
-                <NameField value={player1Name} onChange={handlePlayer1NameChange} />
-              </div>
-            ) : (
-              <>
-                {isSolo ? (
-                  <div className="mb-6 rounded-xl border border-elq-border bg-elq-bg/60 px-4 py-3 text-sm text-elq-muted">
-                    Solo challenge — claim three in a row before three strikes. No name needed.
-                  </div>
-                ) : (
-                  <div className="space-y-4 mb-6">
-                    <NameField
-                      value={isLocal ? localPlayer1Name : player1Name}
-                      onChange={isLocal ? setLocalPlayer1Name : handlePlayer1NameChange}
-                      label={isLocal ? "Player 1" : "Your Name"}
-                      placeholder={isLocal ? "Player 1" : "Your name"}
-                    />
-                    {isLocal && (
+              ) : (
+                <>
+                  {isSolo ? (
+                    <div className="mb-5 rounded-xl border border-elq-border bg-white px-4 py-3 text-sm text-elq-muted">
+                      <strong className="block text-elq-text">Solo challenge</strong>
+                      Claim three in a row before three strikes. No name needed.
+                    </div>
+                  ) : isLocal ? (
+                    <div className="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                      <NameField
+                        value={localPlayer1Name}
+                        onChange={setLocalPlayer1Name}
+                        label="Player 1"
+                        placeholder="Player 1"
+                      />
                       <NameField
                         value={player2Name}
                         onChange={setPlayer2Name}
                         label="Player 2"
                         placeholder="Player 2"
                       />
-                    )}
-                  </div>
-                )}
-
-                {showMatchSettings && (
-                  <>
-                    <SectionCaption>Settings</SectionCaption>
-                    <div className="grid grid-cols-2 gap-4 mb-6">
-                      <div>
-                        <label className="block text-sm text-elq-text mb-1.5">First to</label>
-                        <select
-                          value={targetWins}
-                          onChange={(e) => setTargetWins(Number(e.target.value))}
-                          className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer"
-                        >
-                          <option value={2}>2 wins</option>
-                          <option value={3}>3 wins</option>
-                          <option value={5}>5 wins</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm text-elq-text mb-1.5">Turn timer</label>
-                        <select
-                          value={timerMode}
-                          onChange={(e) => setTimerMode(e.target.value)}
-                          className="w-full px-3 py-2.5 rounded-xl border-2 border-elq-border bg-elq-bg text-sm focus:border-elq-orange focus:ring-0 focus:outline-none transition-colors appearance-none cursor-pointer"
-                        >
-                          <option value="15s">15 seconds</option>
-                          <option value="40s">40 seconds</option>
-                          <option value="unlimited">Unlimited</option>
-                        </select>
-                      </div>
                     </div>
-                  </>
-                )}
-              </>
-            )}
+                  ) : null}
 
-            <button
-              type="submit"
-              disabled={submitDisabled}
-              className="w-full py-3.5 px-6 bg-elq-cta text-white font-bold rounded-xl hover:bg-elq-cta-dark active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg tracking-wide"
-            >
-              {loading ? loadingLabel : ctaLabel}
-            </button>
-          </>
-        )}
+                  {showMatchSettings && (
+                    <>
+                      <SectionCaption>Settings</SectionCaption>
+                      <div className="mb-5 grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="mb-1.5 block text-sm text-elq-text">First to</label>
+                          <select
+                            value={targetWins}
+                            onChange={(e) => setTargetWins(Number(e.target.value))}
+                            className="min-h-11 w-full cursor-pointer appearance-none rounded-xl border-2 border-elq-border bg-white px-3 py-2.5 text-sm transition-colors focus:border-elq-orange focus:outline-none focus:ring-0"
+                          >
+                            <option value={2}>2 wins</option>
+                            <option value={3}>3 wins</option>
+                            <option value={5}>5 wins</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block text-sm text-elq-text">Turn timer</label>
+                          <select
+                            value={timerMode}
+                            onChange={(e) => setTimerMode(e.target.value)}
+                            className="min-h-11 w-full cursor-pointer appearance-none rounded-xl border-2 border-elq-border bg-white px-3 py-2.5 text-sm transition-colors focus:border-elq-orange focus:outline-none focus:ring-0"
+                          >
+                            <option value="15s">15 seconds</option>
+                            <option value="40s">40 seconds</option>
+                            <option value="unlimited">Unlimited</option>
+                          </select>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+
+              <button
+                type="submit"
+                disabled={submitDisabled}
+                className="min-h-12 w-full rounded-xl bg-elq-cta px-6 py-3 text-lg font-bold tracking-wide text-white transition-[background-color,transform] hover:bg-elq-cta-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? loadingLabel : ctaLabel}
+              </button>
+            </>
+          )}
+        </div>
       </form>
     </GameSetupShell>
   );

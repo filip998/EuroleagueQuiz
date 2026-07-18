@@ -1,182 +1,173 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useDialogFocus } from "./useDialogFocus";
 
-// Additive onboarding chrome for the TicTacToe board: a persistent objective
-// line, a dismissible first-run how-to, and a tappable clue legend. Nothing here
-// touches game state — it is pure, client-only explanatory UI so a first-time
-// player understands the goal and what each row/column chip means.
-//
-// Copy stays consistent with the per-cell search prompt (see cluePrompt.js):
-// team = "played for", nationality = "is from", played_with = "teammate of",
-// season = "played in the … season", position = "played as", champion =
-// "EuroLeague champion", stat_milestone = the chip's own label.
+const HOW_TO_STEPS = [
+  {
+    title: "Pick an empty cell",
+    detail: "Its row and column show the two clues to match.",
+  },
+  {
+    title: "Choose a matching player",
+    detail: "Search for any EuroLeague player who fits both clues.",
+  },
+  {
+    title: "Make three in a row",
+    detail: "Claim a horizontal, vertical, or diagonal line to win.",
+  },
+];
 
-const HOWTO_SEEN_KEY = "elq_ttt_howto_seen";
-
-// Read/write of the "seen" flag is best-effort: a throwing localStorage (private
-// mode, disabled storage) must never break the board, so we degrade to "not
-// seen" on read failure and silently drop write failures. The reopen control is
-// always rendered, so the how-to is always reachable regardless.
-function readHowToSeen() {
-  try {
-    return globalThis.localStorage?.getItem(HOWTO_SEEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function persistHowToSeen() {
-  try {
-    globalThis.localStorage?.setItem(HOWTO_SEEN_KEY, "1");
-  } catch {
-    // Ignore: the in-memory flag still dismisses the card for this session.
-  }
-}
-
-// The three micro-steps, shared between the first-run inline card and the
-// reopenable how-to dialog so the wording can never drift between them.
-function HowToSteps() {
-  return (
-    <ol className="space-y-1.5 text-sm text-elq-text list-decimal pl-5">
-      <li>Tap an empty cell.</li>
-      <li>Name a EuroLeague player who fits its row clue and its column clue.</li>
-      <li>Claim three cells in a row to win.</li>
-    </ol>
-  );
-}
-
-// One entry per axis type the backend can serve. Each carries a representative
-// chip (palette + emoji mirror AxisLabel) and a type-level description — never a
-// single hardcoded milestone — so calibration changes need no edit here.
 const LEGEND_ENTRIES = [
   {
     type: "team",
     chip: "Real Madrid",
     palette: "bg-slate-50 text-slate-700 border-slate-200",
     name: "Team",
-    description: "The player played for this club.",
+    description: "Played for this club.",
   },
   {
     type: "nationality",
     chip: "\ud83c\udf0d Serbia",
     palette: "bg-emerald-50 text-emerald-800 border-emerald-200",
     name: "Nationality",
-    description: "The player is from this country.",
+    description: "Is from this country.",
   },
   {
     type: "played_with",
-    chip: "\ud83e\udd1d Teammate",
+    chip: "\ud83e\udd1d Played with",
     palette: "bg-amber-50 text-amber-800 border-amber-200",
-    name: "Played with",
-    description: "The player was a teammate of the named player.",
+    name: "Teammate",
+    description: "Shared a roster with this player.",
   },
   {
     type: "season",
     chip: "\ud83d\udcc5 2015\u201316",
     palette: "bg-violet-50 text-violet-800 border-violet-200",
     name: "Season",
-    description: "The player played in this season.",
+    description: "Played in this season.",
   },
   {
     type: "position",
     chip: "Guard",
     palette: "bg-sky-50 text-sky-800 border-sky-200",
     name: "Position",
-    description: "The player played this role (Guard, Forward, or Center).",
+    description: "Played this role.",
   },
   {
     type: "champion",
-    chip: "\ud83c\udfc6 EuroLeague champion",
+    chip: "\ud83c\udfc6 Champion",
     palette: "bg-yellow-50 text-yellow-800 border-yellow-300",
     name: "Champion",
-    description: "The player won the EuroLeague title.",
+    description: "Won the EuroLeague title.",
   },
   {
     type: "stat_milestone",
-    chip: "\ud83d\udcca 15+ PPG season",
+    chip: "\ud83d\udcca 15+ PPG",
     palette: "bg-rose-50 text-rose-800 border-rose-200",
     name: "Stat milestone",
-    description:
-      "The player hit the stat milestone shown on the chip (e.g. 15+ PPG in a season).",
+    description: "Reached the number shown.",
   },
 ];
 
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-function getFocusable(node) {
-  if (!node) return [];
-  return Array.from(node.querySelectorAll(FOCUSABLE_SELECTOR));
+function HowToPanel({ panelId, tabId }) {
+  return (
+    <div
+      id={panelId}
+      role="tabpanel"
+      aria-labelledby={tabId}
+      data-testid="ttt-help-howto-panel"
+    >
+      <p className="mb-4 text-sm text-elq-muted">
+        Match one player to both the row and column clue.
+      </p>
+      <ol className="space-y-3">
+        {HOW_TO_STEPS.map((step, index) => (
+          <li
+            key={step.title}
+            className="flex items-start gap-4 rounded-xl border border-elq-border bg-slate-50/70 p-3"
+          >
+            <span
+              aria-hidden="true"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-orange-100 text-sm font-bold text-elq-cta-dark"
+            >
+              {index + 1}
+            </span>
+            <span className="min-w-0">
+              <strong className="block text-sm text-elq-dark">{step.title}</strong>
+              <span className="mt-0.5 block text-sm leading-snug text-elq-muted">
+                {step.detail}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
 }
 
-// A portal-mounted modal so it is never clipped by the board's overflow cells.
-// It implements the accessibility contract the issue requires: role="dialog" +
-// aria-modal, a manual focus trap (jsdom does not move focus on Tab), Esc and
-// backdrop-click to close, and focus restoration to the opener.
-function GuideDialog({ open, onClose, title, testId, children }) {
+function LegendPanel({ panelId, tabId }) {
+  return (
+    <div
+      id={panelId}
+      role="tabpanel"
+      aria-labelledby={tabId}
+      data-testid="ttt-help-legend-panel"
+    >
+      <ul className="space-y-3">
+        {LEGEND_ENTRIES.map((entry) => (
+          <li
+            key={entry.type}
+            data-testid={`ttt-legend-entry-${entry.type}`}
+            className="flex items-center gap-3"
+          >
+            <span
+              className={`flex min-h-8 w-[118px] shrink-0 items-center justify-center rounded-lg border px-2 py-1 text-center text-xs font-semibold leading-tight ${entry.palette}`}
+            >
+              {entry.chip}
+            </span>
+            <span className="min-w-0">
+              <strong className="block text-sm text-elq-dark">{entry.name}</strong>
+              <span className="block text-xs leading-snug text-elq-muted">
+                {entry.description}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function HelpDialog({ open, onClose, triggerRef, fallbackFocusRef }) {
+  const [activeTab, setActiveTab] = useState("howto");
   const titleId = useId();
-  const dialogRef = useRef(null);
-  const onCloseRef = useRef(onClose);
-  const openerRef = useRef(null);
-
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  });
-
-  useEffect(() => {
-    if (!open) return undefined;
-
-    openerRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-
-    const node = dialogRef.current;
-    // Focus the container (not a child) so a screen reader announces the dialog
-    // title before the user starts tabbing through controls.
-    node?.focus();
-
-    function handleKeyDown(e) {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onCloseRef.current?.();
-        return;
-      }
-      if (e.key !== "Tab" || !node) return;
-      const focusable = getFocusable(node);
-      if (focusable.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      const insideChild = node.contains(active) && active !== node;
-      if (e.shiftKey) {
-        if (!insideChild || active === first) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else if (!insideChild || active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown, true);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown, true);
-      const opener = openerRef.current;
-      if (opener && opener.isConnected) {
-        opener.focus();
-      }
-    };
-  }, [open]);
+  const howToTabId = useId();
+  const howToPanelId = useId();
+  const legendTabId = useId();
+  const legendPanelId = useId();
+  const howToTabRef = useRef(null);
+  const legendTabRef = useRef(null);
+  const dialogRef = useDialogFocus({ open, onClose, triggerRef, fallbackFocusRef });
 
   if (!open) return null;
 
+  function handleTabKeyDown(event) {
+    let nextTab = null;
+    if (event.key === "Home") nextTab = "howto";
+    else if (event.key === "End") nextTab = "legend";
+    else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      nextTab = activeTab === "howto" ? "legend" : "howto";
+    }
+    if (!nextTab) return;
+
+    event.preventDefault();
+    setActiveTab(nextTab);
+    (nextTab === "howto" ? howToTabRef : legendTabRef).current?.focus();
+  }
+
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-overlay-in"
-      style={{ background: "rgba(15, 25, 35, 0.6)", backdropFilter: "blur(4px)" }}
+      className="animate-overlay-in fixed inset-0 z-50 flex items-end bg-slate-950/50 sm:items-center sm:justify-center sm:p-4"
       onClick={onClose}
     >
       <div
@@ -184,181 +175,148 @@ function GuideDialog({ open, onClose, title, testId, children }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        data-testid={testId}
+        data-testid="ttt-help-dialog"
         tabIndex={-1}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-y-auto p-5 animate-modal-in outline-none"
-        onClick={(e) => e.stopPropagation()}
+        className="ttt-responsive-dialog max-h-[calc(100dvh-56px)] w-full overflow-y-auto rounded-t-3xl bg-white px-4 pb-[max(24px,env(safe-area-inset-bottom))] pt-3 shadow-2xl outline-none sm:max-h-[85vh] sm:max-w-md sm:rounded-2xl sm:p-5"
+        onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-3 gap-3">
+        <div
+          aria-hidden="true"
+          className="mx-auto mb-3 h-1 w-9 rounded-full bg-slate-300 sm:hidden"
+        />
+        <div className="mb-3 flex items-center justify-between gap-3">
           <h2
             id={titleId}
-            className="font-display text-2xl tracking-wide text-elq-dark"
+            className="text-xl font-bold text-elq-dark"
           >
-            {title}
+            Help
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-elq-text hover:bg-elq-bg focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-elq-dark transition-colors"
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-elq-muted transition-colors hover:bg-elq-bg hover:text-elq-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              aria-hidden="true"
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
-        {children}
-        <p className="mt-4 text-[11px] text-elq-text text-center">
-          Press{" "}
-          <kbd className="px-1.5 py-0.5 rounded bg-elq-bg border border-elq-border text-[10px] font-mono">
-            Esc
-          </kbd>{" "}
-          to close
-        </p>
+
+        <div
+          role="tablist"
+          aria-label="TicTacToe help"
+          className="mb-5 grid grid-cols-2 gap-1 rounded-xl bg-slate-200/70 p-1"
+        >
+          <button
+            ref={howToTabRef}
+            id={howToTabId}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "howto"}
+            aria-controls={howToPanelId}
+            tabIndex={activeTab === "howto" ? 0 : -1}
+            data-testid="ttt-help-tab-howto"
+            onClick={() => setActiveTab("howto")}
+            onKeyDown={handleTabKeyDown}
+            className={`min-h-10 rounded-lg text-sm font-semibold ${
+              activeTab === "howto"
+                ? "bg-white text-elq-dark shadow-sm"
+                : "text-elq-muted"
+            }`}
+          >
+            How to play
+          </button>
+          <button
+            ref={legendTabRef}
+            id={legendTabId}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "legend"}
+            aria-controls={legendPanelId}
+            tabIndex={activeTab === "legend" ? 0 : -1}
+            data-testid="ttt-help-tab-legend"
+            onClick={() => setActiveTab("legend")}
+            onKeyDown={handleTabKeyDown}
+            className={`min-h-10 rounded-lg text-sm font-semibold ${
+              activeTab === "legend"
+                ? "bg-white text-elq-dark shadow-sm"
+                : "text-elq-muted"
+            }`}
+          >
+            Clue types
+          </button>
+        </div>
+
+        {activeTab === "howto" ? (
+          <HowToPanel panelId={howToPanelId} tabId={howToTabId} />
+        ) : (
+          <LegendPanel panelId={legendPanelId} tabId={legendTabId} />
+        )}
       </div>
     </div>,
     document.body
   );
 }
 
-const AFFORDANCE_CLASS =
-  "text-sm font-medium text-elq-text underline underline-offset-2 hover:text-elq-orange focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-elq-dark rounded transition-colors";
+const HELP_BUTTON_CLASS =
+  "inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-semibold text-elq-cta hover:text-elq-cta-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange";
 
-// Standalone "How to play" control + dialog for surfaces that want the how-to
-// without the objective line, clue legend, or first-run card — the desktop Solo
-// command rail (issue #266). It reuses the same GuideDialog + HowToSteps and the
-// same `ttt-howto-trigger` / `ttt-howto-dialog` testids as the full guide, so the
-// copy can never drift and behaviour stays identical; only the always-on legend
-// is dropped on this surface, per the product decision.
-export function HowToPlayControl({ className = AFFORDANCE_CLASS }) {
+export function HowToPlayControl({ className = HELP_BUTTON_CLASS, fallbackFocusRef }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef(null);
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
-        data-testid="ttt-howto-trigger"
+        data-testid="ttt-help-trigger"
         onClick={() => setOpen(true)}
         className={className}
       >
-        How to play
+        Help
       </button>
-      <GuideDialog
+      <HelpDialog
         open={open}
         onClose={() => setOpen(false)}
-        title="HOW TO PLAY"
-        testId="ttt-howto-dialog"
-      >
-        <HowToSteps />
-      </GuideDialog>
+        triggerRef={triggerRef}
+        fallbackFocusRef={fallbackFocusRef}
+      />
     </>
   );
 }
 
-export default function TicTacToeGuide() {
-  const [howToSeen, setHowToSeen] = useState(readHowToSeen);
-  // null | "howto" | "legend" — only ever one dialog open at a time.
-  const [openDialog, setOpenDialog] = useState(null);
-
-  function dismissFirstRun() {
-    persistHowToSeen();
-    setHowToSeen(true);
-  }
-
-  const closeDialog = () => setOpenDialog(null);
+export default function TicTacToeGuide({ fallbackFocusRef }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef(null);
 
   return (
-    <div className="w-full mb-2">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
-        <p data-testid="ttt-objective" className="text-sm text-elq-text">
-          Claim three in a row — name a player who matches both clues for a cell.
-        </p>
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            type="button"
-            data-testid="ttt-howto-trigger"
-            onClick={() => setOpenDialog("howto")}
-            className={AFFORDANCE_CLASS}
-          >
-            How to play
-          </button>
-          <span aria-hidden="true" className="text-elq-border">
-            |
-          </span>
-          <button
-            type="button"
-            data-testid="ttt-legend-trigger"
-            onClick={() => setOpenDialog("legend")}
-            className={AFFORDANCE_CLASS}
-          >
-            Clue legend
-          </button>
-        </div>
-      </div>
-
-      {!howToSeen && (
-        <div
-          data-testid="ttt-howto"
-          role="note"
-          aria-label="How to play"
-          onKeyDown={(e) => {
-            if (e.key === "Escape") dismissFirstRun();
-          }}
-          className="ttt-howto-firstrun mt-3 bg-white border border-elq-border rounded-xl p-4 animate-slide-down"
-        >
-          <div className="flex items-start justify-between gap-3 mb-2">
-            <h3 className="text-sm font-semibold text-elq-text">New here? How to play</h3>
-            <button
-              type="button"
-              data-testid="ttt-howto-dismiss"
-              onClick={dismissFirstRun}
-              className="shrink-0 text-xs font-semibold text-elq-text px-2.5 py-1 rounded-lg border border-elq-border hover:bg-elq-bg focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-elq-dark transition-colors"
-            >
-              Got it
-            </button>
-          </div>
-          <HowToSteps />
-        </div>
-      )}
-
-      <GuideDialog
-        open={openDialog === "howto"}
-        onClose={closeDialog}
-        title="HOW TO PLAY"
-        testId="ttt-howto-dialog"
+    <div className="mb-2 flex w-full items-start justify-between gap-3">
+      <p data-testid="ttt-objective" className="pt-2 text-sm leading-snug text-elq-text">
+        Pick a cell, then name a player who matches both clues.
+      </p>
+      <button
+        ref={triggerRef}
+        type="button"
+        data-testid="ttt-help-trigger"
+        onClick={() => setOpen(true)}
+        className={`${HELP_BUTTON_CLASS} shrink-0`}
       >
-        <HowToSteps />
-      </GuideDialog>
-
-      <GuideDialog
-        open={openDialog === "legend"}
-        onClose={closeDialog}
-        title="CLUE LEGEND"
-        testId="ttt-legend-dialog"
-      >
-        <p className="text-sm text-elq-text mb-3">
-          Each cell sits where a row clue meets a column clue — name a player who
-          satisfies both.
-        </p>
-        <ul className="space-y-3">
-          {LEGEND_ENTRIES.map((entry) => (
-            <li
-              key={entry.type}
-              data-testid={`ttt-legend-entry-${entry.type}`}
-              className="flex items-start gap-3"
-            >
-              <span
-                className={`shrink-0 px-2 py-1 rounded-lg border text-xs font-semibold leading-tight ${entry.palette}`}
-              >
-                {entry.chip}
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-elq-text">{entry.name}</p>
-                <p className="text-sm text-elq-text">{entry.description}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </GuideDialog>
+        Help
+      </button>
+      <HelpDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        triggerRef={triggerRef}
+        fallbackFocusRef={fallbackFocusRef}
+      />
     </div>
   );
 }
