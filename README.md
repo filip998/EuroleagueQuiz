@@ -438,8 +438,9 @@ the board switches to the searching lobby. Standard (Best of 3 · 40s) is highli
 default. There is no name gate — the optional name field prefills with the saved nickname or
 a stable auto-generated guest name, and clearing it falls back to anonymous play. While a
 pick is in flight every pool card (and the mode controls) freeze, so a fast multi-tap can't
-open several waiting games for the same guest. The home TicTacToe card also carries a
-visible **Quick Match** call-to-action that jumps straight into the same default.
+open several waiting games for the same guest. In the refined home launcher, the full
+TicTacToe row opens `/tictactoe` on this Quick Match-default setup; the classic fallback
+retains its dedicated **Quick Match** call-to-action.
 
 These pieces are built game-agnostic so other games can adopt Quick Match by mirroring the
 shared-component pattern:

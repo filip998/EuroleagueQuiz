@@ -443,7 +443,8 @@ describe("Universal refined game launcher", () => {
 
     expect(links).toHaveLength(5);
     links.forEach((link) => {
-      expect(link).toHaveClass("home-game-row");
+      expect(link).toHaveClass("home-game-row", "focus-visible:ring-elq-cta");
+      expect(link).not.toHaveClass("focus-visible:ring-elq-orange");
     });
   });
 

@@ -215,7 +215,7 @@ function HomeGameRow({ to, title, modes, icon, iconChip, featured = false }) {
   return (
     <Link
       to={to}
-      className={`home-game-row relative flex touch-manipulation items-center gap-3 overflow-hidden rounded-2xl border px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-orange focus-visible:ring-offset-2 ${
+      className={`home-game-row relative flex touch-manipulation items-center gap-3 overflow-hidden rounded-2xl border px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-elq-cta focus-visible:ring-offset-2 ${
         featured
           ? "min-h-[84px] border-orange-300 bg-orange-50/80 shadow-sm active:bg-orange-100"
           : "min-h-[68px] border-elq-border bg-white shadow-sm active:bg-elq-bg"
