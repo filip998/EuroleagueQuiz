@@ -117,7 +117,7 @@ export default function PlayerSearch({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="ttt-responsive-dialog flex h-[min(66dvh,580px)] max-h-[calc(100dvh-56px)] w-full flex-col rounded-t-3xl bg-white shadow-2xl outline-none sm:h-auto sm:max-h-[calc(100dvh-56px)] sm:min-h-[min(460px,calc(100dvh-56px))] sm:max-w-md sm:rounded-2xl"
+        className="ttt-responsive-dialog flex h-[min(66dvh,580px)] min-h-[min(300px,calc(100dvh-16px))] max-h-[calc(100dvh-16px)] w-full flex-col rounded-t-3xl bg-white shadow-2xl outline-none sm:h-auto sm:max-h-[calc(100dvh-56px)] sm:min-h-[min(460px,calc(100dvh-56px))] sm:max-w-md sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div

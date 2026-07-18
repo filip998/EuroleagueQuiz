@@ -237,6 +237,13 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   // read the stale `selectedCell` and dispatch another submitMove/realtime
   // move. A ref is mutated immediately and closes that window.
   const pendingMoveRef = useRef(false);
+  // Reactive mirror of pendingMoveRef so the board can visibly/accessibly
+  // reflect "a move is in flight" (cells stop looking clickable, aria-disabled
+  // while the request is outstanding) without ever gating the native
+  // `disabled` attribute on it -- see isClickable/baseClickable below, which
+  // keep the attempted cell's button focusable so focus restoration from the
+  // closing PlayerSearch dialog has somewhere to land.
+  const [movePending, setMovePending] = useState(false);
 
   const isSolo = game?.mode === "single_player";
   // A solo / local game must never be treated as online, even if `onlineInfo`
@@ -250,6 +257,26 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
   const isSoloDesktop = isSolo && isDesktop;
   const myPlayer = onlineInfo?.playerNumber;
   const realtimeUnavailableMessage = "Realtime connection unavailable. Reconnecting...";
+
+  // Single place that arms the pending-move guard (ref + reactive mirror) so
+  // every release path stays in lockstep.
+  function beginPendingMove(attemptedCell) {
+    attemptedCellRef.current = attemptedCell;
+    pendingMoveRef.current = true;
+    setMovePending(true);
+  }
+
+  // Single place that clears the pending-move guard. Called whenever we have
+  // proof the outstanding move can no longer be waited on: a state broadcast
+  // that actually carries a result, a realtime error (the move was rejected
+  // or the connection dropped before/after sending it), a failed send, an
+  // HTTP rejection, or -- as a bounded fallback for a broadcast that was lost
+  // in transit -- the next authoritative poll resync (see handleRealtimeState).
+  function releasePendingMove() {
+    attemptedCellRef.current = null;
+    pendingMoveRef.current = false;
+    setMovePending(false);
+  }
 
   function handleRealtimeState(message) {
     const result = message.result;
@@ -270,8 +297,19 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     } else if (attemptedCell && ACCEPTED_MOVE_RESULTS.has(result)) {
       setCellFeedback({ ...attemptedCell, kind: "correct", phase: "check" });
     }
-    if (result) attemptedCellRef.current = null;
-    if (result) pendingMoveRef.current = false;
+    if (result) {
+      releasePendingMove();
+    } else if (message.source === "poll" && pendingMoveRef.current) {
+      // Bounded recovery: this is the periodic authoritative GET /games/{id}
+      // resync (see useOnlineGameRealtime), not a targeted broadcast for our
+      // move. If a move is still marked pending by the time it lands, the
+      // move's own result broadcast was lost (or the socket dropped and
+      // reconnected without replaying it) -- release the guard so the player
+      // is never soft-locked waiting for a reply that will never arrive. The
+      // resync already reflects whatever actually happened on the server, so
+      // there is nothing further to reconcile here beyond unblocking input.
+      releasePendingMove();
+    }
 
     if (result && message.completedRound && ROUND_REVEAL_RESULTS.has(result)) {
       startRoundTransition(result, message.completedRound, feedback);
@@ -284,6 +322,17 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     }
   }
 
+  // A server-rejected move (claimed cell, player not found, a pending draw
+  // that raced ahead, ...) arrives as a realtime ERROR envelope, not a
+  // state/result broadcast, so it would never reach handleRealtimeState's
+  // result-based release above. Routing every realtime error through the
+  // same release keeps a retryable rejection (or a dropped connection) from
+  // ever soft-locking the board; releasing when nothing is pending is a no-op.
+  function handleRealtimeError(message) {
+    releasePendingMove();
+    setError(message);
+  }
+
   const realtime = useOnlineGameRealtime({
     enabled: isOnline,
     gameId: game?.id,
@@ -292,7 +341,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     connect: connectTicTacToeRealtime,
     fetchState: getGame,
     onState: handleRealtimeState,
-    onError: setError,
+    onError: handleRealtimeError,
   });
 
   const round = game?.round;
@@ -419,12 +468,11 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
     // on the realtime broadcast; local/HTTP: waiting on submitMove) so a rapid
     // second PlayerSearch activation can never issue a second move.
     if (!selectedCell || pendingMoveRef.current) return;
-    pendingMoveRef.current = true;
     const attemptedCell = {
       row_index: selectedCell.row_index,
       col_index: selectedCell.col_index,
     };
-    attemptedCellRef.current = attemptedCell;
+    beginPendingMove(attemptedCell);
     setSelectedCell(null);
     setLoading(true);
     setError(null);
@@ -436,12 +484,12 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
           player_id: player.player_id,
         });
         if (!sent) {
-          attemptedCellRef.current = null;
-          pendingMoveRef.current = false;
+          releasePendingMove();
           setError(realtimeUnavailableMessage);
         }
-        // On success the guard stays engaged until the realtime broadcast
-        // reaches handleRealtimeState, which clears it alongside attemptedCellRef.
+        // On success the guard stays engaged until the realtime broadcast (or
+        // a realtime error, or a bounded poll resync) releases it -- see
+        // handleRealtimeState/handleRealtimeError.
         return;
       }
 
@@ -452,8 +500,7 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
       });
       handleRealtimeState(res);
     } catch (err) {
-      attemptedCellRef.current = null;
-      pendingMoveRef.current = false;
+      releasePendingMove();
       setError(err.message);
     } finally {
       setLoading(false);
@@ -887,14 +934,27 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                 cellFeedback?.row_index === ri && cellFeedback?.col_index === ci
                   ? cellFeedback
                   : null;
-              const isClickable =
+              // baseClickable covers every reason a cell is legitimately
+              // inert (claimed, mid-transition, game not active, blocked by a
+              // pending draw, not this player's turn) and drives the native
+              // `disabled` attribute below. `movePending` -- the synchronous
+              // guard's reactive mirror -- is intentionally kept OUT of
+              // `disabled`: gating the HTML attribute on it would make the
+              // just-clicked cell's button unfocusable the instant the
+              // PlayerSearch dialog unmounts, so useDialogFocus's opener-focus
+              // restoration silently no-ops and keyboard focus falls back to
+              // <body>. Blocking activation (via isClickable/onClick) and
+              // surfacing aria-disabled is enough to keep the board from
+              // looking or acting interactive while a move is in flight,
+              // without sacrificing focus restoration.
+              const baseClickable =
                 !claimed &&
                 !activeCellFeedback &&
                 !inTransition &&
                 game.status === "active" &&
                 !game.pending_draw &&
-                !loading &&
                 isMyTurn;
+              const isClickable = baseClickable && !movePending && !loading;
               const showSamples =
                 (inTransition || showFinishedResult) &&
                 !claimed &&
@@ -929,6 +989,10 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
 
               const rowLabel = clueText(displayRound.rows[ri]);
               const colLabel = clueText(displayRound.columns[ci]);
+              // Only surface the transient "blocked by a pending
+              // request" wording when the cell would otherwise be
+              // interactable, mirroring baseClickable vs. isClickable.
+              const pendingBlocked = baseClickable && (movePending || loading);
               const stateLabel = claimed
                 ? `Claimed by ${cell.claimed_player_name || `player ${claimed}`}`
                 : activeCellFeedback?.kind === "incorrect"
@@ -939,14 +1003,17 @@ export default function GameBoard({ initialState, onNewGame, onHome, onlineInfo 
                       ? "No example available"
                     : isClickable
                       ? "Available. Choose a player"
-                      : "Available";
+                      : pendingBlocked
+                        ? "Available. Move in progress"
+                        : "Available";
 
               return (
                 <button
                   key={ci}
                   type="button"
                   onClick={() => isClickable && handleCellClick(cell)}
-                  disabled={!isClickable}
+                  disabled={!baseClickable}
+                  aria-disabled={pendingBlocked ? "true" : undefined}
                   aria-label={`${rowLabel} row and ${colLabel} column. ${stateLabel}.`}
                   data-row-index={ri}
                   data-col-index={ci}

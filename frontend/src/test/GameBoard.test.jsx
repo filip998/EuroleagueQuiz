@@ -641,6 +641,118 @@ describe("GameBoard pending-move guard", () => {
     fireEvent.click(screen.getByText("select-player"));
     await waitFor(() => expect(submitMove).toHaveBeenCalledTimes(2));
   });
+
+  it("releases the pending guard on a realtime ERROR (e.g. a retryable server rejection) so a later selection can send", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+
+    // The server rejects the move (e.g. the cell was claimed a moment
+    // earlier by the opponent) -- this arrives as an ERROR envelope, never as
+    // a state/result broadcast, so it must be routed to the same release path
+    // or the guard would stay engaged forever.
+    act(() => {
+      realtimeHolder.opts.onError("Cell already claimed.");
+    });
+    expect(await screen.findByText("Cell already claimed.")).toBeInTheDocument();
+
+    // A subsequent selection must be able to send again.
+    fireEvent.click(screen.getAllByText("+")[1]);
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases the pending guard on a bounded poll resync when the move's own result broadcast was lost", async () => {
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+
+    // Neither an ERROR nor the targeted STATE broadcast for our move ever
+    // arrives (dropped connection / lost message), but the periodic
+    // authoritative GET /games/{id} resync (source: "poll") still lands with
+    // result:null. That alone must be enough to release the guard so the
+    // player is never soft-locked waiting for a reply that will never come.
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ current_player: 2 }),
+        result: null,
+        completedRound: null,
+        source: "poll",
+      });
+    });
+
+    fireEvent.click(screen.getAllByText("+")[1]);
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not release the pending guard on an unrelated poll resync alone (result absent, source not poll)", async () => {
+    // Guards against over-eager release: a plain realtime STATE broadcast
+    // with no result and no explicit poll source (e.g. a stray duplicate of
+    // the initial connect snapshot) must not be treated as proof our specific
+    // pending move can be abandoned.
+    render(
+      <GameBoard
+        initialState={activeGame()}
+        onNewGame={() => {}}
+        onHome={() => {}}
+        onlineInfo={{ isOnline: true, playerNumber: 1 }}
+      />
+    );
+
+    fireEvent.click(screen.getAllByText("+")[0]);
+    const player = { player_id: 99, full_name: "Nando De Colo" };
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      realtimeHolder.opts.onState({
+        state: activeGame({ current_player: 1 }),
+        result: null,
+        completedRound: null,
+      });
+    });
+
+    // PlayerSearch already closed after the first activation and the guard
+    // is still engaged, so no cell is clickable to reopen it -- but even a
+    // direct re-invocation of the (stale) onSelect callback must still be a
+    // no-op, since the synchronous guard -- not the closed dialog -- is what
+    // is protecting against a second send here.
+    act(() => {
+      playerSearchHolder.props.onSelect(player);
+    });
+    expect(realtimeHolder.sendAction).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("GameBoard claimed-vs-incorrect cell coloring race", () => {
